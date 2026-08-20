@@ -64,6 +64,121 @@ export const projects = pgTable(
 
 export const metalSchema = pgSchema("metal");
 
+export const sandboxStatusEnum = metalSchema.enum("sandbox_status", [
+  "requested",
+  "provisioning",
+  "ready",
+  "pausing",
+  "paused",
+  "provision_unknown",
+  "failed",
+  "deleting",
+  "deleted",
+  "cleanup_pending",
+  "cleanup_failed",
+]);
+
+export const projectApiKeys = metalSchema.table(
+  "project_api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    prefix: text("prefix").notNull(),
+    secretHash: text("secret_hash").notNull(),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "date" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("project_api_keys_secret_hash_key").on(table.secretHash),
+    index("project_api_keys_project_id_idx").on(table.projectId, table.createdAt),
+  ],
+);
+
+export const sandboxes = metalSchema.table(
+  "sandboxes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    provider: text("provider").notNull().default("daytona"),
+    providerResourceId: text("provider_resource_id"),
+    providerOrganizationId: text("provider_organization_id"),
+    providerCostMicrousd: bigint("provider_cost_microusd", { mode: "bigint" }),
+    providerCostMeasuredThrough: timestamp("provider_cost_measured_through", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    providerCostUpdatedAt: timestamp("provider_cost_updated_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    status: sandboxStatusEnum("status").notNull().default("requested"),
+    image: text("image"),
+    language: text("language").notNull().default("typescript"),
+    ttlMinutes: integer("ttl_minutes").notNull().default(30),
+    createdBy: uuid("created_by").notNull(),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    readyAt: timestamp("ready_at", { withTimezone: true, mode: "date" }),
+    pausedAt: timestamp("paused_at", { withTimezone: true, mode: "date" }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    index("sandboxes_project_created_idx").on(table.projectId, table.createdAt),
+    uniqueIndex("sandboxes_provider_resource_key")
+      .on(table.provider, table.providerResourceId)
+      .where(sql`${table.providerResourceId} is not null`),
+  ],
+);
+
+export const providerCostSnapshots = metalSchema.table(
+  "provider_cost_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sandboxId: uuid("sandbox_id")
+      .notNull()
+      .references(() => sandboxes.id),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    provider: text("provider").notNull(),
+    providerResourceId: text("provider_resource_id").notNull(),
+    amountMicrousd: bigint("amount_microusd", { mode: "bigint" }).notNull(),
+    measuredThrough: timestamp("measured_through", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("provider_cost_snapshots_sandbox_captured_idx").on(table.sandboxId, table.capturedAt),
+    uniqueIndex("provider_cost_snapshots_unique_measurement").on(
+      table.sandboxId,
+      table.amountMicrousd,
+      table.measuredThrough,
+    ),
+  ],
+);
+
 export const outboxJobStatusEnum = metalSchema.enum("outbox_job_status", [
   "pending",
   "leased",
@@ -139,6 +254,8 @@ export const schema = {
   organizations,
   organizationMembers,
   projects,
+  projectApiKeys,
+  sandboxes,
   domainEvents,
   outboxJobs,
   idempotencyKeys,

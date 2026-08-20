@@ -1,14 +1,44 @@
 import { z } from "zod";
 import { DurableEventEnvelopeSchema } from "@openmetal/contracts";
 
-export const OutboxJobTypeSchema = z.literal("realtime.broadcast");
+export const OutboxJobTypeSchema = z.enum([
+  "realtime.broadcast",
+  "sandbox.provision",
+  "sandbox.pause",
+  "sandbox.cost.sync",
+  "sandbox.destroy",
+]);
 export type OutboxJobType = z.infer<typeof OutboxJobTypeSchema>;
 
-export const OutboxJobPayloadSchema = z.object({
-  job_type: OutboxJobTypeSchema,
+export const RealtimeBroadcastJobPayloadSchema = z.object({
+  job_type: z.literal("realtime.broadcast"),
   topic: z.string().min(1),
   event: DurableEventEnvelopeSchema,
 });
+export const SandboxProvisionJobPayloadSchema = z.object({
+  job_type: z.literal("sandbox.provision"),
+  sandbox_id: z.uuid(),
+});
+export const SandboxDestroyJobPayloadSchema = z.object({
+  job_type: z.literal("sandbox.destroy"),
+  sandbox_id: z.uuid(),
+});
+export const SandboxPauseJobPayloadSchema = z.object({
+  job_type: z.literal("sandbox.pause"),
+  sandbox_id: z.uuid(),
+});
+export const SandboxCostSyncJobPayloadSchema = z.object({
+  job_type: z.literal("sandbox.cost.sync"),
+  sandbox_id: z.uuid(),
+  final: z.boolean().default(false),
+});
+export const OutboxJobPayloadSchema = z.discriminatedUnion("job_type", [
+  RealtimeBroadcastJobPayloadSchema,
+  SandboxProvisionJobPayloadSchema,
+  SandboxPauseJobPayloadSchema,
+  SandboxCostSyncJobPayloadSchema,
+  SandboxDestroyJobPayloadSchema,
+]);
 export type OutboxJobPayload = z.infer<typeof OutboxJobPayloadSchema>;
 
 export function validateOutboxPayload(input: unknown): OutboxJobPayload {

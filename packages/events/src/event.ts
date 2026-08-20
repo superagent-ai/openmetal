@@ -7,6 +7,12 @@ export const EventTypeValues = [
   "project.created",
   "project.deleted",
   "project.updated",
+  "sandbox.requested",
+  "sandbox.ready",
+  "sandbox.paused",
+  "sandbox.cost_updated",
+  "sandbox.failed",
+  "sandbox.deleted",
 ] as const;
 export const EventTypeValueSchema = z.enum(EventTypeValues);
 export type EventTypeValue = z.infer<typeof EventTypeValueSchema>;

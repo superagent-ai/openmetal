@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -12,8 +13,16 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { createMetalClient } from "@/lib/metal";
+import { createClient } from "@/lib/supabase/client";
 
 type Organization = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+type Project = {
   id: string;
   name: string;
   slug: string;
@@ -27,12 +36,23 @@ export function SiteHeader({
   preferredOrganizationId?: string;
 }) {
   const pathname = usePathname();
+  const supabase = useMemo(() => createClient(), []);
+  const metal = useMemo(
+    () =>
+      createMetalClient(async () => {
+        const { data } = await supabase.auth.getSession();
+        return data.session?.access_token;
+      }),
+    [supabase],
+  );
+  const [projects, setProjects] = useState<Project[]>([]);
   const routeSlug = pathname.split("/")[2];
   const activeOrganization =
     organizations.find((organization) => organization.slug === routeSlug) ??
     organizations.find((organization) => organization.id === preferredOrganizationId) ??
     organizations[0];
   const pageTitles: Record<string, string> = {
+    "api-keys": "API keys",
     projects: "Projects",
     settings: "Settings",
   };
@@ -45,6 +65,31 @@ export function SiteHeader({
         : (pageTitles[lastSegment] ?? "Overview");
   const parentLabel = activeOrganization?.name ?? "Metal";
   const parentHref = activeOrganization ? `/dashboard/${activeOrganization.slug}` : "/dashboard";
+  const routeProjectSlug = pathname.split("/")[4];
+  const isProjectDetail = Boolean(
+    activeOrganization && pathname.includes("/projects/") && routeProjectSlug,
+  );
+  const projectName =
+    projects.find((project) => project.slug === routeProjectSlug)?.name ??
+    routeProjectSlug?.replaceAll("-", " ");
+
+  useEffect(() => {
+    if (!activeOrganization || !isProjectDetail) {
+      return;
+    }
+    let cancelled = false;
+    void metal.projects
+      .list(activeOrganization.id)
+      .then((result) => {
+        if (!cancelled) {
+          setProjects(result.projects);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrganization, isProjectDetail, metal]);
 
   return (
     <header className="flex h-12 shrink-0 items-center border-b">
@@ -60,9 +105,23 @@ export function SiteHeader({
               <BreadcrumbLink render={<Link href={parentHref} />}>{parentLabel}</BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator className="hidden md:block" />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{title}</BreadcrumbPage>
-            </BreadcrumbItem>
+            {isProjectDetail ? (
+              <>
+                <BreadcrumbItem>
+                  <BreadcrumbLink render={<Link href={`${parentHref}/projects`} />}>
+                    {title}
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage className="capitalize">{projectName}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </>
+            ) : (
+              <BreadcrumbItem>
+                <BreadcrumbPage>{title}</BreadcrumbPage>
+              </BreadcrumbItem>
+            )}
           </BreadcrumbList>
         </Breadcrumb>
       </div>

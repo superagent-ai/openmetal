@@ -253,8 +253,8 @@ export function ProjectResourcesTable({
                     <TableCell className="pl-4">Sandbox</TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2">
-                        <span className="flex size-7 items-center justify-center rounded-md bg-muted">
-                          <Image src="/providers/daytona.svg" alt="" width={14} height={15} />
+                        <span className="flex size-6 items-center justify-center rounded-md bg-muted">
+                          <Image src="/providers/daytona.svg" alt="" width={12} height={13} />
                         </span>
                         Daytona
                       </span>

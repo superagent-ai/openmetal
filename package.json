@@ -15,7 +15,6 @@
     "test:integration": "turbo run test:integration",
     "test:rls": "pnpm --filter @openmetal/testkit test:rls",
     "test:realtime": "pnpm --filter @openmetal/testkit test:realtime",
-    "test:e2e": "pnpm --filter @openmetal/web test:e2e",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "supabase:start": "supabase start",

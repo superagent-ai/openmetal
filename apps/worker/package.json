@@ -16,8 +16,8 @@
     "@openmetal/db": "workspace:*",
     "@openmetal/events": "workspace:*",
     "@openmetal/logger": "workspace:*",
-    "drizzle-orm": "0.45.2",
     "dotenv": "17.4.2",
+    "drizzle-orm": "0.45.2",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -25,7 +25,7 @@
     "@openmetal/testkit": "workspace:*",
     "@openmetal/typescript-config": "workspace:*",
     "@types/node": "24.12.0",
-    "eslint": "10.8.1",
+    "eslint": "9.39.5",
     "tsx": "4.23.12",
     "typescript": "5.9.3",
     "vitest": "4.1.11"

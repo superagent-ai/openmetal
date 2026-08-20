@@ -4,7 +4,7 @@ const SECRET_KEY_PATTERN =
   /(authorization|cookie|set-cookie|token|secret|password|passwd|api[_-]?key|apikey|access[_-]?key|refresh[_-]?token|service[_-]?role|database[_-]?url|connectionstring|signed[_-]?url|credential)/i;
 
 const SECRET_VALUE_PATTERN =
-  /(sb_secret_[A-Za-z0-9_]+|sb_publishable_[A-Za-z0-9_]+|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|postgres(?:ql)?:\/\/[^\s"']+|service_role|sk_live_[A-Za-z0-9]+|sk-[A-Za-z0-9]{20,}|https?:\/\/[^\s"']+\?(?:[^\s"']*(?:token|sig|signature|X-Amz-Signature)=[^\s"']+))/i;
+  /(Bearer\s+[^\s"']+|sb_secret_[A-Za-z0-9_]+|sb_publishable_[A-Za-z0-9_]+|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|postgres(?:ql)?:\/\/[^\s"']+|service_role|sk_live_[A-Za-z0-9]+|sk-[A-Za-z0-9]{20,}|(?:https?:\/\/|\/)[^\s"']+\?(?:[^\s"']*(?:token|sig|signature|X-Amz-Signature)=[^\s"']+))/i;
 
 const SECRET_ENV_NAMES = new Set([
   "DATABASE_URL",

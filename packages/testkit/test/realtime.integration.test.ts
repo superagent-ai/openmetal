@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
+import { DurableEventEnvelopeSchema } from "@openmetal/contracts";
 import { createDatabase } from "@openmetal/db";
-import { projectTopic } from "@openmetal/events";
+import { organizationTopic, projectTopic, serializeCursor } from "@openmetal/events";
 import { createConfirmedUser, deleteUser, loadTestEnv, waitUntil } from "../src/index.js";
 import { createRealtimePublisher } from "../../../apps/worker/src/publisher.ts";
 
@@ -42,15 +43,32 @@ describe("private realtime", () => {
     });
     await ownerClient.realtime.setAuth(owner.accessToken);
 
-    const received: Array<{ event_id?: string }> = [];
+    const received: unknown[] = [];
     const channel = ownerClient.channel(topic, { config: { private: true } });
     channel.on("broadcast", { event: "*" }, (payload) => {
-      received.push(payload.payload as { event_id?: string });
+      received.push(payload.payload);
     });
     const subscribed = await new Promise<string>((resolve) => {
       void channel.subscribe((status) => resolve(status));
     });
     expect(subscribed).toBe("SUBSCRIBED");
+
+    const organizationReceived: unknown[] = [];
+    const organizationOwnerClient = createClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${owner.accessToken}` } },
+    });
+    await organizationOwnerClient.realtime.setAuth(owner.accessToken);
+    const organizationChannel = organizationOwnerClient.channel(organizationTopic(organizationId), {
+      config: { private: true },
+    });
+    organizationChannel.on("broadcast", { event: "*" }, (payload) => {
+      organizationReceived.push(payload.payload);
+    });
+    const organizationSubscribed = await new Promise<string>((resolve) => {
+      void organizationChannel.subscribe((status) => resolve(status));
+    });
+    expect(organizationSubscribed).toBe("SUBSCRIBED");
 
     const sendResult = await channel.send({
       type: "broadcast",
@@ -71,26 +89,77 @@ describe("private realtime", () => {
       },
     );
     expect(restPublish.ok).toBe(false);
-    expect(received.some((item) => item.event_id === "should-fail")).toBe(false);
+    expect(
+      received.some(
+        (item) =>
+          typeof item === "object" &&
+          item !== null &&
+          "event_id" in item &&
+          item.event_id === "should-fail",
+      ),
+    ).toBe(false);
 
     const publisher = createRealtimePublisher({
       supabaseUrl: env.SUPABASE_URL,
       secretKey: env.SUPABASE_SECRET_KEY,
     });
     const eventId = crypto.randomUUID();
-    await publisher.publish(topic, "project.created", {
-      cursor: "c1",
+    const publicEvent = {
+      cursor: serializeCursor(1n),
       event_id: eventId,
       type: "project.created",
       organization_id: organizationId,
       project_id: projectId,
       occurred_at: new Date().toISOString(),
       data: {},
-    });
+    };
+    await publisher.publish(topic, "project.created", publicEvent);
 
-    await waitUntil(async () => received.some((item) => item.event_id === eventId), {
-      timeoutMs: 12_000,
+    await waitUntil(
+      async () =>
+        received.some(
+          (item) =>
+            typeof item === "object" &&
+            item !== null &&
+            "event_id" in item &&
+            item.event_id === eventId,
+        ),
+      {
+        timeoutMs: 12_000,
+      },
+    );
+    const delivered = received.find(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        "event_id" in item &&
+        item.event_id === eventId,
+    );
+    expect(DurableEventEnvelopeSchema.parse(delivered)).toEqual(publicEvent);
+    expect(JSON.stringify(delivered)).not.toMatch(
+      /authorization|cookie|token|secret|password|api[_-]?key|database[_-]?url|signed[_-]?url/i,
+    );
+
+    const organizationEventId = crypto.randomUUID();
+    await publisher.publish(organizationTopic(organizationId), "organization.created", {
+      cursor: serializeCursor(2n),
+      event_id: organizationEventId,
+      type: "organization.created",
+      organization_id: organizationId,
+      occurred_at: new Date().toISOString(),
+      data: {},
     });
+    await waitUntil(
+      async () =>
+        organizationReceived.some(
+          (item) =>
+            typeof item === "object" &&
+            item !== null &&
+            "event_id" in item &&
+            item.event_id === organizationEventId,
+        ),
+      { timeoutMs: 12_000 },
+    );
 
     const outsiderClient = createClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -102,8 +171,27 @@ describe("private realtime", () => {
       void forbidden.subscribe((status) => resolve(status));
     });
     expect(forbiddenStatus).not.toBe("SUBSCRIBED");
+    const forbiddenOrganization = outsiderClient.channel(organizationTopic(organizationId), {
+      config: { private: true },
+    });
+    const forbiddenOrganizationStatus = await new Promise<string>((resolve) => {
+      void forbiddenOrganization.subscribe((status) => resolve(status));
+    });
+    expect(forbiddenOrganizationStatus).not.toBe("SUBSCRIBED");
+
+    const anonymousClient = createClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const anonymous = anonymousClient.channel(topic, { config: { private: true } });
+    const anonymousStatus = await new Promise<string>((resolve) => {
+      void anonymous.subscribe((status) => resolve(status));
+    });
+    expect(anonymousStatus).not.toBe("SUBSCRIBED");
 
     await ownerClient.removeChannel(channel);
+    await organizationOwnerClient.removeChannel(organizationChannel);
     await outsiderClient.removeChannel(forbidden);
+    await outsiderClient.removeChannel(forbiddenOrganization);
+    await anonymousClient.removeChannel(anonymous);
   });
 });

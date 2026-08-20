@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isDuplicateDelivery, projectTopic } from "@openmetal/events";
+import {
+  detectCursorGap,
+  isDuplicateDelivery,
+  parseCursor,
+  parsePublicEvent,
+  projectTopic,
+} from "@openmetal/events";
 import { MetalError } from "@openmetal/sdk";
 import {
   AlertCircleIcon,
@@ -25,6 +31,8 @@ type EventItem = {
   cursor: string;
   event_id: string;
   type: string;
+  organization_id: string;
+  project_id?: string;
   occurred_at: string;
   data: Record<string, unknown>;
 };
@@ -66,9 +74,15 @@ export function ControlPlane({
           continue;
         }
         next.push(item);
-        cursorRef.current = item.cursor;
       }
-      return next.slice(-20);
+      next.sort((left, right) => {
+        const leftCursor = parseCursor(left.cursor);
+        const rightCursor = parseCursor(right.cursor);
+        return leftCursor < rightCursor ? -1 : leftCursor > rightCursor ? 1 : 0;
+      });
+      const retained = next.slice(-20);
+      cursorRef.current = retained.at(-1)?.cursor;
+      return retained;
     });
   }, []);
 
@@ -82,6 +96,7 @@ export function ControlPlane({
         }
         setHealth(healthResult.status);
         setMeta(`${metaResult.name} ${metaResult.api_version}`);
+        setError(null);
       } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof MetalError ? caught.message : "Failed to load control plane");
@@ -106,6 +121,7 @@ export function ControlPlane({
           return;
         }
         setProjects(result.projects);
+        setError(null);
         setSelectedProjectId((current) =>
           result.projects.some((project) => project.id === (initialProjectId ?? current))
             ? (initialProjectId ?? current)
@@ -128,7 +144,6 @@ export function ControlPlane({
     if (!selectedProjectId) {
       seen.current = new Set();
       cursorRef.current = undefined;
-      setEvents([]);
       return;
     }
     void metal.events
@@ -144,6 +159,7 @@ export function ControlPlane({
           cursorRef.current = item.cursor;
         }
         setEvents(page.events.slice(-20));
+        setError(null);
       })
       .catch((caught) => {
         setError(caught instanceof MetalError ? caught.message : "Event recovery failed");
@@ -170,9 +186,25 @@ export function ControlPlane({
 
     const channel = supabase.channel(channelName, { config: { private: true } });
     channel.on("broadcast", { event: "*" }, (payload) => {
-      const body = payload.payload as EventItem | undefined;
-      if (body?.event_id && body.cursor) {
+      try {
+        const body = parsePublicEvent(payload.payload) as EventItem;
+        if (body.organization_id !== organization.id || body.project_id !== selectedProjectId) {
+          return;
+        }
+        const previousCursor = cursorRef.current ? parseCursor(cursorRef.current) : undefined;
+        const incomingCursor = parseCursor(body.cursor);
+        if (previousCursor !== undefined && detectCursorGap(previousCursor, incomingCursor)) {
+          void recover().catch((caught) => {
+            if (!cancelled) {
+              setError(caught instanceof MetalError ? caught.message : "Event recovery failed");
+            }
+          });
+        }
         ingest([body]);
+        setError(null);
+      } catch {
+        setError("Invalid Realtime event");
+        setStatus("error");
       }
     });
     channel.subscribe((nextStatus, err) => {
@@ -206,7 +238,7 @@ export function ControlPlane({
       authListener.subscription.unsubscribe();
       void supabase.removeChannel(channel);
     };
-  }, [ingest, metal, selectedProjectId, supabase]);
+  }, [ingest, metal, organization.id, selectedProjectId, supabase]);
 
   useEffect(() => {
     const handleProjectRenamed = (event: Event) => {
@@ -286,6 +318,7 @@ export function ControlPlane({
                 {projects.map((project) => (
                   <li key={project.id}>
                     <Button
+                      nativeButton={false}
                       variant={selectedProjectId === project.id ? "secondary" : "ghost"}
                       className="w-full justify-start"
                       render={
@@ -326,6 +359,9 @@ export function ControlPlane({
               {status}
             </p>
           </CardAction>
+          <span className="sr-only" data-testid="event-count">
+            {events.length}
+          </span>
         </CardHeader>
         <CardContent>
           {!selectedProjectId ? (

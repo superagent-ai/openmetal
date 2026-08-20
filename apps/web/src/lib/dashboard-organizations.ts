@@ -12,8 +12,7 @@ export type DashboardOrganization = {
   slug: string;
 };
 
-export type DashboardSection =
-  "api-keys" | "billing" | "projects" | "settings" | "usage" | "webhooks";
+export type DashboardSection = "projects" | "settings";
 
 export async function listDashboardOrganizations(): Promise<DashboardOrganization[]> {
   const { metal } = await requireMetalSession();

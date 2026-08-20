@@ -21,6 +21,10 @@ export const CreateDomainEventInputSchema = z.object({
 });
 export type CreateDomainEventInput = z.infer<typeof CreateDomainEventInputSchema>;
 
+export function parsePublicEvent(input: unknown): DurableEventEnvelope {
+  return DurableEventEnvelopeSchema.parse(input);
+}
+
 export function toPublicEvent(input: {
   cursor: string;
   eventId: string;

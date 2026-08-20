@@ -17,8 +17,33 @@ describe("database readiness", () => {
   });
 
   it("rejects updates to domain events", async () => {
+    const organizationId = crypto.randomUUID();
+    const eventId = crypto.randomUUID();
+    await database.sql`
+      insert into public.organizations (id, name, slug)
+      values (
+        ${organizationId},
+        'Append Only Org',
+        ${`append-${organizationId.slice(0, 8)}`}
+      )
+    `;
+    await database.sql`
+      insert into metal.domain_events (event_id, type, organization_id, payload, actor_id)
+      values (
+        ${eventId},
+        'organization.created',
+        ${organizationId},
+        '{}'::jsonb,
+        ${crypto.randomUUID()}
+      )
+    `;
     await expect(
-      database.sql`update metal.domain_events set type = 'nope' where false returning 1`,
-    ).resolves.toEqual([]);
+      database.sql`
+        update metal.domain_events set type = 'nope' where event_id = ${eventId}
+      `,
+    ).rejects.toThrow(/append-only/);
+    await expect(
+      database.sql`delete from metal.domain_events where event_id = ${eventId}`,
+    ).rejects.toThrow(/append-only/);
   });
 });

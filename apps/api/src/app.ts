@@ -14,7 +14,7 @@ import { createDatabase, type MetalDatabase } from "@openmetal/db";
 import { createLogger } from "@openmetal/logger";
 import { CursorError } from "@openmetal/events";
 import { createAuthVerifier, type Principal } from "./auth.js";
-import { beginIdempotency, completeIdempotency } from "./idempotency.js";
+import { executeIdempotent } from "./idempotency.js";
 import { ApiError, sendError } from "./errors.js";
 import { loadApiEnv, type ApiEnv } from "./env.js";
 import { listProjectEvents } from "./event-service.js";
@@ -118,6 +118,9 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     logger.error({ err: error, request_id: request.id });
     return sendError(request, reply, new ApiError(500, "internal_error", "internal error"));
   });
+  app.setNotFoundHandler((request, reply) => {
+    return sendError(request, reply, new ApiError(404, "not_found", "route not found"));
+  });
 
   async function requirePrincipal(request: { headers: { authorization?: string } }) {
     const header = request.headers.authorization;
@@ -154,31 +157,27 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
       });
     }
     const key = headerValue(request.headers["idempotency-key"]);
-    const replay = await beginIdempotency(db.db, {
-      principalId: principal.userId,
-      operation: "organizations.create",
-      key,
-      body: parsed.data,
-    });
-    if (replay?.replay) {
-      return reply.status(replay.replay.status).send(replay.replay.body);
-    }
     try {
-      const organization = serializeOrg(
-        await createOrganization(db.db, {
-          userId: principal.userId,
-          name: parsed.data.name,
-          slug: parsed.data.slug,
-        }),
+      const result = await executeIdempotent(
+        db.db,
+        {
+          principalId: principal.userId,
+          operation: "organizations.create",
+          key,
+          body: parsed.data,
+        },
+        async (tx) => {
+          const organization = serializeOrg(
+            await createOrganization(tx, {
+              userId: principal.userId,
+              name: parsed.data.name,
+              slug: parsed.data.slug,
+            }),
+          );
+          return { status: 201, body: organization };
+        },
       );
-      await completeIdempotency(db.db, {
-        principalId: principal.userId,
-        operation: "organizations.create",
-        key,
-        status: 201,
-        body: organization,
-      });
-      return reply.status(201).send(organization);
+      return reply.status(result.status).send(result.body);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ApiError(409, "conflict", "organization slug already exists");
@@ -213,32 +212,28 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
       });
     }
     const key = headerValue(request.headers["idempotency-key"]);
-    const replay = await beginIdempotency(db.db, {
-      principalId: principal.userId,
-      operation: `projects.create:${organizationId}`,
-      key,
-      body: parsed.data,
-    });
-    if (replay?.replay) {
-      return reply.status(replay.replay.status).send(replay.replay.body);
-    }
     try {
-      const project = serializeProject(
-        await createProject(db.db, {
-          userId: principal.userId,
-          organizationId,
-          name: parsed.data.name,
-          slug: parsed.data.slug,
-        }),
+      const result = await executeIdempotent(
+        db.db,
+        {
+          principalId: principal.userId,
+          operation: `projects.create:${organizationId}`,
+          key,
+          body: parsed.data,
+        },
+        async (tx) => {
+          const project = serializeProject(
+            await createProject(tx, {
+              userId: principal.userId,
+              organizationId,
+              name: parsed.data.name,
+              slug: parsed.data.slug,
+            }),
+          );
+          return { status: 201, body: project };
+        },
       );
-      await completeIdempotency(db.db, {
-        principalId: principal.userId,
-        operation: `projects.create:${organizationId}`,
-        key,
-        status: 201,
-        body: project,
-      });
-      return reply.status(201).send(project);
+      return reply.status(result.status).send(result.body);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ApiError(409, "conflict", "project slug already exists");

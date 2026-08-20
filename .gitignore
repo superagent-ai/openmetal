@@ -16,6 +16,9 @@ blob-report
 !.env.example
 apps/web/.env
 apps/web/.env.local
+apps/web/AGENTS.md
+apps/web/CLAUDE.md
+apps/web/next-env.d.ts
 apps/api/.env
 apps/worker/.env
 *.log

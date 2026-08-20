@@ -18,7 +18,12 @@ export default async function HomePage() {
         This first milestone is the product control plane. Create an organization, add a project,
         and recover durable events after a disconnect.
       </p>
-      <Button render={<Link href={href} />} size="lg" className="mt-8 w-fit text-base">
+      <Button
+        nativeButton={false}
+        render={<Link href={href} />}
+        size="lg"
+        className="mt-8 w-fit text-base"
+      >
         {label}
       </Button>
     </main>

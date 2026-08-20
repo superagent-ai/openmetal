@@ -14,11 +14,20 @@ const log = createLogger({
   level: env.LOG_LEVEL,
 });
 const { app } = await buildApp(env);
+let shutdownPromise: Promise<void> | undefined;
 
 const shutdown = async (signal: string) => {
-  log.info({ signal }, "shutting down api");
-  await app.close();
-  process.exit(0);
+  shutdownPromise ??= (async () => {
+    log.info({ signal }, "shutting down api");
+    try {
+      await app.close();
+      process.exitCode = 0;
+    } catch (error) {
+      log.error({ err: error, signal }, "api shutdown failed");
+      process.exitCode = 1;
+    }
+  })();
+  await shutdownPromise;
 };
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

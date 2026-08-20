@@ -20,19 +20,19 @@
     "@openmetal/events": "workspace:*",
     "@openmetal/logger": "workspace:*",
     "@supabase/supabase-js": "2.112.3",
-    "drizzle-orm": "0.45.2",
     "dotenv": "17.4.2",
+    "drizzle-orm": "0.45.2",
     "fastify": "5.12.1",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@openmetal/eslint-config": "workspace:*",
+    "@openmetal/sdk": "workspace:*",
     "@openmetal/testkit": "workspace:*",
     "@openmetal/typescript-config": "workspace:*",
     "@types/node": "24.12.0",
-    "eslint": "10.8.1",
+    "eslint": "9.39.5",
     "tsx": "4.23.12",
-    "@openmetal/sdk": "workspace:*",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
   }

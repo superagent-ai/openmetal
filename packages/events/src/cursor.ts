@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { z } from "zod";
 
 const CursorPayloadSchema = z.object({
@@ -13,17 +12,27 @@ export class CursorError extends Error {
   }
 }
 
+function encodeBase64Url(value: string): string {
+  return btoa(value).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+function decodeBase64Url(value: string): string {
+  const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  return atob(padded);
+}
+
 export function serializeCursor(sequence: bigint | number | string): string {
   const n = typeof sequence === "bigint" ? sequence.toString() : String(sequence);
   if (!/^[0-9]+$/.test(n)) {
     throw new CursorError("cursor sequence must be a non-negative integer");
   }
-  return Buffer.from(JSON.stringify({ v: 1, n }), "utf8").toString("base64url");
+  return encodeBase64Url(JSON.stringify({ v: 1, n }));
 }
 
 export function parseCursor(cursor: string): bigint {
   try {
-    const json = Buffer.from(cursor, "base64url").toString("utf8");
+    const json = decodeBase64Url(cursor);
     const parsed = CursorPayloadSchema.parse(JSON.parse(json));
     return BigInt(parsed.n);
   } catch {

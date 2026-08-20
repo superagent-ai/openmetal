@@ -1,0 +1,33 @@
+{
+  "name": "metal",
+  "private": true,
+  "packageManager": "pnpm@11.13.1",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=11.13.1"
+  },
+  "scripts": {
+    "dev": "turbo run dev --filter=@openmetal/web --filter=@openmetal/api --filter=@openmetal/worker --concurrency=12",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "test:rls": "pnpm --filter @openmetal/testkit test:rls",
+    "test:realtime": "pnpm --filter @openmetal/testkit test:realtime",
+    "test:e2e": "pnpm --filter @openmetal/web test:e2e",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset --local",
+    "db:types": "supabase gen types --local --lang typescript --schema public --schema metal > packages/db/src/database.types.ts",
+    "openapi:generate": "pnpm --filter @openmetal/contracts openapi:generate",
+    "env:local": "node scripts/write-local-env.mjs"
+  },
+  "devDependencies": {
+    "prettier": "3.9.6",
+    "turbo": "2.10.11",
+    "typescript": "5.9.3"
+  }
+}

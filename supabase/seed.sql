@@ -1,0 +1,1 @@
+-- Local seed is intentionally empty. Tests and developers create their own users.

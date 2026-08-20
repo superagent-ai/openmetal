@@ -132,4 +132,55 @@ describe("MetalClient unit", () => {
     await client.organizations.create({ name: "A", slug: "a" }, { idempotencyKey: "k-1" });
     expect(captured).toBe("k-1");
   });
+
+  it("updates a project with PATCH", async () => {
+    let capturedMethod: string | undefined;
+    let capturedBody: string | undefined;
+    const client = new MetalClient({
+      baseUrl: "http://localhost:4000",
+      accessToken: async () => "t",
+      fetch: async (_url, init) => {
+        capturedMethod = init?.method;
+        capturedBody = init?.body?.toString();
+        return jsonResponse(200, {
+          id: "11111111-1111-4111-8111-111111111111",
+          organization_id: "22222222-2222-4222-8222-222222222222",
+          name: "Renamed",
+          slug: "renamed",
+          created_at: "2026-08-20T00:00:00.000Z",
+          updated_at: "2026-08-20T01:00:00.000Z",
+        });
+      },
+    });
+
+    await expect(
+      client.projects.update("11111111-1111-4111-8111-111111111111", {
+        name: "Renamed",
+        slug: "renamed",
+      }),
+    ).resolves.toMatchObject({ name: "Renamed" });
+    expect(capturedMethod).toBe("PATCH");
+    expect(capturedBody).toBe(JSON.stringify({ name: "Renamed", slug: "renamed" }));
+  });
+
+  it("deletes a project with DELETE", async () => {
+    let capturedMethod: string | undefined;
+    const client = new MetalClient({
+      baseUrl: "http://localhost:4000",
+      accessToken: async () => "t",
+      fetch: async (_url, init) => {
+        capturedMethod = init?.method;
+        return jsonResponse(200, {
+          id: "11111111-1111-4111-8111-111111111111",
+          deleted: true,
+        });
+      },
+    });
+
+    await expect(client.projects.delete("11111111-1111-4111-8111-111111111111")).resolves.toEqual({
+      id: "11111111-1111-4111-8111-111111111111",
+      deleted: true,
+    });
+    expect(capturedMethod).toBe("DELETE");
+  });
 });

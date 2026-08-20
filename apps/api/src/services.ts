@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import {
   domainEvents,
   organizationMembers,
@@ -47,7 +47,7 @@ async function requireMembership(
 async function insertEventAndOutbox(
   tx: Tx,
   input: {
-    type: "organization.created" | "project.created";
+    type: "organization.created" | "project.created" | "project.deleted" | "project.updated";
     organizationId: string;
     projectId?: string;
     actorId: string;
@@ -128,7 +128,8 @@ export async function listOrganizations(db: MetalDb, userId: string) {
     })
     .from(organizations)
     .innerJoin(organizationMembers, eq(organizationMembers.organizationId, organizations.id))
-    .where(eq(organizationMembers.userId, userId));
+    .where(eq(organizationMembers.userId, userId))
+    .orderBy(asc(organizations.createdAt));
 }
 
 export async function getOrganization(db: MetalDb, userId: string, organizationId: string) {
@@ -173,16 +174,93 @@ export async function createProject(
   });
 }
 
+export async function updateProject(
+  db: MetalDb,
+  input: { userId: string; projectId: string; name: string; slug: string },
+) {
+  return withTransaction(db, async (tx) => {
+    const existing = await tx
+      .select()
+      .from(projects)
+      .where(and(eq(projects.id, input.projectId), isNull(projects.deletedAt)))
+      .then((rows) => rows[0]);
+    if (!existing) {
+      throw new ApiError(404, "not_found", "project not found");
+    }
+
+    await requireMembership(tx, input.userId, existing.organizationId, ["owner", "admin"]);
+    const [project] = await tx
+      .update(projects)
+      .set({
+        name: input.name,
+        slug: input.slug,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(projects.id, input.projectId), isNull(projects.deletedAt)))
+      .returning();
+    if (!project) {
+      throw new ApiError(404, "not_found", "project not found");
+    }
+
+    await insertEventAndOutbox(tx, {
+      type: "project.updated",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      actorId: input.userId,
+      data: { name: project.name, slug: project.slug },
+      topic: projectTopic(project.id),
+    });
+    return project;
+  });
+}
+
+export async function deleteProject(db: MetalDb, input: { userId: string; projectId: string }) {
+  return withTransaction(db, async (tx) => {
+    const existing = await tx
+      .select()
+      .from(projects)
+      .where(and(eq(projects.id, input.projectId), isNull(projects.deletedAt)))
+      .then((rows) => rows[0]);
+    if (!existing) {
+      throw new ApiError(404, "not_found", "project not found");
+    }
+
+    await requireMembership(tx, input.userId, existing.organizationId, ["owner", "admin"]);
+    const now = new Date();
+    const [project] = await tx
+      .update(projects)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(projects.id, input.projectId), isNull(projects.deletedAt)))
+      .returning();
+    if (!project) {
+      throw new ApiError(404, "not_found", "project not found");
+    }
+
+    await insertEventAndOutbox(tx, {
+      type: "project.deleted",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      actorId: input.userId,
+      data: { name: project.name, slug: project.slug },
+      topic: projectTopic(project.id),
+    });
+    return project;
+  });
+}
+
 export async function listProjects(db: MetalDb, userId: string, organizationId: string) {
   await requireMembership(db, userId, organizationId);
-  return db.select().from(projects).where(eq(projects.organizationId, organizationId));
+  return db
+    .select()
+    .from(projects)
+    .where(and(eq(projects.organizationId, organizationId), isNull(projects.deletedAt)));
 }
 
 export async function getProject(db: MetalDb, userId: string, projectId: string) {
   const project = await db
     .select()
     .from(projects)
-    .where(eq(projects.id, projectId))
+    .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
     .then((rows) => rows[0]);
   if (!project) {
     throw new ApiError(404, "not_found", "project not found");

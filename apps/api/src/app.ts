@@ -8,6 +8,7 @@ import {
   CreateProjectRequestSchema,
   ListEventsQuerySchema,
   OpaqueIdSchema,
+  UpdateProjectRequestSchema,
 } from "@openmetal/contracts";
 import { createDatabase, type MetalDatabase } from "@openmetal/db";
 import { createLogger } from "@openmetal/logger";
@@ -20,10 +21,12 @@ import { listProjectEvents } from "./event-service.js";
 import {
   createOrganization,
   createProject,
+  deleteProject,
   getOrganization,
   getProject,
   listOrganizations,
   listProjects,
+  updateProject,
 } from "./services.js";
 
 declare module "fastify" {
@@ -87,6 +90,7 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
   await app.register(cors, {
     origin: env.CORS_ALLOWED_ORIGINS.split(",").map((value) => value.trim()),
     credentials: true,
+    methods: ["DELETE", "GET", "HEAD", "PATCH", "POST"],
     allowedHeaders: ["authorization", "content-type", "idempotency-key", "x-request-id"],
   });
 
@@ -256,6 +260,43 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     const principal = await requirePrincipal(request);
     const projectId = OpaqueIdSchema.parse((request.params as { project_id: string }).project_id);
     return serializeProject(await getProject(db.db, principal.userId, projectId));
+  });
+
+  app.patch(`/${API_VERSION}/projects/:project_id`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const projectId = OpaqueIdSchema.parse((request.params as { project_id: string }).project_id);
+    const parsed = UpdateProjectRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid project payload", {
+        issues: parsed.error.issues,
+      });
+    }
+
+    try {
+      return serializeProject(
+        await updateProject(db.db, {
+          userId: principal.userId,
+          projectId,
+          name: parsed.data.name,
+          slug: parsed.data.slug,
+        }),
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ApiError(409, "conflict", "project slug already exists");
+      }
+      throw error;
+    }
+  });
+
+  app.delete(`/${API_VERSION}/projects/:project_id`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const projectId = OpaqueIdSchema.parse((request.params as { project_id: string }).project_id);
+    const project = await deleteProject(db.db, {
+      userId: principal.userId,
+      projectId,
+    });
+    return { id: project.id, deleted: true as const };
   });
 
   app.get(`/${API_VERSION}/events`, async (request) => {

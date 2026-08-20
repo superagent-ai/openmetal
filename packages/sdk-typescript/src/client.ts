@@ -16,7 +16,7 @@ export type MetalClientOptions = {
 };
 
 type RequestOptions = {
-  method: "GET" | "POST";
+  method: "DELETE" | "GET" | "PATCH" | "POST";
   path: string;
   body?: unknown;
   query?: Record<string, string | number | undefined>;
@@ -177,6 +177,29 @@ export class MetalClient {
           slug: z.string(),
           created_at: z.string(),
           updated_at: z.string(),
+        }),
+      }),
+    update: (projectId: string, input: { name: string; slug: string }) =>
+      this.request({
+        method: "PATCH",
+        path: `/v1/projects/${projectId}`,
+        body: input,
+        schema: z.object({
+          id: z.string(),
+          organization_id: z.string(),
+          name: z.string(),
+          slug: z.string(),
+          created_at: z.string(),
+          updated_at: z.string(),
+        }),
+      }),
+    delete: (projectId: string) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/projects/${projectId}`,
+        schema: z.object({
+          id: z.string(),
+          deleted: z.literal(true),
         }),
       }),
   };

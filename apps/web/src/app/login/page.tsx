@@ -1,4 +1,7 @@
-import { sendMagicLink } from "./actions";
+import Link from "next/link";
+import { HexagonIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { LoginForm } from "@/components/login-form";
 
 export default async function LoginPage({
   searchParams,
@@ -8,40 +11,33 @@ export default async function LoginPage({
   const params = await searchParams;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-8 py-16">
-      <h1 className="text-3xl font-semibold">Sign in</h1>
-      <p className="mt-4 text-base text-[#9b9b9b]">
-        We will email you a magic link. Open it to confirm your session.
-      </p>
-      {params.sent ? (
-        <p className="mt-6 rounded-lg bg-[#181818] px-4 py-3 text-sm" role="status">
-          Check your inbox for the sign in link. Local mail is available in Inbucket.
-        </p>
-      ) : null}
-      {params.error ? (
-        <p className="mt-6 rounded-lg bg-[#181818] px-4 py-3 text-sm text-red-300" role="alert">
-          {params.error}
-        </p>
-      ) : null}
-      <form action={sendMagicLink} className="mt-8 space-y-4">
-        <label className="block text-sm font-semibold" htmlFor="email">
-          Email
-        </label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          required
-          className="w-full rounded-lg bg-[#1f1f1f] px-3 py-2 text-base"
-          placeholder="you@company.com"
-        />
-        <button
-          type="submit"
-          className="rounded-lg bg-white px-3 py-2 text-base font-semibold text-black"
-        >
-          Send magic link
-        </button>
-      </form>
-    </main>
+    <div className="grid min-h-svh lg:grid-cols-2">
+      <div className="flex flex-col gap-4 p-6 md:p-10">
+        <div className="flex justify-center gap-2 md:justify-start">
+          <Link href="/" className="flex items-center gap-2 font-medium">
+            <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <HugeiconsIcon icon={HexagonIcon} strokeWidth={2} className="size-4" />
+            </div>
+            Metal
+          </Link>
+        </div>
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-xs">
+            <LoginForm sent={params.sent} error={params.error} />
+          </div>
+        </div>
+      </div>
+      <div className="relative hidden bg-muted lg:block">
+        <div className="absolute inset-0 bg-[#181818]" />
+        <div className="relative flex h-full flex-col justify-end p-10">
+          <p className="max-w-md text-3xl font-semibold text-balance">
+            Give your agent a computer from one control plane.
+          </p>
+          <p className="mt-4 max-w-md text-sm text-pretty text-muted-foreground">
+            Create an organization, add a project, and recover durable events after a disconnect.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }

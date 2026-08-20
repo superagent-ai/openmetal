@@ -11,6 +11,7 @@ import {
   CreateProjectRequestSchema,
   ProjectListResponseSchema,
   ProjectSchema,
+  UpdateProjectRequestSchema,
 } from "./projects.js";
 import { CursorEventPageSchema, ListEventsQuerySchema } from "./events.js";
 
@@ -207,6 +208,60 @@ export function buildOpenApiDocument(): Record<string, unknown> {
         },
       },
       "/v1/projects/{project_id}": {
+        patch: {
+          operationId: "updateProject",
+          tags: ["projects"],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "project_id",
+              in: "path",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: json(UpdateProjectRequestSchema) } },
+          },
+          responses: {
+            "200": {
+              description: "Project updated",
+              content: { "application/json": { schema: json(ProjectSchema) } },
+            },
+            "401": errorResponse,
+            "403": errorResponse,
+            "404": errorResponse,
+            "409": errorResponse,
+            "422": errorResponse,
+          },
+        },
+        delete: {
+          operationId: "deleteProject",
+          tags: ["projects"],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "project_id",
+              in: "path",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Project deleted",
+              content: {
+                "application/json": {
+                  schema: json(z.object({ id: z.string(), deleted: z.literal(true) })),
+                },
+              },
+            },
+            "401": errorResponse,
+            "403": errorResponse,
+            "404": errorResponse,
+          },
+        },
         get: {
           operationId: "getProject",
           tags: ["projects"],

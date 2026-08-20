@@ -18,6 +18,12 @@ export const CreateProjectRequestSchema = z.object({
 });
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequestSchema>;
 
+export const UpdateProjectRequestSchema = z.object({
+  name: OrganizationNameSchema,
+  slug: ResourceSlugSchema,
+});
+export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequestSchema>;
+
 export const ProjectListResponseSchema = z.object({
   projects: z.array(ProjectSchema),
 });

@@ -2,7 +2,12 @@ import { DurableEventEnvelopeSchema, type DurableEventEnvelope } from "@openmeta
 import { redactRecord } from "@openmetal/logger";
 import { z } from "zod";
 
-export const EventTypeValues = ["organization.created", "project.created"] as const;
+export const EventTypeValues = [
+  "organization.created",
+  "project.created",
+  "project.deleted",
+  "project.updated",
+] as const;
 export const EventTypeValueSchema = z.enum(EventTypeValues);
 export type EventTypeValue = z.infer<typeof EventTypeValueSchema>;
 

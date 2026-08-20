@@ -97,12 +97,46 @@ describe("metal api integration", () => {
       { idempotencyKey: "create-project-1" },
     );
     await expect(outsiderClient.projects.get(project.id)).rejects.toMatchObject({ status: 403 });
+    await expect(
+      outsiderClient.projects.update(project.id, { name: "Stolen", slug: "stolen" }),
+    ).rejects.toMatchObject({ status: 403 });
     await expect(outsiderClient.events.list({ projectId: project.id })).rejects.toMatchObject({
       status: 403,
     });
 
+    const updated = await ownerClient.projects.update(project.id, {
+      name: "Renamed",
+      slug: `renamed-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    expect(updated.name).toBe("Renamed");
+
+    const deletable = await ownerClient.projects.create(first.id, {
+      name: "Delete Me",
+      slug: `delete-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    await expect(outsiderClient.projects.delete(deletable.id)).rejects.toMatchObject({
+      status: 403,
+    });
+    await expect(ownerClient.projects.delete(deletable.id)).resolves.toEqual({
+      id: deletable.id,
+      deleted: true,
+    });
+    await expect(ownerClient.projects.get(deletable.id)).rejects.toMatchObject({ status: 404 });
+    await expect(
+      ownerClient.projects.update(deletable.id, { name: "Gone", slug: "gone" }),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(ownerClient.projects.list(first.id)).resolves.not.toMatchObject({
+      projects: expect.arrayContaining([expect.objectContaining({ id: deletable.id })]),
+    });
+    const reused = await ownerClient.projects.create(first.id, {
+      name: "Delete Me",
+      slug: deletable.slug,
+    });
+    expect(reused.slug).toBe(deletable.slug);
+
     const events = await ownerClient.events.list({ projectId: project.id });
     expect(events.events.some((item) => item.type === "project.created")).toBe(true);
+    expect(events.events.some((item) => item.type === "project.updated")).toBe(true);
 
     const page = await ownerClient.events.list({
       projectId: project.id,

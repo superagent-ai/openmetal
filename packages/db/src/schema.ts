@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   index,
@@ -9,7 +10,6 @@ import {
   primaryKey,
   text,
   timestamp,
-  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -52,9 +52,12 @@ export const projects = pgTable(
     slug: text("slug").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
-    unique("projects_organization_id_slug_key").on(table.organizationId, table.slug),
+    uniqueIndex("projects_organization_id_slug_key")
+      .on(table.organizationId, table.slug)
+      .where(sql`${table.deletedAt} is null`),
     index("projects_organization_id_idx").on(table.organizationId),
   ],
 );

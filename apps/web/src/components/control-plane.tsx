@@ -1,9 +1,21 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CircleNotch, Plugs, PlugsConnected, WarningCircle } from "@phosphor-icons/react";
 import { isDuplicateDelivery, projectTopic } from "@openmetal/events";
 import { MetalError } from "@openmetal/sdk";
+import {
+  AlertCircleIcon,
+  Loading03Icon,
+  Plug01Icon,
+  UsbNotConnected01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 import { createMetalClient } from "@/lib/metal";
 
@@ -18,15 +30,13 @@ type EventItem = {
 };
 type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting" | "error";
 
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 63);
-}
-
-export function ControlPlane() {
+export function ControlPlane({
+  organization,
+  initialProjectId,
+}: {
+  organization: Organization;
+  initialProjectId?: string;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const metal = useMemo(
     () =>
@@ -37,17 +47,13 @@ export function ControlPlane() {
     [supabase],
   );
 
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedOrgId, setSelectedOrgId] = useState<string>("");
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjectId ?? "");
   const [events, setEvents] = useState<EventItem[]>([]);
   const [health, setHealth] = useState<string>("checking");
   const [meta, setMeta] = useState<string>("");
   const [status, setStatus] = useState<ConnectionState>("connecting");
   const [error, setError] = useState<string | null>(null);
-  const [orgName, setOrgName] = useState("");
-  const [projectName, setProjectName] = useState("");
   const [loading, setLoading] = useState(true);
   const seen = useRef(new Set<string>());
   const cursorRef = useRef<string | undefined>(undefined);
@@ -70,18 +76,12 @@ export function ControlPlane() {
     let cancelled = false;
     void (async () => {
       try {
-        const [healthResult, metaResult, orgResult] = await Promise.all([
-          metal.health(),
-          metal.meta(),
-          metal.organizations.list(),
-        ]);
+        const [healthResult, metaResult] = await Promise.all([metal.health(), metal.meta()]);
         if (cancelled) {
           return;
         }
         setHealth(healthResult.status);
         setMeta(`${metaResult.name} ${metaResult.api_version}`);
-        setOrganizations(orgResult.organizations);
-        setSelectedOrgId((current) => current || orgResult.organizations[0]?.id || "");
       } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof MetalError ? caught.message : "Failed to load control plane");
@@ -98,18 +98,21 @@ export function ControlPlane() {
   }, [metal]);
 
   useEffect(() => {
-    if (!selectedOrgId) {
-      return;
-    }
     let cancelled = false;
     void (async () => {
       try {
-        const result = await metal.projects.list(selectedOrgId);
+        const result = await metal.projects.list(organization.id);
         if (cancelled) {
           return;
         }
         setProjects(result.projects);
-        setSelectedProjectId((current) => current || result.projects[0]?.id || "");
+        setSelectedProjectId((current) =>
+          result.projects.some((project) => project.id === (initialProjectId ?? current))
+            ? (initialProjectId ?? current)
+            : result.projects.some((project) => project.id === current)
+              ? current
+              : (result.projects[0]?.id ?? ""),
+        );
       } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof MetalError ? caught.message : "Failed to load projects");
@@ -119,10 +122,13 @@ export function ControlPlane() {
     return () => {
       cancelled = true;
     };
-  }, [metal, selectedOrgId]);
+  }, [initialProjectId, metal, organization.id]);
 
   useEffect(() => {
     if (!selectedProjectId) {
+      seen.current = new Set();
+      cursorRef.current = undefined;
+      setEvents([]);
       return;
     }
     void metal.events
@@ -202,187 +208,144 @@ export function ControlPlane() {
     };
   }, [ingest, metal, selectedProjectId, supabase]);
 
-  async function onCreateOrganization(formData: FormData) {
-    const name = String(formData.get("orgName") ?? orgName);
-    const created = await metal.organizations.create(
-      { name, slug: slugify(name) },
-      { idempotencyKey: crypto.randomUUID() },
-    );
-    setOrganizations((current) => [...current, created]);
-    setSelectedOrgId(created.id);
-    setOrgName("");
-  }
-
-  async function onCreateProject(formData: FormData) {
-    if (!selectedOrgId) return;
-    const name = String(formData.get("projectName") ?? projectName);
-    const created = await metal.projects.create(
-      selectedOrgId,
-      { name, slug: slugify(name) },
-      { idempotencyKey: crypto.randomUUID() },
-    );
-    setProjects((current) => [...current, created]);
-    setSelectedProjectId(created.id);
-    setProjectName("");
-    const page = await metal.events.list({ projectId: created.id, limit: 50 });
-    ingest(page.events);
-  }
+  useEffect(() => {
+    const handleProjectRenamed = (event: Event) => {
+      const detail = (event as CustomEvent<{ organizationId: string; project: Project }>).detail;
+      if (detail.organizationId !== organization.id) {
+        return;
+      }
+      setProjects((current) =>
+        current.map((project) => (project.id === detail.project.id ? detail.project : project)),
+      );
+    };
+    const handleProjectDeleted = (event: Event) => {
+      const detail = (event as CustomEvent<{ organizationId: string; projectId: string }>).detail;
+      if (detail.organizationId !== organization.id) {
+        return;
+      }
+      setProjects((current) => {
+        const remaining = current.filter((project) => project.id !== detail.projectId);
+        setSelectedProjectId((selected) =>
+          selected === detail.projectId ? (remaining[0]?.id ?? "") : selected,
+        );
+        return remaining;
+      });
+    };
+    window.addEventListener("metal:project-renamed", handleProjectRenamed);
+    window.addEventListener("metal:project-deleted", handleProjectDeleted);
+    return () => {
+      window.removeEventListener("metal:project-renamed", handleProjectRenamed);
+      window.removeEventListener("metal:project-deleted", handleProjectDeleted);
+    };
+  }, [organization.id]);
 
   const latest = events.at(-1);
-  const selectedOrg = organizations.find((org) => org.id === selectedOrgId);
 
   return (
-    <div className="space-y-8">
-      <section className="flex items-center justify-between rounded-2xl bg-[#181818] p-6">
+    <div className="space-y-4">
+      <section className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Control plane</h1>
-          <p className="mt-2 text-sm text-[#9b9b9b]">
-            Organizations, projects, and durable events.
+          <p className="mt-1 text-sm text-muted-foreground">
+            Projects and durable events for {organization.name}.
           </p>
         </div>
-        <p className="rounded-lg bg-[#1f1f1f] px-3 py-2 text-sm" data-testid="api-meta">
+        <Badge variant="secondary" data-testid="api-meta">
           API {health} · {meta || "unknown"}
-        </p>
+        </Badge>
       </section>
 
       {error ? (
-        <p
-          className="flex items-center gap-2 rounded-2xl bg-[#181818] px-4 py-3 text-sm"
-          role="alert"
-        >
-          <WarningCircle size={16} />
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={2} />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       ) : null}
 
       {loading ? (
-        <div className="rounded-2xl bg-[#181818] p-6" aria-busy="true">
-          <div className="h-6 w-40 rounded bg-[#272727]" />
-          <div className="mt-4 h-24 rounded bg-[#1f1f1f]" />
-        </div>
+        <Card aria-busy="true">
+          <CardHeader>
+            <Skeleton className="h-6 w-40" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-24 w-full" />
+          </CardContent>
+        </Card>
       ) : null}
 
-      <section className="grid gap-8 md:grid-cols-2">
-        <form action={onCreateOrganization} className="rounded-2xl bg-[#181818] p-6">
-          <h2 className="text-lg font-semibold">Create organization</h2>
-          <label className="mt-4 block text-sm" htmlFor="orgName">
-            Name
-          </label>
-          <input
-            id="orgName"
-            name="orgName"
-            value={orgName}
-            onChange={(event) => setOrgName(event.target.value)}
-            className="mt-2 w-full rounded-lg bg-[#1f1f1f] px-3 py-2"
-            required
-          />
-          <button className="mt-4 rounded-lg bg-white px-3 py-2 text-base font-semibold text-black">
-            Create organization
-          </button>
-        </form>
+      <section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Projects</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {projects.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No projects in this organization yet.</p>
+            ) : (
+              <ul className="space-y-2" data-testid="project-list">
+                {projects.map((project) => (
+                  <li key={project.id}>
+                    <Button
+                      variant={selectedProjectId === project.id ? "secondary" : "ghost"}
+                      className="w-full justify-start"
+                      render={
+                        <Link href={`/dashboard/${organization.slug}/projects/${project.slug}`} />
+                      }
+                    >
+                      {project.name}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </section>
 
-        <div className="rounded-2xl bg-[#181818] p-6">
-          <h2 className="text-lg font-semibold">Organization</h2>
-          {organizations.length === 0 ? (
-            <p className="mt-4 text-sm text-[#9b9b9b]">
-              No organizations yet. Create one to start.
-            </p>
-          ) : (
-            <select
-              className="mt-4 w-full rounded-lg bg-[#1f1f1f] px-3 py-2"
-              value={selectedOrgId}
-              onChange={(event) => setSelectedOrgId(event.target.value)}
-              data-testid="organization-selector"
+      <Card>
+        <CardHeader>
+          <CardTitle>Latest project event</CardTitle>
+          <CardAction>
+            <p
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+              data-testid="realtime-status"
             >
-              {organizations.map((org) => (
-                <option key={org.id} value={org.id}>
-                  {org.name}
-                </option>
-              ))}
-            </select>
-          )}
-          {selectedOrg ? <p className="mt-3 text-sm text-[#9b9b9b]">{selectedOrg.slug}</p> : null}
-        </div>
-      </section>
-
-      <section className="grid gap-8 md:grid-cols-2">
-        <form action={onCreateProject} className="rounded-2xl bg-[#181818] p-6">
-          <h2 className="text-lg font-semibold">Create project</h2>
-          <label className="mt-4 block text-sm" htmlFor="projectName">
-            Name
-          </label>
-          <input
-            id="projectName"
-            name="projectName"
-            value={projectName}
-            onChange={(event) => setProjectName(event.target.value)}
-            className="mt-2 w-full rounded-lg bg-[#1f1f1f] px-3 py-2"
-            required
-          />
-          <button
-            className="mt-4 rounded-lg bg-white px-3 py-2 text-base font-semibold text-black disabled:opacity-40"
-            disabled={!selectedOrgId}
-          >
-            Create project
-          </button>
-        </form>
-
-        <div className="rounded-2xl bg-[#181818] p-6">
-          <h2 className="text-lg font-semibold">Projects</h2>
-          {projects.length === 0 ? (
-            <p className="mt-4 text-sm text-[#9b9b9b]">No projects in this organization yet.</p>
+              {status === "connected" ? (
+                <HugeiconsIcon icon={Plug01Icon} strokeWidth={2} className="size-4" />
+              ) : null}
+              {status === "connecting" || status === "reconnecting" ? (
+                <HugeiconsIcon
+                  icon={Loading03Icon}
+                  strokeWidth={2}
+                  className="size-4 animate-spin"
+                />
+              ) : null}
+              {status === "disconnected" || status === "error" ? (
+                <HugeiconsIcon icon={UsbNotConnected01Icon} strokeWidth={2} className="size-4" />
+              ) : null}
+              {status}
+            </p>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {!selectedProjectId ? (
+            <p className="text-sm text-muted-foreground">
+              Select a project to subscribe to its private channel.
+            </p>
+          ) : latest ? (
+            <pre
+              className="overflow-x-auto rounded-lg bg-muted p-4 text-sm"
+              data-testid="latest-event"
+            >
+              {JSON.stringify(latest, null, 2)}
+            </pre>
           ) : (
-            <ul className="mt-4 space-y-2" data-testid="project-list">
-              {projects.map((project) => (
-                <li key={project.id}>
-                  <button
-                    type="button"
-                    className={`w-full rounded-lg px-3 py-2 text-left ${
-                      selectedProjectId === project.id ? "bg-[#313131]" : "bg-[#1f1f1f]"
-                    }`}
-                    onClick={() => setSelectedProjectId(project.id)}
-                  >
-                    {project.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <p className="text-sm text-muted-foreground" data-testid="latest-event">
+              Waiting for the first durable event.
+            </p>
           )}
-        </div>
-      </section>
-
-      <section className="rounded-2xl bg-[#181818] p-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Latest project event</h2>
-          <p
-            className="flex items-center gap-2 text-sm text-[#9b9b9b]"
-            data-testid="realtime-status"
-          >
-            {status === "connected" ? <PlugsConnected size={16} /> : null}
-            {status === "connecting" || status === "reconnecting" ? (
-              <CircleNotch size={16} className="animate-spin" />
-            ) : null}
-            {status === "disconnected" || status === "error" ? <Plugs size={16} /> : null}
-            {status}
-          </p>
-        </div>
-        {!selectedProjectId ? (
-          <p className="mt-4 text-sm text-[#9b9b9b]">
-            Select a project to subscribe to its private channel.
-          </p>
-        ) : latest ? (
-          <pre
-            className="mt-4 overflow-x-auto rounded-lg bg-[#1f1f1f] p-4 text-sm"
-            data-testid="latest-event"
-          >
-            {JSON.stringify(latest, null, 2)}
-          </pre>
-        ) : (
-          <p className="mt-4 text-sm text-[#9b9b9b]" data-testid="latest-event">
-            Waiting for the first durable event.
-          </p>
-        )}
-      </section>
+        </CardContent>
+      </Card>
     </div>
   );
 }

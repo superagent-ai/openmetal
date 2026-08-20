@@ -8,6 +8,8 @@ import {
   ListEventsQuerySchema,
   OpaqueIdSchema,
   ReadinessResponseSchema,
+  UpdateProjectRequestSchema,
+  buildOpenApiDocument,
 } from "../src/index.js";
 
 describe("contract parsing", () => {
@@ -67,6 +69,13 @@ describe("contract parsing", () => {
     expect(() => CreateProjectRequestSchema.parse({ name: "  ", slug: "alpha" })).toThrow();
   });
 
+  it("accepts a valid project update body", () => {
+    expect(UpdateProjectRequestSchema.parse({ name: "Renamed", slug: "renamed" })).toEqual({
+      name: "Renamed",
+      slug: "renamed",
+    });
+  });
+
   it("rejects a malformed opaque id", () => {
     expect(() => OpaqueIdSchema.parse("proj_123")).toThrow();
   });
@@ -86,5 +95,13 @@ describe("contract parsing", () => {
 
   it("rejects an event page query without project_id", () => {
     expect(() => ListEventsQuerySchema.parse({ after: "abc" })).toThrow();
+  });
+
+  it("documents project updates on PATCH /v1/projects/{project_id}", () => {
+    const document = buildOpenApiDocument() as {
+      paths: Record<string, Record<string, { operationId?: string }>>;
+    };
+    expect(document.paths["/v1/projects/{project_id}"]?.patch?.operationId).toBe("updateProject");
+    expect(document.paths["/v1/organizations/{organization_id}"]?.patch).toBeUndefined();
   });
 });

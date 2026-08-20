@@ -7,7 +7,12 @@ import {
   PaginationLimitSchema,
 } from "./primitives.js";
 
-export const EventTypeSchema = z.enum(["organization.created", "project.created"]);
+export const EventTypeSchema = z.enum([
+  "organization.created",
+  "project.created",
+  "project.deleted",
+  "project.updated",
+]);
 export type EventType = z.infer<typeof EventTypeSchema>;
 
 export const DurableEventEnvelopeSchema = z.object({

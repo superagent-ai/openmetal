@@ -32,21 +32,46 @@ test("authenticated vertical slice", async ({ page, context }) => {
 
     await page.goto(`/auth/confirm?token_hash=${tokenHash}&type=email`);
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 20_000 });
-    await expect(page.getByText("Control plane")).toBeVisible();
-    await expect(page.getByTestId("api-meta")).toContainText("API");
+    await expect(page.getByRole("heading", { name: "Create organization" })).toBeVisible();
 
     const orgName = `Playwright ${crypto.randomUUID().slice(0, 6)}`;
-    await page.getByLabel("Name").first().fill(orgName);
+    await page.getByLabel("Organization name").fill(orgName);
     await page.getByRole("button", { name: "Create organization" }).click();
-    await expect(page.getByTestId("organization-selector")).toContainText(orgName);
+    await expect(page).toHaveURL(/\/dashboard\/playwright-[a-f0-9]{6}$/);
+    await expect(page.getByRole("heading", { name: "Control plane" })).toBeVisible();
+    await expect(page.getByTestId("api-meta")).toContainText("API");
 
     const projectName = `Alpha ${crypto.randomUUID().slice(0, 6)}`;
-    await page.getByLabel("Name").nth(1).fill(projectName);
-    await page.getByRole("button", { name: "Create project" }).click();
-    await expect(page.getByTestId("project-list")).toContainText(projectName);
+    await page.getByRole("button", { name: "New project" }).click();
+    await expect(page.getByTestId("project-list")).toContainText("Untitled");
     await expect(page.getByTestId("latest-event")).toContainText("project.created", {
       timeout: 20_000,
     });
+    await page.getByRole("button", { name: "Open Untitled menu" }).click();
+    await page.getByRole("menuitem", { name: "Rename" }).click();
+    await page.getByLabel("Project name").fill(projectName);
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByTestId("project-list")).toContainText(projectName);
+
+    await page.getByRole("button", { name: "New project" }).click();
+    await expect(page.getByTestId("project-list")).toContainText("Untitled");
+    await page.getByRole("button", { name: "Open Untitled menu" }).click();
+    await page.getByRole("menuitem", { name: "Delete" }).click();
+    await page.getByRole("button", { name: "Delete project" }).click();
+    await expect(page.getByTestId("project-list")).not.toContainText("Untitled");
+    await expect(page.getByTestId("project-list")).toContainText(projectName);
+
+    const secondOrgName = `Second ${crypto.randomUUID().slice(0, 6)}`;
+    await page.getByRole("button", { name: orgName }).click();
+    await page.getByRole("menuitem", { name: /New organization/ }).click();
+    await expect(page.getByRole("heading", { name: "Create organization" })).toBeVisible();
+    await page.getByLabel("Organization name").fill(secondOrgName);
+    await page.getByRole("button", { name: "Create organization" }).click();
+    await expect(page.getByRole("button", { name: secondOrgName })).toBeVisible();
+
+    await page.getByRole("button", { name: secondOrgName }).click();
+    await page.getByRole("menuitem", { name: orgName }).click();
+    await expect(page.getByTestId("project-list")).toContainText(projectName);
 
     const latest = JSON.parse(await page.getByTestId("latest-event").innerText()) as {
       organization_id: string;
@@ -80,7 +105,7 @@ test("authenticated vertical slice", async ({ page, context }) => {
       .toBe(true);
 
     await page.goto("/dashboard");
-    await page.getByTestId("project-list").getByRole("button").first().click();
+    await page.getByTestId("project-list").getByRole("link").first().click();
     await expect(page.getByTestId("latest-event")).toContainText(gapEventId, { timeout: 20_000 });
     await expect(page.getByTestId("latest-event")).toContainText("recovered");
 

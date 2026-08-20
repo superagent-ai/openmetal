@@ -8,6 +8,7 @@ import {
   Delete02Icon,
   Folder01Icon,
   Home01Icon,
+  Key01Icon,
   MoreHorizontalIcon,
   PencilEdit01Icon,
   Settings04Icon,
@@ -121,12 +122,15 @@ export function AppSidebar({
     organizations[0];
   const currentSection = pathname.includes("/projects")
     ? "projects"
-    : pathname.endsWith("/settings")
-      ? "settings"
-      : undefined;
+    : pathname.endsWith("/api-keys")
+      ? "api-keys"
+      : pathname.endsWith("/settings")
+        ? "settings"
+        : undefined;
   const basePath = activeOrganization ? `/dashboard/${activeOrganization.slug}` : "/dashboard";
   const navItems = [
     { title: "Home", url: basePath, icon: Home01Icon },
+    { title: "API keys", url: `${basePath}/api-keys`, icon: Key01Icon },
     { title: "Settings", url: `${basePath}/settings`, icon: Settings04Icon },
   ];
   const projects =

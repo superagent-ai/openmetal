@@ -1,10 +1,11 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import {
   domainEvents,
   organizationMembers,
   organizations,
   outboxJobs,
   projects,
+  sandboxes,
   withTransaction,
   type MetalDb,
 } from "@openmetal/db";
@@ -77,7 +78,12 @@ async function requireProjectAccess(
 async function insertEventAndOutbox(
   tx: Tx,
   input: {
-    type: "organization.created" | "project.created" | "project.deleted" | "project.updated";
+    type:
+      | "organization.created"
+      | "project.created"
+      | "project.deleted"
+      | "project.updated"
+      | "sandbox.requested";
     organizationId: string;
     projectId?: string;
     actorId: string;
@@ -266,6 +272,132 @@ export async function listProjects(db: MetalDb, userId: string, organizationId: 
 
 export async function getProject(db: MetalDb, userId: string, projectId: string) {
   return requireProjectAccess(db, userId, projectId);
+}
+
+export async function createSandbox(
+  tx: MetalDb,
+  input: {
+    organizationId: string;
+    projectId: string;
+    actorId: string;
+    image?: string;
+    language: string;
+    ttlMinutes: number;
+  },
+) {
+  const [sandbox] = await tx
+    .insert(sandboxes)
+    .values({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      image: input.image,
+      language: input.language,
+      ttlMinutes: input.ttlMinutes,
+      createdBy: input.actorId,
+    })
+    .returning();
+  if (!sandbox) {
+    throw new ApiError(500, "internal_error", "failed to create sandbox");
+  }
+  await insertEventAndOutbox(tx, {
+    type: "sandbox.requested",
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    actorId: input.actorId,
+    data: { sandbox_id: sandbox.id, provider: "daytona" },
+    topic: projectTopic(input.projectId),
+  });
+  await tx.insert(outboxJobs).values({
+    jobType: "sandbox.provision",
+    dedupeKey: `sandbox:provision:${sandbox.id}`,
+    payload: { job_type: "sandbox.provision", sandbox_id: sandbox.id },
+  });
+  return sandbox;
+}
+
+export async function getSandbox(
+  db: MetalDb,
+  input: { sandboxId: string; organizationId: string; projectId: string },
+) {
+  const sandbox = await db
+    .select()
+    .from(sandboxes)
+    .where(
+      and(
+        eq(sandboxes.id, input.sandboxId),
+        eq(sandboxes.organizationId, input.organizationId),
+        eq(sandboxes.projectId, input.projectId),
+      ),
+    )
+    .then((rows) => rows[0]);
+  if (!sandbox) {
+    throw new ApiError(404, "not_found", "sandbox not found");
+  }
+  return sandbox;
+}
+
+export async function listProjectSandboxes(db: MetalDb, userId: string, projectId: string) {
+  await getProject(db, userId, projectId);
+  return db
+    .select()
+    .from(sandboxes)
+    .where(eq(sandboxes.projectId, projectId))
+    .orderBy(desc(sandboxes.createdAt));
+}
+
+export async function requestSandboxPause(
+  db: MetalDb,
+  input: { sandboxId: string; organizationId: string; projectId: string },
+) {
+  return withTransaction(db, async (tx) => {
+    const sandbox = await getSandbox(tx, input);
+    if (sandbox.status === "paused" || sandbox.status === "pausing") {
+      return sandbox;
+    }
+    if (sandbox.status !== "ready") {
+      throw new ApiError(409, "invalid_sandbox_state", "only ready sandboxes can be paused");
+    }
+    const [updated] = await tx
+      .update(sandboxes)
+      .set({ status: "pausing", updatedAt: new Date() })
+      .where(eq(sandboxes.id, sandbox.id))
+      .returning();
+    await tx
+      .insert(outboxJobs)
+      .values({
+        jobType: "sandbox.pause",
+        dedupeKey: `sandbox:pause:${sandbox.id}`,
+        payload: { job_type: "sandbox.pause", sandbox_id: sandbox.id },
+      })
+      .onConflictDoNothing();
+    return updated ?? sandbox;
+  });
+}
+
+export async function requestSandboxDeletion(
+  db: MetalDb,
+  input: { sandboxId: string; organizationId: string; projectId: string },
+) {
+  return withTransaction(db, async (tx) => {
+    const sandbox = await getSandbox(tx, input);
+    if (sandbox.status === "deleted" || sandbox.status === "deleting") {
+      return sandbox;
+    }
+    const [updated] = await tx
+      .update(sandboxes)
+      .set({ status: "deleting", updatedAt: new Date() })
+      .where(eq(sandboxes.id, sandbox.id))
+      .returning();
+    await tx
+      .insert(outboxJobs)
+      .values({
+        jobType: "sandbox.destroy",
+        dedupeKey: `sandbox:destroy:${sandbox.id}`,
+        payload: { job_type: "sandbox.destroy", sandbox_id: sandbox.id },
+      })
+      .onConflictDoNothing();
+    return updated ?? sandbox;
+  });
 }
 
 export { requireMembership };

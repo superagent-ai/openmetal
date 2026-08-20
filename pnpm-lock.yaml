@@ -40,13 +40,13 @@ importers:
         version: link:../../packages/logger
       '@supabase/supabase-js':
         specifier: 2.112.3
-        version: 2.112.3
+        version: 2.112.3(@opentelemetry/api@1.9.1)
       dotenv:
         specifier: 17.4.2
         version: 17.4.2
       drizzle-orm:
         specifier: 0.45.2
-        version: 0.45.2(postgres@3.4.9)
+        version: 0.45.2(@opentelemetry/api@1.9.1)(postgres@3.4.9)
       fastify:
         specifier: 5.12.1
         version: 5.12.1
@@ -80,7 +80,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 4.1.11
-        version: 4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   apps/web:
     dependencies:
@@ -101,10 +101,10 @@ importers:
         version: link:../../packages/sdk-typescript
       '@supabase/ssr':
         specifier: 0.12.4
-        version: 0.12.4(@supabase/supabase-js@2.112.3)
+        version: 0.12.4(@supabase/supabase-js@2.112.3(@opentelemetry/api@1.9.1))
       '@supabase/supabase-js':
         specifier: 2.112.3
-        version: 2.112.3
+        version: 2.112.3(@opentelemetry/api@1.9.1)
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
@@ -113,7 +113,7 @@ importers:
         version: 2.1.1
       next:
         specifier: 16.3.1
-        version: 16.3.1(@babel/core@7.29.7)(@playwright/test@1.62.1)(@types/node@24.12.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 16.3.1(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.62.1)(@types/node@24.12.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       next-themes:
         specifier: 0.4.6
         version: 0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -171,7 +171,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 4.1.11
-        version: 4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   apps/worker:
     dependencies:
@@ -184,12 +184,18 @@ importers:
       '@openmetal/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@openmetal/provider-core':
+        specifier: workspace:*
+        version: link:../../packages/provider-core
+      '@openmetal/provider-daytona':
+        specifier: workspace:*
+        version: link:../../packages/provider-daytona
       dotenv:
         specifier: 17.4.2
         version: 17.4.2
       drizzle-orm:
         specifier: 0.45.2
-        version: 0.45.2(postgres@3.4.9)
+        version: 0.45.2(@opentelemetry/api@1.9.1)(postgres@3.4.9)
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -217,7 +223,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 4.1.11
-        version: 4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/config-eslint:
     dependencies:
@@ -266,13 +272,13 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 4.1.11
-        version: 4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))
 
   packages/db:
     dependencies:
       drizzle-orm:
         specifier: 0.45.2
-        version: 0.45.2(postgres@3.4.9)
+        version: 0.45.2(@opentelemetry/api@1.9.1)(postgres@3.4.9)
       postgres:
         specifier: 3.4.9
         version: 3.4.9
@@ -297,7 +303,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 4.1.11
-        version: 4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/events:
     dependencies:
@@ -328,7 +334,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 4.1.11
-        version: 4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/logger:
     dependencies:
@@ -353,7 +359,56 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 4.1.11
-        version: 4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
+
+  packages/provider-core:
+    devDependencies:
+      '@openmetal/eslint-config':
+        specifier: workspace:*
+        version: link:../config-eslint
+      '@openmetal/typescript-config':
+        specifier: workspace:*
+        version: link:../config-typescript
+      '@types/node':
+        specifier: 24.12.0
+        version: 24.12.0
+      eslint:
+        specifier: 9.39.5
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
+
+  packages/provider-daytona:
+    dependencies:
+      '@openmetal/provider-core':
+        specifier: workspace:*
+        version: link:../provider-core
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@openmetal/eslint-config':
+        specifier: workspace:*
+        version: link:../config-eslint
+      '@openmetal/typescript-config':
+        specifier: workspace:*
+        version: link:../config-typescript
+      '@types/node':
+        specifier: 24.12.0
+        version: 24.12.0
+      eslint:
+        specifier: 9.39.5
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/sdk-typescript:
     dependencies:
@@ -381,7 +436,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 4.1.11
-        version: 4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/testkit:
     dependencies:
@@ -399,7 +454,7 @@ importers:
         version: link:../sdk-typescript
       '@supabase/supabase-js':
         specifier: 2.112.3
-        version: 2.112.3
+        version: 2.112.3(@opentelemetry/api@1.9.1)
       dotenv:
         specifier: 17.4.2
         version: 17.4.2
@@ -427,7 +482,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 4.1.11
-        version: 4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
 packages:
 
@@ -1311,6 +1366,10 @@ packages:
   '@nolyfill/is-core-module@1.0.39':
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
+
+  '@opentelemetry/api@1.9.1':
+    resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
+    engines: {node: '>=8.0.0'}
 
   '@oxc-project/types@0.144.0':
     resolution: {integrity: sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg==}
@@ -4320,6 +4379,11 @@ packages:
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
+  yaml@2.9.0:
+    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
@@ -5091,6 +5155,9 @@ snapshots:
 
   '@nolyfill/is-core-module@1.0.39': {}
 
+  '@opentelemetry/api@1.9.1':
+    optional: true
+
   '@oxc-project/types@0.144.0': {}
 
   '@pinojs/redact@0.4.0': {}
@@ -5171,9 +5238,9 @@ snapshots:
       '@supabase/phoenix': 0.4.5
       tslib: 2.8.1
 
-  '@supabase/ssr@0.12.4(@supabase/supabase-js@2.112.3)':
+  '@supabase/ssr@0.12.4(@supabase/supabase-js@2.112.3(@opentelemetry/api@1.9.1))':
     dependencies:
-      '@supabase/supabase-js': 2.112.3
+      '@supabase/supabase-js': 2.112.3(@opentelemetry/api@1.9.1)
       cookie: 1.1.1
 
   '@supabase/storage-js@2.112.3':
@@ -5181,13 +5248,15 @@ snapshots:
       iceberg-js: 0.8.1
       tslib: 2.8.1
 
-  '@supabase/supabase-js@2.112.3':
+  '@supabase/supabase-js@2.112.3(@opentelemetry/api@1.9.1)':
     dependencies:
       '@supabase/auth-js': 2.112.3
       '@supabase/functions-js': 2.112.3
       '@supabase/postgrest-js': 2.112.3
       '@supabase/realtime-js': 2.112.3
       '@supabase/storage-js': 2.112.3
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
 
   '@swc/helpers@0.5.23':
     dependencies:
@@ -5488,21 +5557,21 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.1
 
-  '@vitest/mocker@4.1.11(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0))':
+  '@vitest/mocker@4.1.11(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))':
     dependencies:
       '@vitest/spy': 4.1.11
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)
+      vite: 8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0)
 
-  '@vitest/mocker@4.1.11(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))':
+  '@vitest/mocker@4.1.11(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))':
     dependencies:
       '@vitest/spy': 4.1.11
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)
+      vite: 8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0)
 
   '@vitest/pretty-format@4.1.11':
     dependencies:
@@ -5906,8 +5975,9 @@ snapshots:
 
   dotenv@17.4.2: {}
 
-  drizzle-orm@0.45.2(postgres@3.4.9):
+  drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(postgres@3.4.9):
     optionalDependencies:
+      '@opentelemetry/api': 1.9.1
       postgres: 3.4.9
 
   dunder-proto@1.0.1:
@@ -7126,7 +7196,7 @@ snapshots:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
-  next@16.3.1(@babel/core@7.29.7)(@playwright/test@1.62.1)(@types/node@24.12.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  next@16.3.1(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.62.1)(@types/node@24.12.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       '@next/env': 16.3.1
       '@swc/helpers': 0.5.23
@@ -7145,6 +7215,7 @@ snapshots:
       '@next/swc-linux-x64-musl': 16.3.1
       '@next/swc-win32-arm64-msvc': 16.3.1
       '@next/swc-win32-x64-msvc': 16.3.1
+      '@opentelemetry/api': 1.9.1
       '@playwright/test': 1.62.1
       sharp: 0.35.3(@types/node@24.12.0)
     transitivePeerDependencies:
@@ -8074,7 +8145,7 @@ snapshots:
 
   vary@1.1.2: {}
 
-  vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0):
+  vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.5
@@ -8087,8 +8158,9 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.7.0
       tsx: 4.21.0
+      yaml: 2.9.0
 
-  vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12):
+  vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.5
@@ -8101,11 +8173,12 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.7.0
       tsx: 4.23.12
+      yaml: 2.9.0
 
-  vitest@4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)):
+  vitest@4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.11
-      '@vitest/mocker': 4.1.11(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0))
+      '@vitest/mocker': 4.1.11(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))
       '@vitest/pretty-format': 4.1.11
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -8122,17 +8195,18 @@ snapshots:
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)
+      vite: 8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
+      '@opentelemetry/api': 1.9.1
       '@types/node': 24.12.0
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.11(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)):
+  vitest@4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.11
-      '@vitest/mocker': 4.1.11(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+      '@vitest/mocker': 4.1.11(vite@8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
       '@vitest/pretty-format': 4.1.11
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -8149,9 +8223,10 @@ snapshots:
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)
+      vite: 8.2.1(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
+      '@opentelemetry/api': 1.9.1
       '@types/node': 24.12.0
     transitivePeerDependencies:
       - msw
@@ -8220,6 +8295,9 @@ snapshots:
       powershell-utils: 0.1.0
 
   yallist@3.1.1: {}
+
+  yaml@2.9.0:
+    optional: true
 
   yocto-queue@0.1.0: {}
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProjectApiKeySchema, SandboxSchema } from "@openmetal/contracts";
 import { MetalError } from "./error.js";
 
 export type AccessTokenProvider = () =>
@@ -201,6 +202,92 @@ export class MetalClient {
           id: z.string(),
           deleted: z.literal(true),
         }),
+      }),
+  };
+
+  readonly apiKeys = {
+    create: (
+      projectId: string,
+      input: {
+        name: string;
+        expires_in?: "1h" | "1d" | "7d" | "30d" | "90d" | "180d" | "1y" | null;
+      },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/projects/${projectId}/api-keys`,
+        body: input,
+        schema: z.object({
+          api_key: ProjectApiKeySchema,
+          key: z.string().startsWith("metal_sk_"),
+        }),
+      }),
+    list: (projectId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/projects/${projectId}/api-keys`,
+        schema: z.object({ api_keys: z.array(ProjectApiKeySchema) }),
+      }),
+    revoke: (projectId: string, apiKeyId: string) =>
+      this.request({
+        method: "POST",
+        path: `/v1/projects/${projectId}/api-keys/${apiKeyId}/revoke`,
+        schema: ProjectApiKeySchema,
+      }),
+    delete: (projectId: string, apiKeyId: string) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/projects/${projectId}/api-keys/${apiKeyId}`,
+        schema: z.object({ id: z.string(), deleted: z.literal(true) }),
+      }),
+  };
+
+  readonly sandboxes = {
+    list: (projectId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/projects/${projectId}/sandboxes`,
+        schema: z.object({ sandboxes: z.array(SandboxSchema) }),
+      }),
+    pause: (projectId: string, sandboxId: string) =>
+      this.request({
+        method: "POST",
+        path: `/v1/projects/${projectId}/sandboxes/${sandboxId}/pause`,
+        schema: SandboxSchema,
+      }),
+    deleteFromProject: (projectId: string, sandboxId: string) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/projects/${projectId}/sandboxes/${sandboxId}`,
+        schema: SandboxSchema,
+      }),
+    create: (
+      input: {
+        project_id?: string;
+        image?: string;
+        language?: string;
+        ttl_minutes?: number;
+      } = {},
+      options?: { idempotencyKey?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: "/v1/sandboxes",
+        body: input,
+        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        schema: SandboxSchema,
+      }),
+    get: (sandboxId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/sandboxes/${sandboxId}`,
+        schema: SandboxSchema,
+      }),
+    delete: (sandboxId: string) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/sandboxes/${sandboxId}`,
+        schema: SandboxSchema,
       }),
   };
 

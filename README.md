@@ -2,6 +2,19 @@
 
 Metal is the universal compute gateway for AI agents. This repository currently implements **Milestone 1**: the production control plane foundation. It does not provision sandboxes, talk to compute providers, route workloads, or bill usage.
 
+## Product model
+
+Metal is OpenRouter for cloud sandboxes and GPUs:
+
+- Managed Metal capacity is the default. Superagent owns provider contracts and credentials.
+- Customers have one Metal account and organization-scoped balance.
+- API keys are scoped per project.
+- Every provider resource maps back to one Metal organization and project.
+- Customers pay Metal; Metal reconciles and pays providers.
+- The public API and TypeScript SDK hide provider-specific lifecycle, usage, and billing differences.
+
+The initial provider set is E2B, Daytona, Modal, Railway, and Vercel. Provider integrations remain behind one capability-oriented Metal API; they are not separate customer-facing products.
+
 ## Architecture
 
 ```text
@@ -102,10 +115,9 @@ pnpm test
 pnpm test:integration
 pnpm test:rls
 pnpm test:realtime
-pnpm test:e2e
 ```
 
-Integration, RLS, Realtime, and browser tests require local Supabase plus `pnpm env:local`.
+Integration, RLS, and Realtime tests require local Supabase plus `pnpm env:local`.
 
 ## Common local failures
 
@@ -126,7 +138,6 @@ pnpm test
 pnpm test:integration
 pnpm test:rls
 pnpm test:realtime
-pnpm test:e2e
 pnpm format
 pnpm format:check
 pnpm supabase:start

@@ -2,12 +2,13 @@ import { type EmailOtpType } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
+import { safeInternalPath } from "@/lib/safe-redirect";
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const tokenHash = searchParams.get("token_hash");
   const requestedType = searchParams.get("type") as EmailOtpType | null;
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = safeInternalPath(searchParams.get("next"), "/dashboard");
   const redirectTo = NextResponse.redirect(new URL(next, origin));
   const failed = NextResponse.redirect(new URL("/login?error=Confirmation%20failed", origin));
 

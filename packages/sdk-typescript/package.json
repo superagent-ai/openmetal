@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --exclude 'test/**/*.integration.test.ts'",
-    "test:integration": "vitest run --exclude 'test/**/*.integration.test.ts'"
+    "test:integration": "vitest run test/client.integration.test.ts"
   },
   "dependencies": {
     "@openmetal/contracts": "workspace:*",
@@ -24,7 +24,7 @@
     "@openmetal/eslint-config": "workspace:*",
     "@openmetal/typescript-config": "workspace:*",
     "@types/node": "24.12.0",
-    "eslint": "10.8.1",
+    "eslint": "9.39.5",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
   }

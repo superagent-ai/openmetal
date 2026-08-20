@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDatabase } from "@openmetal/db";
+import { claimOutboxJobs, createDatabase } from "@openmetal/db";
 import { serializeCursor } from "@openmetal/events";
 import { createConfirmedUser, deleteUser, loadTestEnv } from "@openmetal/testkit";
 import { processOnce } from "../src/processor.js";
@@ -114,7 +114,7 @@ describe("worker outbox", () => {
     const failingPublisher = {
       publish: async () => {
         attempts += 1;
-        throw new Error("transient");
+        throw new Error("Bearer secret-token");
       },
     };
     await processUntilJob(
@@ -125,10 +125,11 @@ describe("worker outbox", () => {
     );
     expect(attempts).toBeGreaterThanOrEqual(1);
     const afterFail = await database.sql`
-      select status, attempt_count from metal.outbox_jobs where id = ${jobId}
+      select status, attempt_count, last_error from metal.outbox_jobs where id = ${jobId}
     `;
     expect(Number(afterFail[0]?.attempt_count)).toBeGreaterThanOrEqual(1);
     expect(afterFail[0]?.status).toBe("pending");
+    expect(afterFail[0]?.last_error).toBe("[REDACTED]");
 
     await processUntilJob(
       jobId,
@@ -137,9 +138,15 @@ describe("worker outbox", () => {
         ...workerEnv,
         WORKER_MAX_ATTEMPTS: 1,
       },
-      (row) => row.status === "failed" || Number(row.attempt_count) >= 2,
+      (row) => row.status === "failed",
     );
     expect(attempts).toBeGreaterThanOrEqual(2);
+    const terminal = await database.sql`
+      select status, attempt_count, last_error from metal.outbox_jobs where id = ${jobId}
+    `;
+    expect(terminal[0]?.status).toBe("failed");
+    expect(Number(terminal[0]?.attempt_count)).toBeGreaterThanOrEqual(2);
+    expect(terminal[0]?.last_error).toBe("[REDACTED]");
 
     let published = 0;
     const okPublisher = {
@@ -156,6 +163,14 @@ describe("worker outbox", () => {
     `;
     await processUntilJob(jobId, okPublisher, workerEnv, (row) => row.status === "succeeded");
     expect(published).toBe(1);
+
+    await database.sql`
+      update metal.outbox_jobs
+      set status = 'pending', available_at = now(), completed_at = null
+      where id = ${jobId}
+    `;
+    await processUntilJob(jobId, okPublisher, workerEnv, (row) => row.status === "succeeded");
+    expect(published).toBe(2);
 
     const events = await database.sql`
       select count(*)::int as count from metal.domain_events where event_id = ${eventId}
@@ -185,17 +200,12 @@ describe("worker outbox", () => {
       },
     };
     const [job] = await database.sql`
-      insert into metal.outbox_jobs (
-        job_type, dedupe_key, payload, status, lease_owner, lease_expires_at, attempt_count
-      )
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
       values (
         'realtime.broadcast',
         ${`broadcast:${eventId}`},
         ${JSON.stringify(payload)}::jsonb,
-        'leased',
-        'dead-worker',
-        now() - interval '1 second',
-        1
+        'pending'
       )
       returning id
     `;
@@ -204,6 +214,17 @@ describe("worker outbox", () => {
       throw new Error("outbox job insert did not return an id");
     }
     const jobId = String(job.id);
+    const claimed = await claimOutboxJobs(database.db, {
+      workerId: "dead-worker",
+      limit: 100,
+      leaseMs: 10,
+    });
+    expect(claimed.some((candidate) => candidate.id === jobId)).toBe(true);
+    const [leased] = await database.sql`
+      select status, lease_owner from metal.outbox_jobs where id = ${jobId}
+    `;
+    expect(leased).toMatchObject({ status: "leased", lease_owner: "dead-worker" });
+    await new Promise((resolve) => setTimeout(resolve, 25));
 
     const workerEnv = loadWorkerEnv({
       ...process.env,
@@ -235,5 +256,76 @@ describe("worker outbox", () => {
     expect(published).toBe(1);
     const row = await database.sql`select status from metal.outbox_jobs where id = ${jobId}`;
     expect(row[0]?.status).toBe("succeeded");
+  });
+
+  it("does not let a stale worker overwrite a reclaimed lease", async () => {
+    const organizationId = crypto.randomUUID();
+    const eventId = crypto.randomUUID();
+    const payload = {
+      job_type: "realtime.broadcast",
+      topic: `organization:${organizationId}`,
+      event: {
+        cursor: serializeCursor(3),
+        event_id: eventId,
+        type: "organization.created",
+        organization_id: organizationId,
+        occurred_at: new Date().toISOString(),
+        data: {},
+      },
+    };
+    const [job] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'realtime.broadcast',
+        ${`broadcast:${eventId}`},
+        ${JSON.stringify(payload)}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    expect(job?.id).toBeTruthy();
+    if (!job) {
+      throw new Error("outbox job insert did not return an id");
+    }
+    const jobId = String(job.id);
+    const workerEnv = loadWorkerEnv({
+      ...process.env,
+      DATABASE_URL: env.DATABASE_URL,
+      SUPABASE_URL: env.SUPABASE_URL,
+      SUPABASE_SECRET_KEY: env.SUPABASE_SECRET_KEY,
+      WORKER_ID: "stale-worker",
+      WORKER_LEASE_MS: "5000",
+      WORKER_POLL_MS: "50",
+      WORKER_BATCH_SIZE: "50",
+      WORKER_MAX_ATTEMPTS: "8",
+      WORKER_BASE_BACKOFF_MS: "10",
+      LOG_LEVEL: "silent",
+      METAL_ENVIRONMENT: "test",
+    });
+
+    await processOnce(
+      database.db,
+      {
+        publish: async () => {
+          await database.sql`
+            update metal.outbox_jobs
+            set lease_owner = 'successor-worker', lease_expires_at = now() + interval '5 seconds'
+            where id = ${jobId}
+          `;
+        },
+      },
+      workerEnv,
+    );
+
+    const [row] = await database.sql`
+      select status, lease_owner, completed_at
+      from metal.outbox_jobs
+      where id = ${jobId}
+    `;
+    expect(row).toMatchObject({
+      status: "leased",
+      lease_owner: "successor-worker",
+      completed_at: null,
+    });
   });
 });

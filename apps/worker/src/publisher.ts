@@ -29,13 +29,20 @@ export function createRealtimePublisher(input: {
         signal: AbortSignal.timeout(8_000),
       });
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`realtime publish failed (${response.status}): ${text.slice(0, 300)}`);
+        throw new Error(`realtime publish failed (${response.status})`);
       }
     },
   };
 }
 
 export function parseJobPayload(payload: unknown) {
-  return validateOutboxPayload(payload);
+  const parsed = validateOutboxPayload(payload);
+  const topic = parseTopic(parsed.topic);
+  if (topic.kind === "project" && parsed.event.project_id !== topic.id) {
+    throw new Error("outbox project topic does not match event");
+  }
+  if (topic.kind === "organization" && parsed.event.organization_id !== topic.id) {
+    throw new Error("outbox organization topic does not match event");
+  }
+  return parsed;
 }

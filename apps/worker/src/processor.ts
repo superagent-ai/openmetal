@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { claimOutboxJobs, outboxJobs, type MetalDb } from "@openmetal/db";
-import { createLogger } from "@openmetal/logger";
+import { createLogger, redactString } from "@openmetal/logger";
 import type { WorkerEnv } from "./env.js";
 import { parseJobPayload, type BroadcastPublisher } from "./publisher.js";
 
@@ -11,7 +11,7 @@ function backoffMs(attempt: number, base: number): number {
 
 function safeError(error: unknown): string {
   if (error instanceof Error) {
-    return error.message.slice(0, 500);
+    return redactString(error.message.slice(0, 500));
   }
   return "unknown error";
 }
@@ -50,7 +50,13 @@ export async function processOnce(
           lastError: null,
           leaseOwner: env.WORKER_ID,
         })
-        .where(eq(outboxJobs.id, job.id));
+        .where(
+          and(
+            eq(outboxJobs.id, job.id),
+            eq(outboxJobs.status, "leased"),
+            eq(outboxJobs.leaseOwner, env.WORKER_ID),
+          ),
+        );
       child.info({ job_id: job.id, event_id: payload.event.event_id }, "published event");
     } catch (error) {
       const attempts = job.attemptCount;
@@ -68,7 +74,13 @@ export async function processOnce(
           updatedAt: new Date(),
           completedAt: terminal ? new Date() : null,
         })
-        .where(eq(outboxJobs.id, job.id));
+        .where(
+          and(
+            eq(outboxJobs.id, job.id),
+            eq(outboxJobs.status, "leased"),
+            eq(outboxJobs.leaseOwner, env.WORKER_ID),
+          ),
+        );
       child.warn(
         { job_id: job.id, attempt: attempts, terminal, err: safeError(error) },
         "publish failed",

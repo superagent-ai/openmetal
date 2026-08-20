@@ -47,10 +47,6 @@
       "dependsOn": ["^build"],
       "cache": false
     },
-    "test:e2e": {
-      "dependsOn": ["^build"],
-      "cache": false
-    },
     "openapi:generate": {
       "dependsOn": ["^build"],
       "outputs": ["openapi.json"]

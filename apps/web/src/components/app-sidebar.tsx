@@ -5,17 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   Add01Icon,
-  Analytics01Icon,
-  CreditCardIcon,
   Delete02Icon,
   Folder01Icon,
   Home01Icon,
-  Key01Icon,
   MoreHorizontalIcon,
   PencilEdit01Icon,
   Settings04Icon,
   Tick02Icon,
-  WebhookIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { selectOrganization } from "@/app/dashboard/actions";
@@ -123,24 +119,14 @@ export function AppSidebar({
     organizations.find((organization) => organization.slug === routeSlug) ??
     organizations.find((organization) => organization.id === preferredOrganizationId) ??
     organizations[0];
-  const dashboardSections = [
-    "api-keys",
-    "billing",
-    "projects",
-    "settings",
-    "usage",
-    "webhooks",
-  ] as const;
   const currentSection = pathname.includes("/projects")
     ? "projects"
-    : dashboardSections.find((section) => pathname.endsWith(`/${section}`));
+    : pathname.endsWith("/settings")
+      ? "settings"
+      : undefined;
   const basePath = activeOrganization ? `/dashboard/${activeOrganization.slug}` : "/dashboard";
   const navItems = [
     { title: "Home", url: basePath, icon: Home01Icon },
-    { title: "API keys", url: `${basePath}/api-keys`, icon: Key01Icon },
-    { title: "Billing", url: `${basePath}/billing`, icon: CreditCardIcon },
-    { title: "Usage", url: `${basePath}/usage`, icon: Analytics01Icon },
-    { title: "Webhooks", url: `${basePath}/webhooks`, icon: WebhookIcon },
     { title: "Settings", url: `${basePath}/settings`, icon: Settings04Icon },
   ];
   const projects =
@@ -381,7 +367,7 @@ export function AppSidebar({
           <SidebarGroup>
             <SidebarGroupLabel>Projects</SidebarGroupLabel>
             <SidebarGroupContent>
-            <SidebarMenu>
+              <SidebarMenu>
                 {projectsLoading ? (
                   <>
                     <SidebarMenuItem>

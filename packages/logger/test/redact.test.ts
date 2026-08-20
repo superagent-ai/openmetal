@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { Writable } from "node:stream";
+import { createLogger } from "../src/logger.js";
 import { REDACTED, redactRecord, redactString } from "../src/redact.js";
 
 describe("logger redaction", () => {
@@ -6,6 +8,7 @@ describe("logger redaction", () => {
     expect(redactRecord({ authorization: "Bearer secret-token" })).toEqual({
       authorization: REDACTED,
     });
+    expect(redactString("request failed with Bearer secret-token")).toBe(REDACTED);
   });
 
   it("redacts cookies", () => {
@@ -66,5 +69,42 @@ describe("logger redaction", () => {
       path: "/v1/organizations",
       status_code: 201,
     });
+  });
+
+  it("redacts representative secrets in emitted structured logs", () => {
+    const output: string[] = [];
+    const destination = new Writable({
+      write(chunk, _encoding, callback) {
+        output.push(String(chunk));
+        callback();
+      },
+    });
+    const logger = createLogger({
+      service: "validation",
+      level: "info",
+      destination,
+    });
+    logger.error({
+      headers: {
+        authorization: "Bearer secret-token",
+        cookie: "session=secret-cookie",
+      },
+      DATABASE_URL: "postgresql://user:password@localhost/database",
+      url: "https://storage.example/file?token=signed-secret",
+      path: "/v1/events?token=query-secret",
+      job: {
+        payload: {
+          api_key: "sk-abcdefghijklmnopqrstuvwxyz123456",
+        },
+      },
+      request_id: "req_safe",
+    });
+
+    const serialized = output.join("");
+    expect(serialized).toContain("req_safe");
+    expect(serialized).toContain(REDACTED);
+    expect(serialized).not.toMatch(
+      /secret-token|secret-cookie|user:password|signed-secret|query-secret|sk-abcdefghijklmnopqrstuvwxyz123456/,
+    );
   });
 });

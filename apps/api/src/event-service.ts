@@ -1,6 +1,6 @@
 import { and, desc, eq, gt } from "drizzle-orm";
 import { domainEvents, type MetalDb } from "@openmetal/db";
-import { parseCursor, serializeCursor, toPublicEvent } from "@openmetal/events";
+import { CursorError, parseCursor, serializeCursor, toPublicEvent } from "@openmetal/events";
 import { getProject } from "./services.js";
 
 export async function listProjectEvents(
@@ -9,6 +9,16 @@ export async function listProjectEvents(
 ) {
   const project = await getProject(db, input.userId, input.projectId);
   const after = input.after ? parseCursor(input.after) : 0n;
+  if (input.after) {
+    const cursorEvent = await db
+      .select({ projectId: domainEvents.projectId })
+      .from(domainEvents)
+      .where(eq(domainEvents.cursor, after))
+      .then((rows) => rows[0]);
+    if (!cursorEvent || cursorEvent.projectId !== project.id) {
+      throw new CursorError("cursor does not belong to project");
+    }
+  }
   const rows = await db
     .select()
     .from(domainEvents)

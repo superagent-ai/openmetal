@@ -12,7 +12,7 @@ At the end of the plan, a private-beta customer can:
 2. Fund or receive a controlled credit balance.
 3. Use one Metal API key and TypeScript SDK.
 4. Request a CPU Linux sandbox by capability.
-5. Let Metal choose among E2B, Daytona, and Modal.
+5. Let Metal choose among E2B, Daytona, Modal, Railway, and Vercel.
 6. Run commands, stream output, transfer files, and expose an HTTP port.
 7. Receive automatic fallback when provisioning fails safely.
 8. Inspect routing, usage, costs, and audit history.
@@ -263,7 +263,7 @@ Given a fixed catalog and observation dataset, Metal can reproduce and explain e
 
 ---
 
-## Milestone 5: Modal adapter and provisioning fallback
+## Milestone 5: Remaining initial adapters and provisioning fallback
 
 ### Objective
 
@@ -271,8 +271,8 @@ Add a third provider and safely rescue failed creation requests.
 
 ### Deliverables
 
-- Modal adapter passing the shared conformance suite
-- Modal live tests matching Milestone 2 where capabilities permit
+- Modal, Railway, and Vercel adapters passing the shared conformance suite
+- Live tests matching Milestone 2 where capabilities permit
 - Ordered fallback plan generated from eligible ranked candidates
 - Per-attempt deadlines and overall request deadline
 - Attempt and cleanup records for every provider contacted
@@ -282,7 +282,7 @@ Add a third provider and safely rescue failed creation requests.
 
 ### Required verification
 
-- Same portable program runs on E2B, Daytona, and Modal
+- Same portable program runs on E2B, Daytona, Modal, Railway, and Vercel
 - Forced first-provider capacity failure falls back and succeeds on the next eligible provider
 - Timeout with unknown provider outcome triggers reconciliation before any unsafe duplicate action
 - Overall deadline caps the full fallback sequence
@@ -353,7 +353,7 @@ Make the complete routed sandbox lifecycle easy to adopt and inspect.
 
 - Published-package dry run installs into an empty example application
 - Examples compile and run against the fake environment in CI
-- One example runs unchanged across all three live providers through routing
+- One example runs unchanged across all five live providers through routing
 - SDK reconnect behavior does not duplicate command execution
 - Dashboard tenant-isolation and sensitive-data tests pass
 - Accessibility and basic responsive-layout checks pass

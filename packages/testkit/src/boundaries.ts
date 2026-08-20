@@ -33,7 +33,7 @@ function collectTsFiles(dir: string): string[] {
   const entries = readdirSync(dir);
   const files: string[] = [];
   for (const entry of entries) {
-    if (entry === "node_modules" || entry === ".next" || entry === "e2e") continue;
+    if (entry === "node_modules" || entry === ".next") continue;
     const full = join(dir, entry);
     const stat = statSync(full);
     if (stat.isDirectory()) {

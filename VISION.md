@@ -117,7 +117,7 @@ Every routing decision must be explainable. Internally, and eventually to custom
 
 An SDK that maps several provider APIs into common method names is useful but insufficient. Metal's core value is hosted coordination:
 
-- One Metal API key
+- One Metal API surface, with keys scoped to projects
 - One prepaid balance or contract
 - Normalized, auditable usage
 - Current price and capability discovery
@@ -128,6 +128,11 @@ An SDK that maps several provider APIs into common method names is useful but in
 - Optional bring-your-own-provider credentials for enterprise customers
 
 Managed billing is the default product. BYOK is an escape hatch, not the primary experience.
+
+Managed capacity is also the default operating model. Metal maintains provider contracts and
+credentials, provisions resources under Superagent-managed capacity, tags every resource to its
+Metal organization and project, charges the customer through Metal, and reconciles upstream
+provider invoices.
 
 ## Trust, security, and isolation
 
@@ -209,7 +214,7 @@ The MVP integrates existing providers. Metal does not operate its own sandbox fl
 The MVP includes:
 
 - TypeScript SDK and HTTPS API
-- E2B, Daytona, and Modal adapters
+- E2B, Daytona, Modal, Railway, and Vercel adapters
 - CPU Linux sandboxes
 - Lifecycle, command streaming, filesystem operations, environment/secrets, and HTTP port exposure
 - Capability and normalized price catalog

@@ -21,16 +21,22 @@ const publisher = createRealtimePublisher({
   secretKey: env.SUPABASE_SECRET_KEY,
 });
 const abort = new AbortController();
+logger.info({ worker_id: env.WORKER_ID }, "worker started");
+const loop = runWorkerLoop(database.db, publisher, env, abort.signal);
+let shutdownPromise: Promise<void> | undefined;
 
 const shutdown = async (signal: string) => {
-  logger.info({ signal }, "shutting down worker");
-  abort.abort();
-  await database.shutdown();
-  process.exit(0);
+  shutdownPromise ??= (async () => {
+    logger.info({ signal }, "shutting down worker");
+    abort.abort();
+    await loop;
+    await database.shutdown();
+    process.exitCode = 0;
+  })();
+  await shutdownPromise;
 };
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
-logger.info({ worker_id: env.WORKER_ID }, "worker started");
-await runWorkerLoop(database.db, publisher, env, abort.signal);
+await loop;

@@ -44,6 +44,36 @@ async function requireMembership(
   return membership;
 }
 
+async function requireProjectAccess(
+  db: Tx,
+  userId: string,
+  projectId: string,
+  roles?: Array<"owner" | "admin" | "member">,
+) {
+  const row = await db
+    .select({
+      project: projects,
+      role: organizationMembers.role,
+    })
+    .from(projects)
+    .innerJoin(
+      organizationMembers,
+      and(
+        eq(organizationMembers.organizationId, projects.organizationId),
+        eq(organizationMembers.userId, userId),
+      ),
+    )
+    .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+    .then((rows) => rows[0]);
+  if (!row) {
+    throw new ApiError(404, "not_found", "project not found");
+  }
+  if (roles && !roles.includes(row.role)) {
+    throw new ApiError(403, "forbidden", "insufficient organization role");
+  }
+  return row.project;
+}
+
 async function insertEventAndOutbox(
   tx: Tx,
   input: {
@@ -90,31 +120,29 @@ async function insertEventAndOutbox(
 }
 
 export async function createOrganization(
-  db: MetalDb,
+  tx: MetalDb,
   input: { userId: string; name: string; slug: string },
 ) {
-  return withTransaction(db, async (tx) => {
-    const [organization] = await tx
-      .insert(organizations)
-      .values({ name: input.name, slug: input.slug })
-      .returning();
-    if (!organization) {
-      throw new ApiError(500, "internal_error", "failed to create organization");
-    }
-    await tx.insert(organizationMembers).values({
-      organizationId: organization.id,
-      userId: input.userId,
-      role: "owner",
-    });
-    await insertEventAndOutbox(tx, {
-      type: "organization.created",
-      organizationId: organization.id,
-      actorId: input.userId,
-      data: { name: organization.name, slug: organization.slug },
-      topic: organizationTopic(organization.id),
-    });
-    return organization;
+  const [organization] = await tx
+    .insert(organizations)
+    .values({ name: input.name, slug: input.slug })
+    .returning();
+  if (!organization) {
+    throw new ApiError(500, "internal_error", "failed to create organization");
+  }
+  await tx.insert(organizationMembers).values({
+    organizationId: organization.id,
+    userId: input.userId,
+    role: "owner",
   });
+  await insertEventAndOutbox(tx, {
+    type: "organization.created",
+    organizationId: organization.id,
+    actorId: input.userId,
+    data: { name: organization.name, slug: organization.slug },
+    topic: organizationTopic(organization.id),
+  });
+  return organization;
 }
 
 export async function listOrganizations(db: MetalDb, userId: string) {
@@ -146,32 +174,30 @@ export async function getOrganization(db: MetalDb, userId: string, organizationI
 }
 
 export async function createProject(
-  db: MetalDb,
+  tx: MetalDb,
   input: { userId: string; organizationId: string; name: string; slug: string },
 ) {
-  return withTransaction(db, async (tx) => {
-    await requireMembership(tx, input.userId, input.organizationId, ["owner", "admin"]);
-    const [project] = await tx
-      .insert(projects)
-      .values({
-        organizationId: input.organizationId,
-        name: input.name,
-        slug: input.slug,
-      })
-      .returning();
-    if (!project) {
-      throw new ApiError(500, "internal_error", "failed to create project");
-    }
-    await insertEventAndOutbox(tx, {
-      type: "project.created",
+  await requireMembership(tx, input.userId, input.organizationId, ["owner", "admin"]);
+  const [project] = await tx
+    .insert(projects)
+    .values({
       organizationId: input.organizationId,
-      projectId: project.id,
-      actorId: input.userId,
-      data: { name: project.name, slug: project.slug },
-      topic: projectTopic(project.id),
-    });
-    return project;
+      name: input.name,
+      slug: input.slug,
+    })
+    .returning();
+  if (!project) {
+    throw new ApiError(500, "internal_error", "failed to create project");
+  }
+  await insertEventAndOutbox(tx, {
+    type: "project.created",
+    organizationId: input.organizationId,
+    projectId: project.id,
+    actorId: input.userId,
+    data: { name: project.name, slug: project.slug },
+    topic: projectTopic(project.id),
   });
+  return project;
 }
 
 export async function updateProject(
@@ -179,16 +205,7 @@ export async function updateProject(
   input: { userId: string; projectId: string; name: string; slug: string },
 ) {
   return withTransaction(db, async (tx) => {
-    const existing = await tx
-      .select()
-      .from(projects)
-      .where(and(eq(projects.id, input.projectId), isNull(projects.deletedAt)))
-      .then((rows) => rows[0]);
-    if (!existing) {
-      throw new ApiError(404, "not_found", "project not found");
-    }
-
-    await requireMembership(tx, input.userId, existing.organizationId, ["owner", "admin"]);
+    await requireProjectAccess(tx, input.userId, input.projectId, ["owner", "admin"]);
     const [project] = await tx
       .update(projects)
       .set({
@@ -216,16 +233,7 @@ export async function updateProject(
 
 export async function deleteProject(db: MetalDb, input: { userId: string; projectId: string }) {
   return withTransaction(db, async (tx) => {
-    const existing = await tx
-      .select()
-      .from(projects)
-      .where(and(eq(projects.id, input.projectId), isNull(projects.deletedAt)))
-      .then((rows) => rows[0]);
-    if (!existing) {
-      throw new ApiError(404, "not_found", "project not found");
-    }
-
-    await requireMembership(tx, input.userId, existing.organizationId, ["owner", "admin"]);
+    await requireProjectAccess(tx, input.userId, input.projectId, ["owner", "admin"]);
     const now = new Date();
     const [project] = await tx
       .update(projects)
@@ -257,16 +265,7 @@ export async function listProjects(db: MetalDb, userId: string, organizationId: 
 }
 
 export async function getProject(db: MetalDb, userId: string, projectId: string) {
-  const project = await db
-    .select()
-    .from(projects)
-    .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
-    .then((rows) => rows[0]);
-  if (!project) {
-    throw new ApiError(404, "not_found", "project not found");
-  }
-  await requireMembership(db, userId, project.organizationId);
-  return project;
+  return requireProjectAccess(db, userId, projectId);
 }
 
 export { requireMembership };

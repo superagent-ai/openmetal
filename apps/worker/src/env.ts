@@ -1,0 +1,32 @@
+import { z } from "zod";
+
+export const WorkerEnvSchema = z.object({
+  DATABASE_URL: z.string().min(1),
+  SUPABASE_URL: z.string().url(),
+  SUPABASE_SECRET_KEY: z.string().min(1),
+  LOG_LEVEL: z.string().default("info"),
+  METAL_ENVIRONMENT: z.string().default("development"),
+  WORKER_ID: z.string().min(1),
+  WORKER_LEASE_MS: z.coerce.number().int().min(1000).default(30_000),
+  WORKER_POLL_MS: z.coerce.number().int().min(50).default(250),
+  WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(10),
+  WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(8),
+  WORKER_BASE_BACKOFF_MS: z.coerce.number().int().min(1).default(200),
+});
+export type WorkerEnv = z.infer<typeof WorkerEnvSchema>;
+
+export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEnv {
+  return WorkerEnvSchema.parse({
+    DATABASE_URL: source.DATABASE_URL,
+    SUPABASE_URL: source.SUPABASE_URL,
+    SUPABASE_SECRET_KEY: source.SUPABASE_SECRET_KEY,
+    LOG_LEVEL: source.LOG_LEVEL,
+    METAL_ENVIRONMENT: source.METAL_ENVIRONMENT,
+    WORKER_ID: source.WORKER_ID,
+    WORKER_LEASE_MS: source.WORKER_LEASE_MS,
+    WORKER_POLL_MS: source.WORKER_POLL_MS,
+    WORKER_BATCH_SIZE: source.WORKER_BATCH_SIZE,
+    WORKER_MAX_ATTEMPTS: source.WORKER_MAX_ATTEMPTS,
+    WORKER_BASE_BACKOFF_MS: source.WORKER_BASE_BACKOFF_MS,
+  });
+}

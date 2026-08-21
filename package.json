@@ -22,10 +22,15 @@
     "supabase:reset": "supabase db reset --local",
     "db:types": "supabase gen types --local --lang typescript --schema public --schema metal > packages/db/src/database.types.ts",
     "openapi:generate": "pnpm --filter @openmetal/contracts openapi:generate",
-    "env:local": "node scripts/write-local-env.mjs"
+    "env:local": "node scripts/write-local-env.mjs",
+    "prepare": "simple-git-hooks"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm format:check && pnpm lint"
   },
   "devDependencies": {
     "prettier": "3.9.6",
+    "simple-git-hooks": "^2.13.1",
     "turbo": "2.10.11",
     "typescript": "5.9.3"
   }

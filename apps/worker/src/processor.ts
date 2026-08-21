@@ -131,6 +131,7 @@ async function provisionSandbox(db: MetalDb, provider: SandboxProvider, sandboxI
         status: "ready",
         providerResourceId: remote.providerResourceId,
         providerOrganizationId: remote.providerOrganizationId,
+        providerMetadata: remote.providerMetadata ?? {},
         readyAt: new Date(),
         updatedAt: new Date(),
         errorCode: null,
@@ -161,7 +162,13 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
   await withTransaction(db, async (tx) => {
     const [updated] = await tx
       .update(sandboxes)
-      .set({ status: "deleted", deletedAt: new Date(), updatedAt: new Date() })
+      .set({
+        status: "deleted",
+        errorCode: null,
+        errorMessage: null,
+        deletedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(sandboxes.id, sandbox.id))
       .returning();
     if (updated) {
@@ -169,7 +176,8 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
         provider: provider.name,
       });
       if (provider.capabilities.cost) {
-        await scheduleCostSync(tx, updated.id, new Date(Date.now() + 120_000), true);
+        const delayMs = provider.name === "e2b" ? 2_000 : 120_000;
+        await scheduleCostSync(tx, updated.id, new Date(Date.now() + delayMs), true);
       }
     }
   });
@@ -191,7 +199,13 @@ async function pauseSandbox(db: MetalDb, provider: SandboxProvider, sandboxId: s
   await withTransaction(db, async (tx) => {
     const [updated] = await tx
       .update(sandboxes)
-      .set({ status: "paused", pausedAt: new Date(), updatedAt: new Date() })
+      .set({
+        status: "paused",
+        errorCode: null,
+        errorMessage: null,
+        pausedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(sandboxes.id, sandbox.id))
       .returning();
     if (updated) {
@@ -223,8 +237,9 @@ async function syncSandboxCost(
   const cost = await provider.getCost({
     providerResourceId: sandbox.providerResourceId,
     providerOrganizationId: sandbox.providerOrganizationId ?? undefined,
-    from: sandbox.createdAt,
-    to: measuredAt,
+    providerMetadata: sandbox.providerMetadata,
+    from: sandbox.readyAt ?? sandbox.createdAt,
+    to: sandbox.deletedAt ?? sandbox.pausedAt ?? measuredAt,
   });
   if (!cost && final) {
     throw new Error("final provider cost is not available yet");

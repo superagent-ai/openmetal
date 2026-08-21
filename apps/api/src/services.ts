@@ -280,7 +280,7 @@ export async function createSandbox(
     organizationId: string;
     projectId: string;
     actorId: string;
-    provider: "daytona" | "modal";
+    provider: "daytona" | "e2b" | "modal";
     image?: string;
     language: string;
     ttlMinutes: number;
@@ -356,7 +356,7 @@ export async function requestSandboxPause(
     if (sandbox.status === "paused" || sandbox.status === "pausing") {
       return sandbox;
     }
-    if (sandbox.provider !== "daytona") {
+    if (sandbox.provider === "modal") {
       throw new ApiError(
         409,
         "unsupported_operation",
@@ -404,7 +404,19 @@ export async function requestSandboxDeletion(
         dedupeKey: `sandbox:destroy:${sandbox.id}`,
         payload: { job_type: "sandbox.destroy", sandbox_id: sandbox.id },
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: outboxJobs.dedupeKey,
+        set: {
+          status: "pending",
+          attemptCount: 0,
+          availableAt: new Date(),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          lastError: null,
+          completedAt: null,
+          updatedAt: new Date(),
+        },
+      });
     return updated ?? sandbox;
   });
 }

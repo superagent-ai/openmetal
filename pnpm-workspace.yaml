@@ -2,7 +2,9 @@ packages:
   - apps/*
   - packages/*
 allowBuilds:
+  cbor-extract: true
   esbuild: true
+  protobufjs: true
   unrs-resolver: true
 minimumReleaseAgeExclude:
   - "@fastify/helmet@13.1.1"

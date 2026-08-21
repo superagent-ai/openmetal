@@ -280,6 +280,7 @@ export async function createSandbox(
     organizationId: string;
     projectId: string;
     actorId: string;
+    provider: "daytona" | "modal";
     image?: string;
     language: string;
     ttlMinutes: number;
@@ -290,6 +291,7 @@ export async function createSandbox(
     .values({
       organizationId: input.organizationId,
       projectId: input.projectId,
+      provider: input.provider,
       image: input.image,
       language: input.language,
       ttlMinutes: input.ttlMinutes,
@@ -304,7 +306,7 @@ export async function createSandbox(
     organizationId: input.organizationId,
     projectId: input.projectId,
     actorId: input.actorId,
-    data: { sandbox_id: sandbox.id, provider: "daytona" },
+    data: { sandbox_id: sandbox.id, provider: input.provider },
     topic: projectTopic(input.projectId),
   });
   await tx.insert(outboxJobs).values({
@@ -353,6 +355,13 @@ export async function requestSandboxPause(
     const sandbox = await getSandbox(tx, input);
     if (sandbox.status === "paused" || sandbox.status === "pausing") {
       return sandbox;
+    }
+    if (sandbox.provider !== "daytona") {
+      throw new ApiError(
+        409,
+        "unsupported_operation",
+        `${sandbox.provider} sandboxes do not support pause`,
+      );
     }
     if (sandbox.status !== "ready") {
       throw new ApiError(409, "invalid_sandbox_state", "only ready sandboxes can be paused");

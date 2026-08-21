@@ -28,8 +28,14 @@ export type ProviderSandboxCost = {
   raw: Record<string, unknown>;
 };
 
+export type SandboxProviderName = "daytona" | "modal";
+
 export interface SandboxProvider {
-  readonly name: "daytona";
+  readonly name: SandboxProviderName;
+  readonly capabilities: {
+    pause: boolean;
+    cost: boolean;
+  };
   create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox>;
   getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost | null>;
   pause(providerResourceId: string, signal?: AbortSignal): Promise<void>;

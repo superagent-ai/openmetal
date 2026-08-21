@@ -57,9 +57,7 @@ export async function listProjectApiKeys(
   return db
     .select()
     .from(projectApiKeys)
-    .where(
-      and(eq(projectApiKeys.projectId, input.projectId), isNull(projectApiKeys.deletedAt)),
-    );
+    .where(and(eq(projectApiKeys.projectId, input.projectId), isNull(projectApiKeys.deletedAt)));
 }
 
 export async function revokeProjectApiKey(

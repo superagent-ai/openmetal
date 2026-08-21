@@ -281,7 +281,15 @@ export async function createSandbox(
     projectId: string;
     actorId: string;
     provider:
-      "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "runloop" | "vercel";
+      | "blaxel"
+      | "cloudflare"
+      | "codesandbox"
+      | "daytona"
+      | "e2b"
+      | "modal"
+      | "northflank"
+      | "runloop"
+      | "vercel";
     image?: string;
     language: string;
     ttlMinutes: number;

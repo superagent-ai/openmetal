@@ -269,6 +269,7 @@ export class MetalClient {
         provider?:
           | "blaxel"
           | "cloudflare"
+          | "codesandbox"
           | "daytona"
           | "e2b"
           | "modal"

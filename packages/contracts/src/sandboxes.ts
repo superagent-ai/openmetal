@@ -19,6 +19,7 @@ export type SandboxStatus = z.infer<typeof SandboxStatusSchema>;
 export const SandboxProviderSchema = z.enum([
   "blaxel",
   "cloudflare",
+  "codesandbox",
   "daytona",
   "e2b",
   "modal",

@@ -151,6 +151,7 @@ async function provisionSandbox(db: MetalDb, provider: SandboxProvider, sandboxI
       }
       if (
         provider.name === "cloudflare" ||
+        provider.name === "codesandbox" ||
         provider.name === "northflank" ||
         provider.name === "runloop"
       ) {
@@ -205,7 +206,10 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
       });
       if (provider.capabilities.cost) {
         const availableAt =
-          provider.name === "e2b" || provider.name === "runloop" || provider.name === "vercel"
+          provider.name === "codesandbox" ||
+          provider.name === "e2b" ||
+          provider.name === "runloop" ||
+          provider.name === "vercel"
             ? new Date(Date.now() + 2_000)
             : provider.name === "cloudflare"
               ? new Date(Date.now() + 10 * 60_000)
@@ -250,13 +254,14 @@ async function pauseSandbox(db: MetalDb, provider: SandboxProvider, sandboxId: s
         provider: provider.name,
       });
       if (provider.capabilities.cost) {
+        const final = provider.name === "codesandbox" || provider.name === "northflank";
         await scheduleCostSync(
           tx,
           updated.id,
           provider.name === "northflank"
             ? northflankBillingAvailableAt(updated.pausedAt ?? new Date())
             : new Date(Date.now() + 5_000),
-          provider.name === "northflank",
+          final,
         );
       }
     }
@@ -283,7 +288,10 @@ async function syncSandboxCost(
     providerOrganizationId: sandbox.providerOrganizationId ?? undefined,
     providerMetadata: sandbox.providerMetadata,
     from: sandbox.readyAt ?? sandbox.createdAt,
-    to: sandbox.deletedAt ?? sandbox.pausedAt ?? measuredAt,
+    to:
+      provider.name === "codesandbox" && sandbox.pausedAt
+        ? sandbox.pausedAt
+        : (sandbox.deletedAt ?? sandbox.pausedAt ?? measuredAt),
   });
   if (!cost && final) {
     throw new Error("final provider cost is not available yet");
@@ -547,7 +555,8 @@ async function scheduleMissingSandboxCosts(db: MetalDb, providers: SandboxProvid
     }
     const final =
       sandbox.status === "deleted" ||
-      (provider.name === "northflank" && sandbox.status === "paused");
+      ((provider.name === "codesandbox" || provider.name === "northflank") &&
+        sandbox.status === "paused");
     const measuredThrough = sandbox.deletedAt ?? sandbox.pausedAt;
     const providerAvailableAt =
       provider.name === "northflank" && final && measuredThrough

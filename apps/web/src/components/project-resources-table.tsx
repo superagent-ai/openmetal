@@ -42,7 +42,15 @@ type Sandbox = {
   id: string;
   type: "sandbox";
   provider:
-    "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "runloop" | "vercel";
+    | "blaxel"
+    | "cloudflare"
+    | "codesandbox"
+    | "daytona"
+    | "e2b"
+    | "modal"
+    | "northflank"
+    | "runloop"
+    | "vercel";
   provider_cost_microusd: string | null;
   provider_cost_measured_through: string | null;
   provider_cost_updated_at: string | null;
@@ -113,6 +121,9 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
   if (provider === "cloudflare") {
     return <Image src="/providers/cloudflare.ico" alt="" width={13} height={13} />;
   }
+  if (provider === "codesandbox") {
+    return <Image src="/providers/codesandbox.svg" alt="" width={13} height={13} />;
+  }
   if (provider === "daytona") {
     return <Image src="/providers/daytona.svg" alt="" width={12} height={13} />;
   }
@@ -132,6 +143,9 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
 }
 
 function providerLabel(provider: Sandbox["provider"]) {
+  if (provider === "codesandbox") {
+    return "CodeSandbox";
+  }
   if (provider === "e2b") {
     return "E2B";
   }

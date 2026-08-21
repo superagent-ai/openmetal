@@ -114,6 +114,10 @@ export const sandboxes = metalSchema.table(
     provider: text("provider").notNull().default("daytona"),
     providerResourceId: text("provider_resource_id"),
     providerOrganizationId: text("provider_organization_id"),
+    providerMetadata: jsonb("provider_metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
     providerCostMicrousd: bigint("provider_cost_microusd", { mode: "bigint" }),
     providerCostMeasuredThrough: timestamp("provider_cost_measured_through", {
       withTimezone: true,

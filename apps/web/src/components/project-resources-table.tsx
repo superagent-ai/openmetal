@@ -40,7 +40,7 @@ import { createClient } from "@/lib/supabase/client";
 type Sandbox = {
   id: string;
   type: "sandbox";
-  provider: "daytona" | "modal";
+  provider: "daytona" | "e2b" | "modal";
   provider_cost_microusd: string | null;
   provider_cost_measured_through: string | null;
   provider_cost_updated_at: string | null;
@@ -108,6 +108,9 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
   if (provider === "daytona") {
     return <Image src="/providers/daytona.svg" alt="" width={12} height={13} />;
   }
+  if (provider === "e2b") {
+    return <Image src="/providers/e2b.png" alt="" width={13} height={13} />;
+  }
   return <Image src="/providers/modal.svg" alt="" width={13} height={13} />;
 }
 
@@ -157,7 +160,22 @@ export function ProjectResourcesTable({
         // Ignore unrelated or malformed broadcasts on this project channel.
       }
     });
-    channel.subscribe();
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token) {
+        await supabase.realtime.setAuth(data.session.access_token);
+      }
+      if (!cancelled) {
+        channel.subscribe((status) => {
+          if (
+            !cancelled &&
+            (status === "CHANNEL_ERROR" || status === "TIMED_OUT")
+          ) {
+            setError("Realtime resource updates disconnected");
+          }
+        });
+      }
+    })();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token) {
@@ -263,7 +281,13 @@ export function ProjectResourcesTable({
                         <span className="flex size-6 items-center justify-center rounded-md bg-muted">
                           <ProviderMark provider={sandbox.provider} />
                         </span>
-                        <span className="capitalize">{sandbox.provider}</span>
+                        <span className="normal-case">
+                          {sandbox.provider === "e2b"
+                            ? "E2B"
+                            : sandbox.provider === "daytona"
+                              ? "Daytona"
+                              : "Modal"}
+                        </span>
                       </span>
                     </TableCell>
                     <TableCell>
@@ -294,7 +318,7 @@ export function ProjectResourcesTable({
                             ? `Updated ${dateFormatter.format(
                                 new Date(sandbox.provider_cost_updated_at),
                               )}`
-                            : "Waiting for Daytona usage data"
+                            : `Waiting for ${sandbox.provider} usage data`
                       }
                     >
                       {sandbox.provider === "modal"
@@ -362,7 +386,15 @@ export function ProjectResourcesTable({
               </AlertDialogMedia>
               <AlertDialogTitle>Delete this sandbox?</AlertDialogTitle>
               <AlertDialogDescription>
-                The sandbox and its filesystem will be permanently deleted from Daytona.
+                The sandbox and its filesystem will be permanently deleted from{" "}
+                <span className="normal-case">
+                  {deletingSandbox.provider === "e2b"
+                    ? "E2B"
+                    : deletingSandbox.provider === "daytona"
+                      ? "Daytona"
+                        : "Modal"}
+                  {"."}
+                </span>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

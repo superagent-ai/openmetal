@@ -6,6 +6,7 @@ loadEnv({ path: ".env" });
 import { createDatabase } from "@openmetal/db";
 import { createLogger } from "@openmetal/logger";
 import { DaytonaSandboxProvider } from "@openmetal/provider-daytona";
+import { E2BSandboxProvider } from "@openmetal/provider-e2b";
 import { ModalSandboxProvider } from "@openmetal/provider-modal";
 import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
 import { loadWorkerEnv } from "./env.js";
@@ -30,6 +31,13 @@ if (env.DAYTONA_API_KEY) {
     apiUrl: env.DAYTONA_API_URL,
     analyticsApiUrl: env.DAYTONA_ANALYTICS_API_URL,
     target: env.DAYTONA_TARGET,
+  });
+}
+if (env.E2B_API_KEY) {
+  sandboxProviders.e2b = new E2BSandboxProvider({
+    apiKey: env.E2B_API_KEY,
+    apiUrl: env.E2B_API_URL,
+    templateId: env.E2B_TEMPLATE_ID,
   });
 }
 if (env.MODAL_TOKEN_ID && env.MODAL_TOKEN_SECRET) {

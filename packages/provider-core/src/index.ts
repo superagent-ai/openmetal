@@ -11,11 +11,13 @@ export type ProviderCreateSandboxInput = {
 export type ProviderSandbox = {
   providerResourceId: string;
   providerOrganizationId: string;
+  providerMetadata?: Record<string, unknown>;
 };
 
 export type ProviderSandboxCostInput = {
   providerResourceId: string;
   providerOrganizationId?: string;
+  providerMetadata?: Record<string, unknown>;
   from: Date;
   to: Date;
   signal?: AbortSignal;
@@ -28,7 +30,7 @@ export type ProviderSandboxCost = {
   raw: Record<string, unknown>;
 };
 
-export type SandboxProviderName = "daytona" | "modal";
+export type SandboxProviderName = "daytona" | "e2b" | "modal";
 
 export interface SandboxProvider {
   readonly name: SandboxProviderName;

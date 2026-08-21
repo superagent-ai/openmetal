@@ -22,6 +22,7 @@
     "@openmetal/provider-daytona": "workspace:*",
     "@openmetal/provider-e2b": "workspace:*",
     "@openmetal/provider-modal": "workspace:*",
+    "@openmetal/provider-northflank": "workspace:*",
     "@openmetal/provider-vercel": "workspace:*",
     "dotenv": "17.4.2",
     "drizzle-orm": "0.45.2",

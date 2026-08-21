@@ -13,6 +13,13 @@ export const WorkerEnvSchema = z.object({
   BLAXEL_REGION: z.string().min(1).optional(),
   BLAXEL_DEFAULT_IMAGE: z.string().min(1).optional(),
   BLAXEL_DEFAULT_MEMORY_MB: z.coerce.number().int().min(512).optional(),
+  NORTHFLANK_API_TOKEN: z.string().min(1).optional(),
+  NORTHFLANK_PROJECT_ID: z.string().min(1).optional(),
+  NORTHFLANK_TEAM_ID: z.string().min(1).optional(),
+  NORTHFLANK_API_URL: z.string().url().optional(),
+  NORTHFLANK_DEPLOYMENT_PLAN: z.string().min(1).optional(),
+  NORTHFLANK_DEFAULT_IMAGE: z.string().min(1).optional(),
+  NORTHFLANK_EPHEMERAL_STORAGE_MB: z.coerce.number().int().min(1_024).optional(),
   DAYTONA_API_KEY: z.string().min(1).optional(),
   DAYTONA_API_URL: z.string().url().optional(),
   DAYTONA_ANALYTICS_API_URL: z.string().url().optional(),
@@ -42,6 +49,11 @@ export const WorkerEnvSchema = z.object({
   WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(10),
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(8),
   WORKER_BASE_BACKOFF_MS: z.coerce.number().int().min(1).default(200),
+  WORKER_COST_SWEEP_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(5 * 60_000),
 });
 export type WorkerEnv = z.infer<typeof WorkerEnvSchema>;
 
@@ -59,6 +71,13 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     BLAXEL_REGION: source.BLAXEL_REGION,
     BLAXEL_DEFAULT_IMAGE: source.BLAXEL_DEFAULT_IMAGE,
     BLAXEL_DEFAULT_MEMORY_MB: source.BLAXEL_DEFAULT_MEMORY_MB,
+    NORTHFLANK_API_TOKEN: source.NORTHFLANK_API_TOKEN,
+    NORTHFLANK_PROJECT_ID: source.NORTHFLANK_PROJECT_ID,
+    NORTHFLANK_TEAM_ID: source.NORTHFLANK_TEAM_ID,
+    NORTHFLANK_API_URL: source.NORTHFLANK_API_URL,
+    NORTHFLANK_DEPLOYMENT_PLAN: source.NORTHFLANK_DEPLOYMENT_PLAN,
+    NORTHFLANK_DEFAULT_IMAGE: source.NORTHFLANK_DEFAULT_IMAGE,
+    NORTHFLANK_EPHEMERAL_STORAGE_MB: source.NORTHFLANK_EPHEMERAL_STORAGE_MB,
     DAYTONA_API_KEY: source.DAYTONA_API_KEY,
     DAYTONA_API_URL: source.DAYTONA_API_URL,
     DAYTONA_ANALYTICS_API_URL: source.DAYTONA_ANALYTICS_API_URL,
@@ -88,5 +107,6 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     WORKER_BATCH_SIZE: source.WORKER_BATCH_SIZE,
     WORKER_MAX_ATTEMPTS: source.WORKER_MAX_ATTEMPTS,
     WORKER_BASE_BACKOFF_MS: source.WORKER_BASE_BACKOFF_MS,
+    WORKER_COST_SWEEP_MS: source.WORKER_COST_SWEEP_MS,
   });
 }

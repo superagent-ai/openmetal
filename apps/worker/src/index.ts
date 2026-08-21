@@ -10,6 +10,7 @@ import { CloudflareSandboxProvider } from "@openmetal/provider-cloudflare";
 import { DaytonaSandboxProvider } from "@openmetal/provider-daytona";
 import { E2BSandboxProvider } from "@openmetal/provider-e2b";
 import { ModalSandboxProvider } from "@openmetal/provider-modal";
+import { NorthflankSandboxProvider } from "@openmetal/provider-northflank";
 import { VercelSandboxProvider } from "@openmetal/provider-vercel";
 import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
 import { loadWorkerEnv } from "./env.js";
@@ -71,6 +72,18 @@ if (env.MODAL_TOKEN_ID && env.MODAL_TOKEN_SECRET) {
     tokenSecret: env.MODAL_TOKEN_SECRET,
     appName: env.MODAL_APP_NAME,
     environment: env.MODAL_ENVIRONMENT,
+  });
+}
+// Northflank maps managed sandboxes to deployment services in the configured project.
+if (env.NORTHFLANK_API_TOKEN && env.NORTHFLANK_PROJECT_ID) {
+  sandboxProviders.northflank = new NorthflankSandboxProvider({
+    apiToken: env.NORTHFLANK_API_TOKEN,
+    projectId: env.NORTHFLANK_PROJECT_ID,
+    teamId: env.NORTHFLANK_TEAM_ID,
+    apiUrl: env.NORTHFLANK_API_URL,
+    deploymentPlan: env.NORTHFLANK_DEPLOYMENT_PLAN,
+    defaultImage: env.NORTHFLANK_DEFAULT_IMAGE,
+    ephemeralStorageMb: env.NORTHFLANK_EPHEMERAL_STORAGE_MB,
   });
 }
 const vercelToken = env.VERCEL_OIDC_TOKEN ?? env.VERCEL_TOKEN;

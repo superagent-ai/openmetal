@@ -34,7 +34,8 @@ export type ProviderDestroyResult = {
   providerMetadata?: Record<string, unknown>;
 };
 
-export type SandboxProviderName = "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "vercel";
+export type SandboxProviderName =
+  "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "vercel";
 
 export interface SandboxProvider {
   readonly name: SandboxProviderName;

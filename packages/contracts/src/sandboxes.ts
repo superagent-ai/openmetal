@@ -22,6 +22,7 @@ export const SandboxProviderSchema = z.enum([
   "daytona",
   "e2b",
   "modal",
+  "northflank",
   "vercel",
 ]);
 export type SandboxProvider = z.infer<typeof SandboxProviderSchema>;

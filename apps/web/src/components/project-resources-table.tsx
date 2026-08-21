@@ -40,7 +40,7 @@ import { createClient } from "@/lib/supabase/client";
 type Sandbox = {
   id: string;
   type: "sandbox";
-  provider: "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "vercel";
+  provider: "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "vercel";
   provider_cost_microusd: string | null;
   provider_cost_measured_through: string | null;
   provider_cost_updated_at: string | null;
@@ -119,6 +119,9 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
   }
   if (provider === "modal") {
     return <Image src="/providers/modal.svg" alt="" width={13} height={13} />;
+  }
+  if (provider === "northflank") {
+    return <Image src="/providers/northflank.svg" alt="" width={13} height={9} />;
   }
   return <Image src="/providers/vercel.ico" alt="" width={13} height={13} />;
 }

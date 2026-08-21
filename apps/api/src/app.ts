@@ -130,7 +130,8 @@ function serializeSandbox(row: {
     type: "sandbox" as const,
     organization_id: row.organizationId,
     project_id: row.projectId,
-    provider: row.provider as "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "vercel",
+    provider: row.provider as
+      "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "vercel",
     provider_cost_microusd: row.providerCostMicrousd?.toString() ?? null,
     provider_cost_measured_through: row.providerCostMeasuredThrough?.toISOString() ?? null,
     provider_cost_updated_at: row.providerCostUpdatedAt?.toISOString() ?? null,

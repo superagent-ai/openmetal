@@ -264,7 +264,7 @@ export class MetalClient {
     create: (
       input: {
         project_id?: string;
-        provider?: "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "vercel";
+        provider?: "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "vercel";
         image?: string;
         language?: string;
         ttl_minutes?: number;

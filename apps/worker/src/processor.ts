@@ -143,7 +143,7 @@ async function provisionSandbox(db: MetalDb, provider: SandboxProvider, sandboxI
       if (provider.capabilities.cost) {
         await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
       }
-      if (provider.name === "cloudflare") {
+      if (provider.name === "cloudflare" || provider.name === "northflank") {
         await tx
           .insert(outboxJobs)
           .values({
@@ -201,7 +201,9 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
               ? 10 * 60_000
               : provider.name === "blaxel"
                 ? 5 * 60_000
-                : 120_000;
+                : provider.name === "northflank"
+                  ? 10 * 60_000
+                  : 120_000;
         await scheduleCostSync(tx, updated.id, new Date(Date.now() + delayMs), true);
       }
     }

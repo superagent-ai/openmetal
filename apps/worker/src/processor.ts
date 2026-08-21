@@ -156,9 +156,9 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
   if (!sandbox || sandbox.status === "deleted") {
     return;
   }
-  if (sandbox.providerResourceId) {
-    await provider.destroy(sandbox.providerResourceId);
-  }
+  const destroyResult = sandbox.providerResourceId
+    ? await provider.destroy(sandbox.providerResourceId)
+    : undefined;
   await withTransaction(db, async (tx) => {
     const [updated] = await tx
       .update(sandboxes)
@@ -166,6 +166,10 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
         status: "deleted",
         errorCode: null,
         errorMessage: null,
+        providerMetadata: {
+          ...sandbox.providerMetadata,
+          ...(destroyResult?.providerMetadata ?? {}),
+        },
         deletedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -176,7 +180,7 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
         provider: provider.name,
       });
       if (provider.capabilities.cost) {
-        const delayMs = provider.name === "e2b" ? 2_000 : 120_000;
+        const delayMs = provider.name === "e2b" || provider.name === "vercel" ? 2_000 : 120_000;
         await scheduleCostSync(tx, updated.id, new Date(Date.now() + delayMs), true);
       }
     }

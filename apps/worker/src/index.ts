@@ -8,6 +8,7 @@ import { createLogger } from "@openmetal/logger";
 import { DaytonaSandboxProvider } from "@openmetal/provider-daytona";
 import { E2BSandboxProvider } from "@openmetal/provider-e2b";
 import { ModalSandboxProvider } from "@openmetal/provider-modal";
+import { VercelSandboxProvider } from "@openmetal/provider-vercel";
 import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
 import { loadWorkerEnv } from "./env.js";
 import { createRealtimePublisher } from "./publisher.js";
@@ -46,6 +47,15 @@ if (env.MODAL_TOKEN_ID && env.MODAL_TOKEN_SECRET) {
     tokenSecret: env.MODAL_TOKEN_SECRET,
     appName: env.MODAL_APP_NAME,
     environment: env.MODAL_ENVIRONMENT,
+  });
+}
+const vercelToken = env.VERCEL_OIDC_TOKEN ?? env.VERCEL_TOKEN;
+if (vercelToken && env.VERCEL_PROJECT_ID) {
+  sandboxProviders.vercel = new VercelSandboxProvider({
+    token: vercelToken,
+    projectId: env.VERCEL_PROJECT_ID,
+    teamId: env.VERCEL_TEAM_ID,
+    apiUrl: env.VERCEL_API_URL,
   });
 }
 const abort = new AbortController();

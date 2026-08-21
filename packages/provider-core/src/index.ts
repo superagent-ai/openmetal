@@ -30,7 +30,11 @@ export type ProviderSandboxCost = {
   raw: Record<string, unknown>;
 };
 
-export type SandboxProviderName = "daytona" | "e2b" | "modal";
+export type ProviderDestroyResult = {
+  providerMetadata?: Record<string, unknown>;
+};
+
+export type SandboxProviderName = "daytona" | "e2b" | "modal" | "vercel";
 
 export interface SandboxProvider {
   readonly name: SandboxProviderName;
@@ -41,5 +45,5 @@ export interface SandboxProvider {
   create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox>;
   getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost | null>;
   pause(providerResourceId: string, signal?: AbortSignal): Promise<void>;
-  destroy(providerResourceId: string, signal?: AbortSignal): Promise<void>;
+  destroy(providerResourceId: string, signal?: AbortSignal): Promise<ProviderDestroyResult | void>;
 }

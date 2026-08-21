@@ -280,7 +280,7 @@ export async function createSandbox(
     organizationId: string;
     projectId: string;
     actorId: string;
-    provider: "daytona" | "e2b" | "modal" | "vercel";
+    provider: "cloudflare" | "daytona" | "e2b" | "modal" | "vercel";
     image?: string;
     language: string;
     ttlMinutes: number;
@@ -356,7 +356,11 @@ export async function requestSandboxPause(
     if (sandbox.status === "paused" || sandbox.status === "pausing") {
       return sandbox;
     }
-    if (sandbox.provider === "modal" || sandbox.provider === "vercel") {
+    if (
+      sandbox.provider === "cloudflare" ||
+      sandbox.provider === "modal" ||
+      sandbox.provider === "vercel"
+    ) {
       throw new ApiError(
         409,
         "unsupported_operation",

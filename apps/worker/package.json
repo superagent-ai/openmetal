@@ -16,6 +16,7 @@
     "@openmetal/db": "workspace:*",
     "@openmetal/events": "workspace:*",
     "@openmetal/logger": "workspace:*",
+    "@openmetal/provider-cloudflare": "workspace:*",
     "@openmetal/provider-core": "workspace:*",
     "@openmetal/provider-daytona": "workspace:*",
     "@openmetal/provider-e2b": "workspace:*",

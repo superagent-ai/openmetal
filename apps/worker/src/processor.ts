@@ -143,6 +143,20 @@ async function provisionSandbox(db: MetalDb, provider: SandboxProvider, sandboxI
       if (provider.capabilities.cost) {
         await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
       }
+      if (provider.name === "cloudflare") {
+        await tx
+          .insert(outboxJobs)
+          .values({
+            jobType: "sandbox.destroy",
+            dedupeKey: `sandbox:destroy:${updated.id}`,
+            payload: {
+              job_type: "sandbox.destroy",
+              sandbox_id: updated.id,
+            },
+            availableAt: new Date(Date.now() + updated.ttlMinutes * 60_000),
+          })
+          .onConflictDoNothing();
+      }
     }
   });
 }
@@ -180,7 +194,12 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
         provider: provider.name,
       });
       if (provider.capabilities.cost) {
-        const delayMs = provider.name === "e2b" || provider.name === "vercel" ? 2_000 : 120_000;
+        const delayMs =
+          provider.name === "e2b" || provider.name === "vercel"
+            ? 2_000
+            : provider.name === "cloudflare"
+              ? 10 * 60_000
+              : 120_000;
         await scheduleCostSync(tx, updated.id, new Date(Date.now() + delayMs), true);
       }
     }

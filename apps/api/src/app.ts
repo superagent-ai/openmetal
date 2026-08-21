@@ -131,7 +131,15 @@ function serializeSandbox(row: {
     organization_id: row.organizationId,
     project_id: row.projectId,
     provider: row.provider as
-      "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "runloop" | "vercel",
+      | "blaxel"
+      | "cloudflare"
+      | "codesandbox"
+      | "daytona"
+      | "e2b"
+      | "modal"
+      | "northflank"
+      | "runloop"
+      | "vercel",
     provider_cost_microusd: row.providerCostMicrousd?.toString() ?? null,
     provider_cost_measured_through: row.providerCostMeasuredThrough?.toISOString() ?? null,
     provider_cost_updated_at: row.providerCostUpdatedAt?.toISOString() ?? null,

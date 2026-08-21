@@ -7,6 +7,7 @@ import { createDatabase } from "@openmetal/db";
 import { createLogger } from "@openmetal/logger";
 import { BlaxelSandboxProvider } from "@openmetal/provider-blaxel";
 import { CloudflareSandboxProvider } from "@openmetal/provider-cloudflare";
+import { CodeSandboxProvider } from "@openmetal/provider-codesandbox";
 import { DaytonaSandboxProvider } from "@openmetal/provider-daytona";
 import { E2BSandboxProvider } from "@openmetal/provider-e2b";
 import { ModalSandboxProvider } from "@openmetal/provider-modal";
@@ -52,6 +53,20 @@ if (env.CLOUDFLARE_SANDBOX_API_URL && env.CLOUDFLARE_SANDBOX_API_KEY) {
     analyticsToken: env.CLOUDFLARE_ANALYTICS_API_TOKEN,
   });
 }
+// CodeSandbox uses managed templates with direct REST lifecycle control.
+if (env.CODESANDBOX_API_KEY) {
+  sandboxProviders.codesandbox = new CodeSandboxProvider({
+    apiKey: env.CODESANDBOX_API_KEY,
+    apiUrl: env.CODESANDBOX_API_URL,
+    templateId: env.CODESANDBOX_TEMPLATE_ID,
+    vmTier: env.CODESANDBOX_VM_TIER,
+    workspaceId: env.CODESANDBOX_WORKSPACE_ID,
+    creditRateMicrousd:
+      env.CODESANDBOX_CREDIT_RATE_USD === undefined
+        ? undefined
+        : BigInt(Math.round(env.CODESANDBOX_CREDIT_RATE_USD * 1_000_000)),
+  });
+}
 if (env.DAYTONA_API_KEY) {
   sandboxProviders.daytona = new DaytonaSandboxProvider({
     apiKey: env.DAYTONA_API_KEY,
@@ -75,7 +90,7 @@ if (env.MODAL_TOKEN_ID && env.MODAL_TOKEN_SECRET) {
     environment: env.MODAL_ENVIRONMENT,
   });
 }
-// Northflank maps managed sandboxes to deployment services in the configured project.
+// Northflank maps managed sandboxes to services in the configured project.
 if (env.NORTHFLANK_API_TOKEN && env.NORTHFLANK_PROJECT_ID) {
   sandboxProviders.northflank = new NorthflankSandboxProvider({
     apiToken: env.NORTHFLANK_API_TOKEN,

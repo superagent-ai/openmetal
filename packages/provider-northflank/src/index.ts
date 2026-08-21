@@ -192,9 +192,10 @@ export class NorthflankSandboxProvider implements SandboxProvider {
     const lastHour = Math.floor(input.to.getTime() / hourMs) * hourMs;
     let totalCents = 0;
     let matched = false;
+    let delayedAt: string | undefined;
     const rawHours: JsonRecord[] = [];
 
-    for (let hour = firstHour; hour <= lastHour; hour += hourMs) {
+    const getHourCost = async (hour: number) => {
       for (let page = 1; page <= 100; page += 1) {
         const query = new URLSearchParams({
           resourceType: "service",
@@ -216,12 +217,32 @@ export class NorthflankSandboxProvider implements SandboxProvider {
         rawHours.push(record);
         const cost = findResourceCost(record, input.providerResourceId);
         if (cost) {
-          matched = true;
-          totalCents += cost.amountCents;
-          break;
+          return cost.amountCents;
         }
         const pagination = asRecord(record.pagination);
         if (pagination?.hasNextPage !== true) {
+          break;
+        }
+      }
+      return undefined;
+    };
+
+    for (let hour = firstHour; hour <= lastHour; hour += hourMs) {
+      const amountCents = await getHourCost(hour);
+      if (amountCents !== undefined) {
+        matched = true;
+        totalCents += amountCents;
+      }
+    }
+
+    if (!matched) {
+      const currentHour = Math.floor(Date.now() / hourMs) * hourMs;
+      for (let hour = lastHour + hourMs; hour <= currentHour; hour += hourMs) {
+        const amountCents = await getHourCost(hour);
+        if (amountCents !== undefined) {
+          matched = true;
+          totalCents = amountCents;
+          delayedAt = new Date(hour).toISOString();
           break;
         }
       }
@@ -238,6 +259,8 @@ export class NorthflankSandboxProvider implements SandboxProvider {
         source: "northflank-hourly-billing-usage",
         projectId: this.projectId,
         teamId: this.teamId,
+        attribution: delayedAt ? "first-delayed-hour" : "runtime-hours",
+        delayedAt,
         hours: rawHours,
       },
     };

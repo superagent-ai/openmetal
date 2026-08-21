@@ -35,7 +35,15 @@ export type ProviderDestroyResult = {
 };
 
 export type SandboxProviderName =
-  "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "runloop" | "vercel";
+  | "blaxel"
+  | "cloudflare"
+  | "codesandbox"
+  | "daytona"
+  | "e2b"
+  | "modal"
+  | "northflank"
+  | "runloop"
+  | "vercel";
 
 export interface SandboxProvider {
   readonly name: SandboxProviderName;

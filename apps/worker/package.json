@@ -18,6 +18,7 @@
     "@openmetal/logger": "workspace:*",
     "@openmetal/provider-blaxel": "workspace:*",
     "@openmetal/provider-cloudflare": "workspace:*",
+    "@openmetal/provider-codesandbox": "workspace:*",
     "@openmetal/provider-core": "workspace:*",
     "@openmetal/provider-daytona": "workspace:*",
     "@openmetal/provider-e2b": "workspace:*",

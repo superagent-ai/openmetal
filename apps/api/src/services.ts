@@ -280,7 +280,7 @@ export async function createSandbox(
     organizationId: string;
     projectId: string;
     actorId: string;
-    provider: "cloudflare" | "daytona" | "e2b" | "modal" | "vercel";
+    provider: "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "vercel";
     image?: string;
     language: string;
     ttlMinutes: number;
@@ -357,6 +357,7 @@ export async function requestSandboxPause(
       return sandbox;
     }
     if (
+      sandbox.provider === "blaxel" ||
       sandbox.provider === "cloudflare" ||
       sandbox.provider === "modal" ||
       sandbox.provider === "vercel"

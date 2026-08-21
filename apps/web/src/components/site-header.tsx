@@ -53,8 +53,12 @@ export function SiteHeader({
     organizations[0];
   const pageTitles: Record<string, string> = {
     "api-keys": "API keys",
+    billing: "Billing",
+    members: "Members",
     projects: "Projects",
     settings: "Settings",
+    usage: "Usage",
+    webhooks: "Webhooks",
   };
   const lastSegment = pathname.split("/").at(-1) ?? "";
   const title =

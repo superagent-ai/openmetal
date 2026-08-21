@@ -40,7 +40,7 @@ import { createClient } from "@/lib/supabase/client";
 type Sandbox = {
   id: string;
   type: "sandbox";
-  provider: "cloudflare" | "daytona" | "e2b" | "modal" | "vercel";
+  provider: "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "vercel";
   provider_cost_microusd: string | null;
   provider_cost_measured_through: string | null;
   provider_cost_updated_at: string | null;
@@ -105,6 +105,9 @@ function formatMicrousd(value: string | null) {
 }
 
 function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
+  if (provider === "blaxel") {
+    return <Image src="/providers/blaxel.png" alt="" width={13} height={13} />;
+  }
   if (provider === "cloudflare") {
     return <Image src="/providers/cloudflare.ico" alt="" width={13} height={13} />;
   }
@@ -135,7 +138,7 @@ export function ProjectResourcesTable({
   sandboxes: Sandbox[];
 }) {
   const now = useSyncExternalStore(subscribeToClock, getClockSnapshot, getServerClockSnapshot);
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = useMemo(() => createClient({ isSingleton: false }), []);
   const metal = useMemo(
     () =>
       createMetalClient(async () => {
@@ -180,7 +183,13 @@ export function ProjectResourcesTable({
       }
       if (!cancelled) {
         channel.subscribe((status) => {
-          if (!cancelled && (status === "CHANNEL_ERROR" || status === "TIMED_OUT")) {
+          if (!cancelled && status === "SUBSCRIBED") {
+            void refreshSandboxes().catch((caught) => {
+              if (!cancelled) {
+                setError(caught instanceof Error ? caught.message : "Could not refresh resources");
+              }
+            });
+          } else if (!cancelled && (status === "CHANNEL_ERROR" || status === "TIMED_OUT")) {
             setError("Realtime resource updates disconnected");
           }
         });
@@ -349,6 +358,7 @@ export function ProjectResourcesTable({
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
                             disabled={
+                              sandbox.provider === "blaxel" ||
                               sandbox.provider === "modal" ||
                               sandbox.provider === "cloudflare" ||
                               sandbox.provider === "vercel" ||

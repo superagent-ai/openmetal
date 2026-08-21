@@ -3,16 +3,20 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { parsePublicEvent, projectTopic } from "@openmetal/events";
 import {
   Add01Icon,
+  Analytics01Icon,
+  CreditCardIcon,
   Delete02Icon,
-  Folder01Icon,
   Home01Icon,
   Key01Icon,
   MoreHorizontalIcon,
   PencilEdit01Icon,
   Settings04Icon,
   Tick02Icon,
+  UserMultiple02Icon,
+  WebhookIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { selectOrganization } from "@/app/dashboard/actions";
@@ -69,6 +73,17 @@ const organizationAvatarStyles = [
   "bg-cyan-500/15 text-cyan-700 ring-cyan-500/25 dark:text-cyan-300",
 ] as const;
 
+const runningResourceStatuses = new Set([
+  "requested",
+  "provisioning",
+  "ready",
+  "pausing",
+  "provision_unknown",
+  "deleting",
+  "cleanup_pending",
+  "cleanup_failed",
+]);
+
 function organizationAvatarClass(organizationId: string): string {
   let hash = 0;
   for (const character of organizationId) {
@@ -98,7 +113,7 @@ export function AppSidebar({
   const pathname = usePathname();
   const router = useRouter();
   const [isSwitching, startTransition] = useTransition();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = useMemo(() => createClient({ isSingleton: false }), []);
   const metal = useMemo(
     () =>
       createMetalClient(async () => {
@@ -111,6 +126,7 @@ export function AppSidebar({
     organizationId: string;
     projects: Project[];
   }>({ organizationId: "", projects: [] });
+  const [runningProjectIds, setRunningProjectIds] = useState<Set<string>>(new Set());
   const [renamingProject, setRenamingProject] = useState<Project>();
   const [deletingProject, setDeletingProject] = useState<Project>();
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -122,19 +138,23 @@ export function AppSidebar({
     organizations[0];
   const currentSection = pathname.includes("/projects")
     ? "projects"
-    : pathname.endsWith("/api-keys")
-      ? "api-keys"
-      : pathname.endsWith("/settings")
-        ? "settings"
-        : undefined;
+    : (["api-keys", "billing", "members", "settings", "usage", "webhooks"] as const).find(
+        (section) => pathname.endsWith(`/${section}`),
+      );
   const basePath = activeOrganization ? `/dashboard/${activeOrganization.slug}` : "/dashboard";
   const navItems = [
     { title: "Home", url: basePath, icon: Home01Icon },
     { title: "API keys", url: `${basePath}/api-keys`, icon: Key01Icon },
+    { title: "Webhooks", url: `${basePath}/webhooks`, icon: WebhookIcon },
+    { title: "Billing", url: `${basePath}/billing`, icon: CreditCardIcon },
+    { title: "Usage", url: `${basePath}/usage`, icon: Analytics01Icon },
+    { title: "Members", url: `${basePath}/members`, icon: UserMultiple02Icon },
     { title: "Settings", url: `${basePath}/settings`, icon: Settings04Icon },
   ];
-  const projects =
-    projectState.organizationId === activeOrganization?.id ? projectState.projects : [];
+  const projects = useMemo(
+    () => (projectState.organizationId === activeOrganization?.id ? projectState.projects : []),
+    [activeOrganization?.id, projectState],
+  );
   const routeProjectSlug = pathname.split("/")[4];
   const projectsLoading = Boolean(
     activeOrganization && projectState.organizationId !== activeOrganization.id,
@@ -179,6 +199,98 @@ export function AppSidebar({
       window.removeEventListener("metal:project-created", handleProjectCreated);
     };
   }, [activeOrganization, metal]);
+
+  useEffect(() => {
+    if (!activeOrganization || projects.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    function updateProjectStatus(projectId: string, isRunning: boolean) {
+      setRunningProjectIds((current) => {
+        const next = new Set(current);
+        if (isRunning) {
+          next.add(projectId);
+        } else {
+          next.delete(projectId);
+        }
+        return next;
+      });
+    }
+
+    async function refreshRunningProject(project: Project) {
+      const { sandboxes } = await metal.sandboxes.list(project.id);
+      if (!cancelled) {
+        updateProjectStatus(
+          project.id,
+          sandboxes.some((sandbox) => runningResourceStatuses.has(sandbox.status)),
+        );
+      }
+    }
+
+    async function refreshRunningProjects() {
+      const results = await Promise.all(
+        projects.map(async (project) => {
+          const { sandboxes } = await metal.sandboxes.list(project.id);
+          return sandboxes.some((sandbox) => runningResourceStatuses.has(sandbox.status))
+            ? project.id
+            : undefined;
+        }),
+      );
+      if (!cancelled) {
+        setRunningProjectIds(new Set(results.filter((id): id is string => Boolean(id))));
+      }
+    }
+
+    const channels = projects.map((project) => {
+      const channel = supabase.channel(projectTopic(project.id), {
+        config: { private: true },
+      });
+      channel.on("broadcast", { event: "*" }, (message) => {
+        try {
+          const event = parsePublicEvent(message.payload);
+          if (event.project_id === project.id && event.type.startsWith("sandbox.") && !cancelled) {
+            void refreshRunningProject(project).catch(() => undefined);
+          }
+        } catch {
+          // Ignore unrelated or malformed broadcasts.
+        }
+      });
+      return channel;
+    });
+
+    void refreshRunningProjects().catch(() => undefined);
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token) {
+        await supabase.realtime.setAuth(data.session.access_token);
+      }
+      if (!cancelled) {
+        for (const [index, channel] of channels.entries()) {
+          const project = projects[index];
+          channel.subscribe((status) => {
+            if (!cancelled && status === "SUBSCRIBED" && project) {
+              void refreshRunningProject(project).catch(() => undefined);
+            }
+          });
+        }
+      }
+    })();
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) {
+        void supabase.realtime.setAuth(session.access_token);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      authListener.subscription.unsubscribe();
+      for (const channel of channels) {
+        void supabase.removeChannel(channel);
+      }
+    };
+  }, [activeOrganization, metal, projects, supabase]);
 
   async function createUntitledProject() {
     if (!activeOrganization || isCreatingProject) {
@@ -403,7 +515,21 @@ export function AppSidebar({
                       render={<Link href={`${basePath}/projects/${project.slug}`} />}
                       tooltip={project.name}
                     >
-                      <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} />
+                      <span className="flex size-4 shrink-0 items-center justify-center">
+                        <span
+                          className={cn(
+                            "size-2 rounded-full",
+                            runningProjectIds.has(project.id)
+                              ? "bg-emerald-500"
+                              : "bg-muted-foreground/40",
+                          )}
+                          aria-label={
+                            runningProjectIds.has(project.id)
+                              ? "Has running resources"
+                              : "No running resources"
+                          }
+                        />
+                      </span>
                       <span>{project.name}</span>
                     </SidebarMenuButton>
                     <DropdownMenu>

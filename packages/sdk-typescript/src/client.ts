@@ -249,10 +249,12 @@ export class MetalClient {
         path: `/v1/projects/${projectId}/sandboxes`,
         schema: z.object({ sandboxes: z.array(SandboxSchema) }),
       }),
-    pause: (projectId: string, sandboxId: string) =>
+    pause: (projectIdOrSandboxId: string, sandboxId?: string) =>
       this.request({
         method: "POST",
-        path: `/v1/projects/${projectId}/sandboxes/${sandboxId}/pause`,
+        path: sandboxId
+          ? `/v1/projects/${projectIdOrSandboxId}/sandboxes/${sandboxId}/pause`
+          : `/v1/sandboxes/${projectIdOrSandboxId}/pause`,
         schema: SandboxSchema,
       }),
     deleteFromProject: (projectId: string, sandboxId: string) =>
@@ -264,7 +266,15 @@ export class MetalClient {
     create: (
       input: {
         project_id?: string;
-        provider?: "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "vercel";
+        provider?:
+          | "blaxel"
+          | "cloudflare"
+          | "daytona"
+          | "e2b"
+          | "modal"
+          | "northflank"
+          | "runloop"
+          | "vercel";
         image?: string;
         language?: string;
         ttl_minutes?: number;

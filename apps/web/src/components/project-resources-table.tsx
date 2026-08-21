@@ -41,7 +41,8 @@ import { cn } from "@/lib/utils";
 type Sandbox = {
   id: string;
   type: "sandbox";
-  provider: "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "vercel";
+  provider:
+    "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "runloop" | "vercel";
   provider_cost_microusd: string | null;
   provider_cost_measured_through: string | null;
   provider_cost_updated_at: string | null;
@@ -123,6 +124,9 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
   }
   if (provider === "northflank") {
     return <Image src="/providers/northflank.svg" alt="" width={13} height={9} />;
+  }
+  if (provider === "runloop") {
+    return <Image src="/providers/runloop.png" alt="" width={13} height={13} />;
   }
   return <Image src="/providers/vercel.ico" alt="" width={13} height={13} />;
 }

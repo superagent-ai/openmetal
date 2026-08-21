@@ -131,7 +131,7 @@ function serializeSandbox(row: {
     organization_id: row.organizationId,
     project_id: row.projectId,
     provider: row.provider as
-      "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "vercel",
+      "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "runloop" | "vercel",
     provider_cost_microusd: row.providerCostMicrousd?.toString() ?? null,
     provider_cost_measured_through: row.providerCostMeasuredThrough?.toISOString() ?? null,
     provider_cost_updated_at: row.providerCostUpdatedAt?.toISOString() ?? null,
@@ -519,6 +519,18 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     const sandboxId = OpaqueIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
     return serializeSandbox(
       await getSandbox(db.db, {
+        sandboxId,
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+      }),
+    );
+  });
+
+  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/pause`, async (request) => {
+    const principal = await requireApiKeyPrincipal(request);
+    const sandboxId = OpaqueIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    return serializeSandbox(
+      await requestSandboxPause(db.db, {
         sandboxId,
         organizationId: principal.organizationId,
         projectId: principal.projectId,

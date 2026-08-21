@@ -280,7 +280,8 @@ export async function createSandbox(
     organizationId: string;
     projectId: string;
     actorId: string;
-    provider: "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "vercel";
+    provider:
+      "blaxel" | "cloudflare" | "daytona" | "e2b" | "modal" | "northflank" | "runloop" | "vercel";
     image?: string;
     language: string;
     ttlMinutes: number;

@@ -11,6 +11,7 @@ import { DaytonaSandboxProvider } from "@openmetal/provider-daytona";
 import { E2BSandboxProvider } from "@openmetal/provider-e2b";
 import { ModalSandboxProvider } from "@openmetal/provider-modal";
 import { NorthflankSandboxProvider } from "@openmetal/provider-northflank";
+import { RunloopSandboxProvider } from "@openmetal/provider-runloop";
 import { VercelSandboxProvider } from "@openmetal/provider-vercel";
 import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
 import { loadWorkerEnv } from "./env.js";
@@ -84,6 +85,26 @@ if (env.NORTHFLANK_API_TOKEN && env.NORTHFLANK_PROJECT_ID) {
     deploymentPlan: env.NORTHFLANK_DEPLOYMENT_PLAN,
     defaultImage: env.NORTHFLANK_DEFAULT_IMAGE,
     ephemeralStorageMb: env.NORTHFLANK_EPHEMERAL_STORAGE_MB,
+  });
+}
+// Runloop Devboxes provide the managed coding-sandbox lifecycle.
+if (env.RUNLOOP_API_KEY) {
+  const usageRatesMicrousd =
+    env.RUNLOOP_VCPU_HOUR_RATE_USD !== undefined &&
+    env.RUNLOOP_MEMORY_GB_HOUR_RATE_USD !== undefined &&
+    env.RUNLOOP_DISK_GB_HOUR_RATE_USD !== undefined
+      ? {
+          vcpuHour: BigInt(Math.round(env.RUNLOOP_VCPU_HOUR_RATE_USD * 1_000_000)),
+          memoryGbHour: BigInt(Math.round(env.RUNLOOP_MEMORY_GB_HOUR_RATE_USD * 1_000_000)),
+          diskGbHour: BigInt(Math.round(env.RUNLOOP_DISK_GB_HOUR_RATE_USD * 1_000_000)),
+        }
+      : undefined;
+  sandboxProviders.runloop = new RunloopSandboxProvider({
+    apiKey: env.RUNLOOP_API_KEY,
+    apiUrl: env.RUNLOOP_API_URL,
+    resourceSize: env.RUNLOOP_RESOURCE_SIZE,
+    blueprintId: env.RUNLOOP_BLUEPRINT_ID,
+    usageRatesMicrousd,
   });
 }
 const vercelToken = env.VERCEL_OIDC_TOKEN ?? env.VERCEL_TOKEN;

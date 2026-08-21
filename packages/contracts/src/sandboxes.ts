@@ -16,7 +16,14 @@ export const SandboxStatusSchema = z.enum([
 ]);
 export type SandboxStatus = z.infer<typeof SandboxStatusSchema>;
 
-export const SandboxProviderSchema = z.enum(["cloudflare", "daytona", "e2b", "modal", "vercel"]);
+export const SandboxProviderSchema = z.enum([
+  "blaxel",
+  "cloudflare",
+  "daytona",
+  "e2b",
+  "modal",
+  "vercel",
+]);
 export type SandboxProvider = z.infer<typeof SandboxProviderSchema>;
 
 export const SandboxSchema = z.object({

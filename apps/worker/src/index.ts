@@ -5,6 +5,7 @@ loadEnv({ path: ".env" });
 
 import { createDatabase } from "@openmetal/db";
 import { createLogger } from "@openmetal/logger";
+import { BlaxelSandboxProvider } from "@openmetal/provider-blaxel";
 import { CloudflareSandboxProvider } from "@openmetal/provider-cloudflare";
 import { DaytonaSandboxProvider } from "@openmetal/provider-daytona";
 import { E2BSandboxProvider } from "@openmetal/provider-e2b";
@@ -27,6 +28,20 @@ const publisher = createRealtimePublisher({
   secretKey: env.SUPABASE_SECRET_KEY,
 });
 const sandboxProviders: Partial<Record<SandboxProviderName, SandboxProvider>> = {};
+// Prefer Blaxel's native environment names while retaining the Metal-prefixed aliases.
+const blaxelApiKey = env.BL_API_KEY ?? env.BLAXEL_API_KEY;
+const blaxelWorkspace = env.BL_WORKSPACE ?? env.BLAXEL_WORKSPACE;
+if (blaxelApiKey && blaxelWorkspace) {
+  sandboxProviders.blaxel = new BlaxelSandboxProvider({
+    apiKey: blaxelApiKey,
+    workspace: blaxelWorkspace,
+    accountId: env.BLAXEL_ACCOUNT_ID,
+    apiUrl: env.BLAXEL_API_URL,
+    region: env.BLAXEL_REGION,
+    defaultImage: env.BLAXEL_DEFAULT_IMAGE,
+    defaultMemoryMb: env.BLAXEL_DEFAULT_MEMORY_MB,
+  });
+}
 if (env.CLOUDFLARE_SANDBOX_API_URL && env.CLOUDFLARE_SANDBOX_API_KEY) {
   sandboxProviders.cloudflare = new CloudflareSandboxProvider({
     apiUrl: env.CLOUDFLARE_SANDBOX_API_URL,

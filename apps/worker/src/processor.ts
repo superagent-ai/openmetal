@@ -199,7 +199,9 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
             ? 2_000
             : provider.name === "cloudflare"
               ? 10 * 60_000
-              : 120_000;
+              : provider.name === "blaxel"
+                ? 5 * 60_000
+                : 120_000;
         await scheduleCostSync(tx, updated.id, new Date(Date.now() + delayMs), true);
       }
     }
@@ -427,6 +429,10 @@ export async function processOnce(
     } catch (error) {
       const attempts = job.attemptCount;
       const terminal = attempts >= env.WORKER_MAX_ATTEMPTS;
+      const retryDelayMs =
+        payload?.job_type === "sandbox.cost.sync" && payload.final
+          ? 2 * 60_000
+          : backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS);
       if (terminal && payload && payload.job_type !== "realtime.broadcast") {
         await recordTerminalSandboxFailure(db, payload);
       }
@@ -435,9 +441,7 @@ export async function processOnce(
         .set({
           status: terminal ? "failed" : "pending",
           lastError: safeError(error),
-          availableAt: terminal
-            ? new Date()
-            : new Date(Date.now() + backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS)),
+          availableAt: terminal ? new Date() : new Date(Date.now() + retryDelayMs),
           leaseOwner: null,
           leaseExpiresAt: null,
           updatedAt: new Date(),

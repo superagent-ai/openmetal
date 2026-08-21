@@ -40,7 +40,7 @@ import { createClient } from "@/lib/supabase/client";
 type Sandbox = {
   id: string;
   type: "sandbox";
-  provider: "daytona";
+  provider: "daytona" | "modal";
   provider_cost_microusd: string | null;
   provider_cost_measured_through: string | null;
   provider_cost_updated_at: string | null;
@@ -102,6 +102,13 @@ function formatMicrousd(value: string | null) {
   const whole = amount / 1_000_000n;
   const fraction = (amount % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
   return `$${whole.toLocaleString("en-US")}.${fraction || "00"}`;
+}
+
+function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
+  if (provider === "daytona") {
+    return <Image src="/providers/daytona.svg" alt="" width={12} height={13} />;
+  }
+  return <Image src="/providers/modal.svg" alt="" width={13} height={13} />;
 }
 
 export function ProjectResourcesTable({
@@ -254,9 +261,9 @@ export function ProjectResourcesTable({
                     <TableCell>
                       <span className="flex items-center gap-2">
                         <span className="flex size-6 items-center justify-center rounded-md bg-muted">
-                          <Image src="/providers/daytona.svg" alt="" width={12} height={13} />
+                          <ProviderMark provider={sandbox.provider} />
                         </span>
-                        Daytona
+                        <span className="capitalize">{sandbox.provider}</span>
                       </span>
                     </TableCell>
                     <TableCell>
@@ -280,16 +287,19 @@ export function ProjectResourcesTable({
                       )}
                     </TableCell>
                     <TableCell
-                      className="font-mono text-xs"
                       title={
-                        sandbox.provider_cost_updated_at
-                          ? `Updated ${dateFormatter.format(
-                              new Date(sandbox.provider_cost_updated_at),
-                            )}`
-                          : "Waiting for Daytona usage data"
+                        sandbox.provider === "modal"
+                          ? "Modal does not expose per-sandbox provider cost"
+                          : sandbox.provider_cost_updated_at
+                            ? `Updated ${dateFormatter.format(
+                                new Date(sandbox.provider_cost_updated_at),
+                              )}`
+                            : "Waiting for Daytona usage data"
                       }
                     >
-                      {formatMicrousd(sandbox.provider_cost_microusd)}
+                      {sandbox.provider === "modal"
+                        ? "—"
+                        : formatMicrousd(sandbox.provider_cost_microusd)}
                     </TableCell>
                     <TableCell className="pr-4 text-right">
                       <DropdownMenu>
@@ -310,7 +320,7 @@ export function ProjectResourcesTable({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            disabled={sandbox.status !== "ready"}
+                            disabled={sandbox.provider === "modal" || sandbox.status !== "ready"}
                             onClick={() => void pauseSandbox(sandbox)}
                           >
                             <HugeiconsIcon icon={PauseIcon} strokeWidth={2} />

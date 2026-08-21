@@ -17,9 +17,11 @@ import {
   type OutboxJobPayload,
 } from "@openmetal/events";
 import { createLogger, redactString } from "@openmetal/logger";
-import type { SandboxProvider } from "@openmetal/provider-core";
+import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
 import type { WorkerEnv } from "./env.js";
 import type { BroadcastPublisher } from "./publisher.js";
+
+type SandboxProviders = Partial<Record<SandboxProviderName, SandboxProvider>>;
 
 function backoffMs(attempt: number, base: number): number {
   const exp = Math.min(base * 2 ** Math.max(attempt - 1, 0), 30_000);
@@ -81,7 +83,6 @@ async function recordSandboxEvent(
     organizationId: event.organizationId,
     projectId: event.projectId,
     occurredAt: event.occurredAt,
-    actorId: event.actorId,
     data: event.payload,
   });
   await tx.insert(outboxJobs).values({
@@ -138,7 +139,9 @@ async function provisionSandbox(db: MetalDb, provider: SandboxProvider, sandboxI
       .returning();
     if (updated) {
       await recordSandboxEvent(tx, updated, "sandbox.ready", { provider: provider.name });
-      await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
+      if (provider.capabilities.cost) {
+        await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
+      }
     }
   });
 }
@@ -165,7 +168,9 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
       await recordSandboxEvent(tx, updated, "sandbox.deleted", {
         provider: provider.name,
       });
-      await scheduleCostSync(tx, updated.id, new Date(Date.now() + 120_000), true);
+      if (provider.capabilities.cost) {
+        await scheduleCostSync(tx, updated.id, new Date(Date.now() + 120_000), true);
+      }
     }
   });
 }
@@ -193,7 +198,9 @@ async function pauseSandbox(db: MetalDb, provider: SandboxProvider, sandboxId: s
       await recordSandboxEvent(tx, updated, "sandbox.paused", {
         provider: provider.name,
       });
-      await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
+      if (provider.capabilities.cost) {
+        await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
+      }
     }
   });
 }
@@ -303,11 +310,30 @@ async function recordTerminalSandboxFailure(
   });
 }
 
+async function resolveSandboxProvider(
+  db: MetalDb,
+  providers: SandboxProviders,
+  sandboxId: string,
+): Promise<SandboxProvider> {
+  const sandbox = await db
+    .select({ provider: sandboxes.provider })
+    .from(sandboxes)
+    .where(eq(sandboxes.id, sandboxId))
+    .then((rows) => rows[0]);
+  const provider = sandbox ? providers[sandbox.provider as SandboxProviderName] : undefined;
+  if (!provider) {
+    throw new Error(
+      sandbox ? `${sandbox.provider} sandbox provider is not configured` : "sandbox not found",
+    );
+  }
+  return provider;
+}
+
 export async function processOnce(
   db: MetalDb,
   publisher: BroadcastPublisher,
   env: WorkerEnv,
-  sandboxProvider?: SandboxProvider,
+  providers: SandboxProviders = {},
 ): Promise<number> {
   const logger = createLogger({
     service: "worker",
@@ -332,9 +358,7 @@ export async function processOnce(
       if (payload.job_type === "realtime.broadcast") {
         await publisher.publish(payload.topic, payload.event.type, payload.event);
       } else {
-        if (!sandboxProvider) {
-          throw new Error("sandbox provider is not configured");
-        }
+        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
         if (payload.job_type === "sandbox.provision") {
           await provisionSandbox(db, sandboxProvider, payload.sandbox_id);
         } else if (payload.job_type === "sandbox.pause") {
@@ -403,19 +427,24 @@ export async function runWorkerLoop(
   publisher: BroadcastPublisher,
   env: WorkerEnv,
   signal: AbortSignal,
-  sandboxProvider?: SandboxProvider,
+  providers: SandboxProviders = {},
 ): Promise<void> {
-  if (sandboxProvider) {
-    const missingCosts = await db
-      .select({ id: sandboxes.id, status: sandboxes.status })
-      .from(sandboxes)
-      .where(and(isNotNull(sandboxes.providerResourceId), isNull(sandboxes.providerCostUpdatedAt)));
-    for (const sandbox of missingCosts) {
+  const missingCosts = await db
+    .select({
+      id: sandboxes.id,
+      status: sandboxes.status,
+      provider: sandboxes.provider,
+    })
+    .from(sandboxes)
+    .where(and(isNotNull(sandboxes.providerResourceId), isNull(sandboxes.providerCostUpdatedAt)));
+  for (const sandbox of missingCosts) {
+    const provider = providers[sandbox.provider as SandboxProviderName];
+    if (provider?.capabilities.cost) {
       await scheduleCostSync(db, sandbox.id, new Date(), sandbox.status === "deleted");
     }
   }
   while (!signal.aborted) {
-    await processOnce(db, publisher, env, sandboxProvider);
+    await processOnce(db, publisher, env, providers);
     await new Promise((resolve) => {
       const timer = setTimeout(resolve, env.WORKER_POLL_MS);
       signal.addEventListener("abort", () => {

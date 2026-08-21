@@ -29,9 +29,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           preferredOrganizationId={preferredOrganization?.id}
         />
         <ScrollArea className="min-h-0 w-full flex-1">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 pt-12">
-            {children}
-          </div>
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 pt-12">{children}</div>
         </ScrollArea>
       </SidebarInset>
     </SidebarProvider>

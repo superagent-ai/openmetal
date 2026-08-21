@@ -1,4 +1,4 @@
-import { parseTopic, validateOutboxPayload } from "@openmetal/events";
+import { parseTopic, RealtimeBroadcastJobPayloadSchema } from "@openmetal/events";
 
 export type BroadcastPublisher = {
   publish: (topic: string, eventName: string, payload: unknown) => Promise<void>;
@@ -36,7 +36,7 @@ export function createRealtimePublisher(input: {
 }
 
 export function parseJobPayload(payload: unknown) {
-  const parsed = validateOutboxPayload(payload);
+  const parsed = RealtimeBroadcastJobPayloadSchema.parse(payload);
   const topic = parseTopic(parsed.topic);
   if (topic.kind === "project" && parsed.event.project_id !== topic.id) {
     throw new Error("outbox project topic does not match event");

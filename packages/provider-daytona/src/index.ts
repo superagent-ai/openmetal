@@ -25,6 +25,7 @@ class DaytonaRequestError extends Error {
 
 export class DaytonaSandboxProvider implements SandboxProvider {
   readonly name = "daytona" as const;
+  readonly capabilities = { pause: true, cost: true } as const;
   private readonly apiKey: string;
   private readonly apiUrl: string;
   private readonly analyticsApiUrl: string;

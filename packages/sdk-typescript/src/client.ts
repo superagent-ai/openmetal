@@ -264,6 +264,7 @@ export class MetalClient {
     create: (
       input: {
         project_id?: string;
+        provider?: "daytona" | "modal";
         image?: string;
         language?: string;
         ttl_minutes?: number;

@@ -167,10 +167,7 @@ export function ProjectResourcesTable({
       }
       if (!cancelled) {
         channel.subscribe((status) => {
-          if (
-            !cancelled &&
-            (status === "CHANNEL_ERROR" || status === "TIMED_OUT")
-          ) {
+          if (!cancelled && (status === "CHANNEL_ERROR" || status === "TIMED_OUT")) {
             setError("Realtime resource updates disconnected");
           }
         });
@@ -392,7 +389,7 @@ export function ProjectResourcesTable({
                     ? "E2B"
                     : deletingSandbox.provider === "daytona"
                       ? "Daytona"
-                        : "Modal"}
+                      : "Modal"}
                   {"."}
                 </span>
               </AlertDialogDescription>

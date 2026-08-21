@@ -5,6 +5,7 @@ loadEnv({ path: ".env" });
 
 import { createDatabase } from "@openmetal/db";
 import { createLogger } from "@openmetal/logger";
+import { CloudflareSandboxProvider } from "@openmetal/provider-cloudflare";
 import { DaytonaSandboxProvider } from "@openmetal/provider-daytona";
 import { E2BSandboxProvider } from "@openmetal/provider-e2b";
 import { ModalSandboxProvider } from "@openmetal/provider-modal";
@@ -26,6 +27,14 @@ const publisher = createRealtimePublisher({
   secretKey: env.SUPABASE_SECRET_KEY,
 });
 const sandboxProviders: Partial<Record<SandboxProviderName, SandboxProvider>> = {};
+if (env.CLOUDFLARE_SANDBOX_API_URL && env.CLOUDFLARE_SANDBOX_API_KEY) {
+  sandboxProviders.cloudflare = new CloudflareSandboxProvider({
+    apiUrl: env.CLOUDFLARE_SANDBOX_API_URL,
+    apiKey: env.CLOUDFLARE_SANDBOX_API_KEY,
+    accountId: env.CLOUDFLARE_ACCOUNT_ID,
+    analyticsToken: env.CLOUDFLARE_ANALYTICS_API_TOKEN,
+  });
+}
 if (env.DAYTONA_API_KEY) {
   sandboxProviders.daytona = new DaytonaSandboxProvider({
     apiKey: env.DAYTONA_API_KEY,

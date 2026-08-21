@@ -40,7 +40,7 @@ import { createClient } from "@/lib/supabase/client";
 type Sandbox = {
   id: string;
   type: "sandbox";
-  provider: "daytona" | "e2b" | "modal" | "vercel";
+  provider: "cloudflare" | "daytona" | "e2b" | "modal" | "vercel";
   provider_cost_microusd: string | null;
   provider_cost_measured_through: string | null;
   provider_cost_updated_at: string | null;
@@ -105,6 +105,9 @@ function formatMicrousd(value: string | null) {
 }
 
 function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
+  if (provider === "cloudflare") {
+    return <Image src="/providers/cloudflare.ico" alt="" width={13} height={13} />;
+  }
   if (provider === "daytona") {
     return <Image src="/providers/daytona.svg" alt="" width={12} height={13} />;
   }
@@ -347,6 +350,7 @@ export function ProjectResourcesTable({
                           <DropdownMenuItem
                             disabled={
                               sandbox.provider === "modal" ||
+                              sandbox.provider === "cloudflare" ||
                               sandbox.provider === "vercel" ||
                               sandbox.status !== "ready"
                             }

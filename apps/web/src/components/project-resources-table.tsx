@@ -40,7 +40,7 @@ import { createClient } from "@/lib/supabase/client";
 type Sandbox = {
   id: string;
   type: "sandbox";
-  provider: "daytona" | "e2b" | "modal";
+  provider: "daytona" | "e2b" | "modal" | "vercel";
   provider_cost_microusd: string | null;
   provider_cost_measured_through: string | null;
   provider_cost_updated_at: string | null;
@@ -111,7 +111,17 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
   if (provider === "e2b") {
     return <Image src="/providers/e2b.png" alt="" width={13} height={13} />;
   }
-  return <Image src="/providers/modal.svg" alt="" width={13} height={13} />;
+  if (provider === "modal") {
+    return <Image src="/providers/modal.svg" alt="" width={13} height={13} />;
+  }
+  return <Image src="/providers/vercel.ico" alt="" width={13} height={13} />;
+}
+
+function providerLabel(provider: Sandbox["provider"]) {
+  if (provider === "e2b") {
+    return "E2B";
+  }
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
 export function ProjectResourcesTable({
@@ -278,13 +288,7 @@ export function ProjectResourcesTable({
                         <span className="flex size-6 items-center justify-center rounded-md bg-muted">
                           <ProviderMark provider={sandbox.provider} />
                         </span>
-                        <span className="normal-case">
-                          {sandbox.provider === "e2b"
-                            ? "E2B"
-                            : sandbox.provider === "daytona"
-                              ? "Daytona"
-                              : "Modal"}
-                        </span>
+                        <span className="normal-case">{providerLabel(sandbox.provider)}</span>
                       </span>
                     </TableCell>
                     <TableCell>
@@ -341,7 +345,11 @@ export function ProjectResourcesTable({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            disabled={sandbox.provider === "modal" || sandbox.status !== "ready"}
+                            disabled={
+                              sandbox.provider === "modal" ||
+                              sandbox.provider === "vercel" ||
+                              sandbox.status !== "ready"
+                            }
                             onClick={() => void pauseSandbox(sandbox)}
                           >
                             <HugeiconsIcon icon={PauseIcon} strokeWidth={2} />
@@ -385,11 +393,7 @@ export function ProjectResourcesTable({
               <AlertDialogDescription>
                 The sandbox and its filesystem will be permanently deleted from{" "}
                 <span className="normal-case">
-                  {deletingSandbox.provider === "e2b"
-                    ? "E2B"
-                    : deletingSandbox.provider === "daytona"
-                      ? "Daytona"
-                      : "Modal"}
+                  {providerLabel(deletingSandbox.provider)}
                   {"."}
                 </span>
               </AlertDialogDescription>

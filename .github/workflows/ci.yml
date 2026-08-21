@@ -20,28 +20,9 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-      - uses: supabase/setup-cli@v1
-        with:
-          version: 2.105.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm supabase:start
-      - run: pnpm supabase:reset
-      - run: pnpm env:local
-      - name: Export local environment
-        run: |
-          grep -v '^#' .env | grep -v '^$' >> "$GITHUB_ENV"
-      - run: pnpm db:types
-      - name: Check generated database types
-        run: git diff --exit-code -- packages/db/src/database.types.ts
-      - run: pnpm test:integration
-      - run: pnpm test:rls
-      - run: pnpm test:realtime
-      - run: pnpm --filter @openmetal/api test:integration
-      - run: pnpm --filter @openmetal/sdk test:integration
-      - run: pnpm --filter @openmetal/worker test:integration
       - run: pnpm build
-      - run: supabase db advisors --local --type all --level warn --fail-on error

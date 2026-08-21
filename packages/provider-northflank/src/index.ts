@@ -251,9 +251,7 @@ export class NorthflankSandboxProvider implements SandboxProvider {
   }
 
   private billingPath(): string {
-    return this.teamId
-      ? `/teams/${encodeURIComponent(this.teamId)}/billing/usage`
-      : "/billing/usage";
+    return "/billing/usage";
   }
 
   private async waitUntilReady(

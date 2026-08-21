@@ -49,6 +49,11 @@ export const WorkerEnvSchema = z.object({
   WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(10),
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(8),
   WORKER_BASE_BACKOFF_MS: z.coerce.number().int().min(1).default(200),
+  WORKER_COST_SWEEP_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(5 * 60_000),
 });
 export type WorkerEnv = z.infer<typeof WorkerEnvSchema>;
 
@@ -102,5 +107,6 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     WORKER_BATCH_SIZE: source.WORKER_BATCH_SIZE,
     WORKER_MAX_ATTEMPTS: source.WORKER_MAX_ATTEMPTS,
     WORKER_BASE_BACKOFF_MS: source.WORKER_BASE_BACKOFF_MS,
+    WORKER_COST_SWEEP_MS: source.WORKER_COST_SWEEP_MS,
   });
 }

@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   claimOutboxJobs,
   domainEvents,
@@ -26,6 +26,12 @@ type SandboxProviders = Partial<Record<SandboxProviderName, SandboxProvider>>;
 function backoffMs(attempt: number, base: number): number {
   const exp = Math.min(base * 2 ** Math.max(attempt - 1, 0), 30_000);
   return Math.round(exp * (0.5 + Math.random()));
+}
+
+function northflankBillingAvailableAt(measuredThrough: Date): Date {
+  const hourMs = 60 * 60_000;
+  const nextHour = (Math.floor(measuredThrough.getTime() / hourMs) + 1) * hourMs;
+  return new Date(nextHour + 10 * 60_000);
 }
 
 function safeError(error: unknown): string {
@@ -140,7 +146,7 @@ async function provisionSandbox(db: MetalDb, provider: SandboxProvider, sandboxI
       .returning();
     if (updated) {
       await recordSandboxEvent(tx, updated, "sandbox.ready", { provider: provider.name });
-      if (provider.capabilities.cost) {
+      if (provider.capabilities.cost && provider.name !== "northflank") {
         await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
       }
       if (provider.name === "cloudflare" || provider.name === "northflank") {
@@ -194,17 +200,17 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
         provider: provider.name,
       });
       if (provider.capabilities.cost) {
-        const delayMs =
+        const availableAt =
           provider.name === "e2b" || provider.name === "vercel"
-            ? 2_000
+            ? new Date(Date.now() + 2_000)
             : provider.name === "cloudflare"
-              ? 10 * 60_000
+              ? new Date(Date.now() + 10 * 60_000)
               : provider.name === "blaxel"
-                ? 5 * 60_000
+                ? new Date(Date.now() + 5 * 60_000)
                 : provider.name === "northflank"
-                  ? 10 * 60_000
-                  : 120_000;
-        await scheduleCostSync(tx, updated.id, new Date(Date.now() + delayMs), true);
+                  ? northflankBillingAvailableAt(updated.deletedAt ?? new Date())
+                  : new Date(Date.now() + 120_000);
+        await scheduleCostSync(tx, updated.id, availableAt, true);
       }
     }
   });
@@ -240,7 +246,14 @@ async function pauseSandbox(db: MetalDb, provider: SandboxProvider, sandboxId: s
         provider: provider.name,
       });
       if (provider.capabilities.cost) {
-        await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
+        await scheduleCostSync(
+          tx,
+          updated.id,
+          provider.name === "northflank"
+            ? northflankBillingAvailableAt(updated.pausedAt ?? new Date())
+            : new Date(Date.now() + 5_000),
+          provider.name === "northflank",
+        );
       }
     }
   });
@@ -466,6 +479,85 @@ export async function processOnce(
   return jobs.length;
 }
 
+async function scheduleMissingSandboxCosts(db: MetalDb, providers: SandboxProviders, now: Date) {
+  const activeJobs = await db
+    .select({ payload: outboxJobs.payload })
+    .from(outboxJobs)
+    .where(
+      and(
+        eq(outboxJobs.jobType, "sandbox.cost.sync"),
+        inArray(outboxJobs.status, ["pending", "leased"]),
+      ),
+    );
+  const activeSandboxIds = new Set<string>();
+  for (const job of activeJobs) {
+    const parsed = OutboxJobPayloadSchema.safeParse(job.payload);
+    if (parsed.success && parsed.data.job_type === "sandbox.cost.sync") {
+      activeSandboxIds.add(parsed.data.sandbox_id);
+    }
+  }
+
+  const missingCosts = await db
+    .select({
+      id: sandboxes.id,
+      status: sandboxes.status,
+      provider: sandboxes.provider,
+      pausedAt: sandboxes.pausedAt,
+      deletedAt: sandboxes.deletedAt,
+    })
+    .from(sandboxes)
+    .where(
+      and(
+        isNotNull(sandboxes.providerResourceId),
+        sql`(
+          ${sandboxes.providerCostUpdatedAt} is null
+          or (
+            ${sandboxes.status} = 'deleted'
+            and ${sandboxes.deletedAt} is not null
+            and (
+              ${sandboxes.providerCostMeasuredThrough} is null
+              or ${sandboxes.providerCostMeasuredThrough} < ${sandboxes.deletedAt}
+            )
+          )
+          or (
+            ${sandboxes.status} = 'paused'
+            and ${sandboxes.pausedAt} is not null
+            and (
+              ${sandboxes.providerCostMeasuredThrough} is null
+              or ${sandboxes.providerCostMeasuredThrough} < ${sandboxes.pausedAt}
+            )
+          )
+        )`,
+      ),
+    );
+  for (const sandbox of missingCosts) {
+    if (activeSandboxIds.has(sandbox.id)) {
+      continue;
+    }
+    const provider = providers[sandbox.provider as SandboxProviderName];
+    if (!provider?.capabilities.cost) {
+      continue;
+    }
+    if (provider.name === "northflank" && sandbox.status === "ready") {
+      continue;
+    }
+    const final =
+      sandbox.status === "deleted" ||
+      (provider.name === "northflank" && sandbox.status === "paused");
+    const measuredThrough = sandbox.deletedAt ?? sandbox.pausedAt;
+    const providerAvailableAt =
+      provider.name === "northflank" && final && measuredThrough
+        ? northflankBillingAvailableAt(measuredThrough)
+        : now;
+    await scheduleCostSync(
+      db,
+      sandbox.id,
+      new Date(Math.max(providerAvailableAt.getTime(), now.getTime())),
+      final,
+    );
+  }
+}
+
 export async function runWorkerLoop(
   db: MetalDb,
   publisher: BroadcastPublisher,
@@ -473,21 +565,14 @@ export async function runWorkerLoop(
   signal: AbortSignal,
   providers: SandboxProviders = {},
 ): Promise<void> {
-  const missingCosts = await db
-    .select({
-      id: sandboxes.id,
-      status: sandboxes.status,
-      provider: sandboxes.provider,
-    })
-    .from(sandboxes)
-    .where(and(isNotNull(sandboxes.providerResourceId), isNull(sandboxes.providerCostUpdatedAt)));
-  for (const sandbox of missingCosts) {
-    const provider = providers[sandbox.provider as SandboxProviderName];
-    if (provider?.capabilities.cost) {
-      await scheduleCostSync(db, sandbox.id, new Date(), sandbox.status === "deleted");
-    }
-  }
+  let nextCostSweepAt = 0;
   while (!signal.aborted) {
+    const now = Date.now();
+    if (now >= nextCostSweepAt) {
+      const sweepBucket = Math.floor(now / env.WORKER_COST_SWEEP_MS) * env.WORKER_COST_SWEEP_MS;
+      await scheduleMissingSandboxCosts(db, providers, new Date(sweepBucket));
+      nextCostSweepAt = sweepBucket + env.WORKER_COST_SWEEP_MS;
+    }
     await processOnce(db, publisher, env, providers);
     await new Promise((resolve) => {
       const timer = setTimeout(resolve, env.WORKER_POLL_MS);

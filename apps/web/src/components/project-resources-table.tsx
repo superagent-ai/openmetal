@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/table";
 import { createMetalClient } from "@/lib/metal";
 import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
 
 type Sandbox = {
   id: string;
@@ -131,6 +132,25 @@ function providerLabel(provider: Sandbox["provider"]) {
     return "E2B";
   }
   return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
+function statusBadgeClass(status: string) {
+  if (status === "ready") {
+    return "bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300";
+  }
+  if (status === "requested" || status === "provisioning") {
+    return "bg-sky-500/15 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300";
+  }
+  if (status === "pausing" || status === "deleting" || status === "cleanup_pending") {
+    return "bg-amber-500/15 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300";
+  }
+  if (status === "failed" || status === "cleanup_failed") {
+    return "bg-destructive/10 text-destructive dark:bg-destructive/20";
+  }
+  if (status === "provision_unknown") {
+    return "bg-violet-500/15 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300";
+  }
+  return "bg-muted text-muted-foreground";
 }
 
 export function ProjectResourcesTable({
@@ -307,7 +327,10 @@ export function ProjectResourcesTable({
                       </span>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className="capitalize">
+                      <Badge
+                        variant="secondary"
+                        className={cn("capitalize", statusBadgeClass(sandbox.status))}
+                      >
                         {sandbox.status.replaceAll("_", " ")}
                       </Badge>
                     </TableCell>

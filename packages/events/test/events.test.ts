@@ -15,7 +15,7 @@ import {
 describe("events", () => {
   it("constructs and parses validated topics", () => {
     const organizationId = "11111111-1111-4111-8111-111111111111";
-    const projectId = "22222222-2222-4222-8222-222222222222";
+    const projectId = "prj_22222222222242228222222222222222";
     expect(organizationTopic(organizationId)).toBe(`organization:${organizationId}`);
     expect(projectTopic(projectId)).toBe(`project:${projectId}`);
     expect(parseTopic(`project:${projectId}`)).toEqual({ kind: "project", id: projectId });
@@ -54,7 +54,7 @@ describe("events", () => {
       eventId: "11111111-1111-4111-8111-111111111111",
       type: "project.created",
       organizationId: "22222222-2222-4222-8222-222222222222",
-      projectId: "33333333-3333-4333-8333-333333333333",
+      projectId: "prj_33333333333343338333333333333333",
       occurredAt: "2026-08-20T12:00:00.000Z",
       data: {
         authorization: "Bearer secret-token",

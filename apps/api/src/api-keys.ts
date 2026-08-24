@@ -53,11 +53,11 @@ export async function listProjectApiKeys(
   db: MetalDb,
   input: { userId: string; projectId: string },
 ) {
-  await getProject(db, input.userId, input.projectId);
+  const project = await getProject(db, input.userId, input.projectId);
   return db
     .select()
     .from(projectApiKeys)
-    .where(and(eq(projectApiKeys.projectId, input.projectId), isNull(projectApiKeys.deletedAt)));
+    .where(and(eq(projectApiKeys.projectId, project.id), isNull(projectApiKeys.deletedAt)));
 }
 
 export async function revokeProjectApiKey(
@@ -72,7 +72,7 @@ export async function revokeProjectApiKey(
     .where(
       and(
         eq(projectApiKeys.id, input.apiKeyId),
-        eq(projectApiKeys.projectId, input.projectId),
+        eq(projectApiKeys.projectId, project.id),
         isNull(projectApiKeys.revokedAt),
         isNull(projectApiKeys.deletedAt),
       ),
@@ -96,7 +96,7 @@ export async function deleteProjectApiKey(
     .where(
       and(
         eq(projectApiKeys.id, input.apiKeyId),
-        eq(projectApiKeys.projectId, input.projectId),
+        eq(projectApiKeys.projectId, project.id),
         isNotNull(projectApiKeys.revokedAt),
         isNull(projectApiKeys.deletedAt),
       ),

@@ -21,6 +21,7 @@
     "@openmetal/contracts": "workspace:*",
     "@openmetal/db": "workspace:*",
     "@openmetal/events": "workspace:*",
+    "@openmetal/provider-core": "workspace:*",
     "@openmetal/sdk": "workspace:*",
     "@supabase/supabase-js": "2.112.3",
     "dotenv": "17.4.2",

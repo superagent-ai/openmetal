@@ -23,6 +23,7 @@ describe("private realtime", () => {
     users.push(owner.user.id, outsider.user.id);
     const organizationId = crypto.randomUUID();
     const projectId = crypto.randomUUID();
+    const projectPublicId = `prj_${projectId.replaceAll("-", "")}`;
     await database.sql`
       insert into public.organizations (id, name, slug)
       values (${organizationId}, 'Rt Org', ${`rt-${organizationId.slice(0, 8)}`})
@@ -32,11 +33,11 @@ describe("private realtime", () => {
       values (${organizationId}, ${owner.user.id}, 'owner')
     `;
     await database.sql`
-      insert into public.projects (id, organization_id, name, slug)
-      values (${projectId}, ${organizationId}, 'Rt Project', ${`rtp-${projectId.slice(0, 8)}`})
+      insert into public.projects (id, public_id, organization_id, name, slug)
+      values (${projectId}, ${projectPublicId}, ${organizationId}, 'Rt Project', ${`rtp-${projectId.slice(0, 8)}`})
     `;
 
-    const topic = projectTopic(projectId);
+    const topic = projectTopic(projectPublicId);
     const ownerClient = createClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${owner.accessToken}` } },
@@ -109,7 +110,7 @@ describe("private realtime", () => {
       event_id: eventId,
       type: "project.created",
       organization_id: organizationId,
-      project_id: projectId,
+      project_id: projectPublicId,
       occurred_at: new Date().toISOString(),
       data: {},
     };

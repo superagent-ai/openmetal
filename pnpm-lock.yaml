@@ -322,6 +322,9 @@ importers:
       '@types/node':
         specifier: 24.12.0
         version: 24.12.0
+      dotenv:
+        specifier: 17.4.2
+        version: 17.4.2
       eslint:
         specifier: 9.39.5
         version: 9.39.5(jiti@2.7.0)
@@ -700,6 +703,9 @@ importers:
       '@openmetal/events':
         specifier: workspace:*
         version: link:../events
+      '@openmetal/provider-core':
+        specifier: workspace:*
+        version: link:../provider-core
       '@openmetal/sdk':
         specifier: workspace:*
         version: link:../sdk-typescript

@@ -5,6 +5,7 @@ import {
   JsonObjectSchema,
   OpaqueIdSchema,
   PaginationLimitSchema,
+  ProjectIdSchema,
 } from "./primitives.js";
 
 export const EventTypeSchema = z.enum([
@@ -15,6 +16,9 @@ export const EventTypeSchema = z.enum([
   "sandbox.requested",
   "sandbox.ready",
   "sandbox.paused",
+  "sandbox.resumed",
+  "sandbox.attempt_started",
+  "sandbox.attempt_failed",
   "sandbox.cost_updated",
   "sandbox.failed",
   "sandbox.deleted",
@@ -26,7 +30,7 @@ export const DurableEventEnvelopeSchema = z.object({
   event_id: OpaqueIdSchema,
   type: z.string().min(1),
   organization_id: OpaqueIdSchema,
-  project_id: OpaqueIdSchema.optional(),
+  project_id: ProjectIdSchema.optional(),
   occurred_at: IsoDateTimeSchema,
   data: JsonObjectSchema,
 });
@@ -39,7 +43,7 @@ export const CursorEventPageSchema = z.object({
 export type CursorEventPage = z.infer<typeof CursorEventPageSchema>;
 
 export const ListEventsQuerySchema = z.object({
-  project_id: OpaqueIdSchema,
+  project_id: ProjectIdSchema,
   after: CursorSchema.optional(),
   limit: PaginationLimitSchema.default(50),
 });

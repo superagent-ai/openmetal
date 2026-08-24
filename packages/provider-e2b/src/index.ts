@@ -23,7 +23,7 @@ const SandboxSchema = z
   })
   .passthrough();
 
-const LifecycleEventsSchema = z.array(
+const LifecycleEventArraySchema = z.array(
   z
     .object({
       id: z.string().min(1),
@@ -47,6 +47,9 @@ const LifecycleEventsSchema = z.array(
     })
     .passthrough(),
 );
+const LifecycleEventsSchema = z
+  .union([LifecycleEventArraySchema, z.object({ events: LifecycleEventArraySchema })])
+  .transform((value) => (Array.isArray(value) ? value : value.events));
 
 export type E2BSandboxProviderOptions = {
   apiKey: string;
@@ -64,7 +67,13 @@ class E2BRequestError extends Error {
 
 export class E2BSandboxProvider implements SandboxProvider {
   readonly name = "e2b" as const;
-  readonly capabilities = { pause: true, cost: true } as const;
+  readonly capabilities = {
+    pause: true,
+    resume: true,
+    cost: true,
+    sizing: "template",
+    sources: ["environment", "provider_template"],
+  } as const;
   private readonly apiKey: string;
   private readonly apiUrl: string;
   private readonly templateId: string;
@@ -80,6 +89,12 @@ export class E2BSandboxProvider implements SandboxProvider {
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
+    const templateId =
+      typeof input.providerOptions?.template_id === "string"
+        ? input.providerOptions.template_id
+        : input.source.kind === "provider_template"
+          ? input.source.template
+          : (input.image ?? this.templateId);
     const existing = await this.findByMetalId(input.metalSandboxId, input.signal);
     const created =
       existing ??
@@ -87,7 +102,7 @@ export class E2BSandboxProvider implements SandboxProvider {
         await this.request("/sandboxes", {
           method: "POST",
           body: JSON.stringify({
-            templateID: input.image ?? this.templateId,
+            templateID: templateId,
             timeout: input.ttlMinutes * 60,
             autoPause: false,
             secure: true,
@@ -115,6 +130,13 @@ export class E2BSandboxProvider implements SandboxProvider {
         memoryMB: detail.memoryMB,
         templateId: detail.templateID,
       },
+      resolvedResources: {
+        vcpu: detail.cpuCount ?? input.resources.vcpu,
+        memoryMb: detail.memoryMB ?? input.resources.memoryMb,
+        diskMb: input.resources.diskMb ?? null,
+        architecture: input.resources.architecture === "arm64" ? "arm64" : "x86_64",
+        providerSize: detail.templateID,
+      },
     };
   }
 
@@ -126,6 +148,64 @@ export class E2BSandboxProvider implements SandboxProvider {
     });
   }
 
+  async reconcileCreate(
+    metalSandboxId: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderSandbox | null> {
+    const existing = await this.findByMetalId(metalSandboxId, signal);
+    if (!existing) return null;
+    return {
+      providerResourceId: existing.sandboxID,
+      providerOrganizationId: existing.clientID,
+      providerMetadata: {
+        startedAt: existing.startedAt,
+        cpuCount: existing.cpuCount,
+        memoryMB: existing.memoryMB,
+        templateId: existing.templateID,
+      },
+      resolvedResources:
+        existing.cpuCount && existing.memoryMB
+          ? {
+              vcpu: existing.cpuCount,
+              memoryMb: existing.memoryMB,
+              diskMb: null,
+              architecture: "x86_64",
+              providerSize: existing.templateID,
+            }
+          : undefined,
+    };
+  }
+
+  async resume(providerResourceId: string, signal?: AbortSignal): Promise<ProviderSandbox> {
+    const detail = SandboxSchema.parse(
+      await this.request(`/sandboxes/${encodeURIComponent(providerResourceId)}/resume`, {
+        method: "POST",
+        body: JSON.stringify({ timeout: 3600 }),
+        signal,
+      }),
+    );
+    return {
+      providerResourceId: detail.sandboxID,
+      providerOrganizationId: detail.clientID,
+      providerMetadata: {
+        startedAt: detail.startedAt,
+        cpuCount: detail.cpuCount,
+        memoryMB: detail.memoryMB,
+        templateId: detail.templateID,
+      },
+      resolvedResources:
+        detail.cpuCount && detail.memoryMB
+          ? {
+              vcpu: detail.cpuCount,
+              memoryMb: detail.memoryMB,
+              diskMb: null,
+              architecture: "x86_64",
+              providerSize: detail.templateID,
+            }
+          : undefined,
+    };
+  }
+
   async destroy(providerResourceId: string, signal?: AbortSignal): Promise<void> {
     await this.request(`/sandboxes/${encodeURIComponent(providerResourceId)}`, {
       method: "DELETE",
@@ -135,12 +215,12 @@ export class E2BSandboxProvider implements SandboxProvider {
   }
 
   async getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost | null> {
-    const events = LifecycleEventsSchema.parse(
-      await this.request(
-        `/events/sandboxes/${encodeURIComponent(input.providerResourceId)}?limit=100&orderAsc=true`,
-        { method: "GET", signal: input.signal },
-      ),
+    const response = await this.request(
+      `/events/sandboxes/${encodeURIComponent(input.providerResourceId)}?limit=100&orderAsc=true`,
+      { method: "GET", signal: input.signal, allowNotFound: true },
     );
+    if (!response) return null;
+    const events = LifecycleEventsSchema.parse(response);
     const completedExecutions = new Map<
       string,
       { durationMs: number; memoryMB: number; vcpuCount: number; timestamp: Date }

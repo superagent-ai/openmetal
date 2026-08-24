@@ -1,5 +1,14 @@
 import { z } from "zod";
-import { ProjectApiKeySchema, SandboxSchema } from "@openmetal/contracts";
+import {
+  CreateSandboxRequestSchema,
+  OperationSchema,
+  ProjectApiKeySchema,
+  SandboxMutationSchema,
+  SandboxSchema,
+  type CreateSandboxRequest,
+  type Operation,
+  type SandboxMutation,
+} from "@openmetal/contracts";
 import { MetalError } from "./error.js";
 
 export type AccessTokenProvider = () =>
@@ -242,6 +251,33 @@ export class MetalClient {
       }),
   };
 
+  readonly operations = {
+    get: (operationId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/operations/${operationId}`,
+        schema: OperationSchema,
+      }) as Promise<Operation>,
+    wait: async (
+      operationOrId: Operation | string,
+      options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    ) => {
+      const operationId = typeof operationOrId === "string" ? operationOrId : operationOrId.id;
+      const deadline = Date.now() + (options.timeoutMs ?? 180_000);
+      while (Date.now() < deadline) {
+        if (options.signal?.aborted) {
+          throw options.signal.reason ?? new Error("operation wait aborted");
+        }
+        const operation = await this.operations.get(operationId);
+        if (["succeeded", "failed", "cancelled"].includes(operation.state)) {
+          return operation;
+        }
+        await sleep(500);
+      }
+      throw new Error(`operation ${operationId} did not complete before timeout`);
+    },
+  };
+
   readonly sandboxes = {
     list: (projectId: string) =>
       this.request({
@@ -249,58 +285,90 @@ export class MetalClient {
         path: `/v1/projects/${projectId}/sandboxes`,
         schema: z.object({ sandboxes: z.array(SandboxSchema) }),
       }),
-    pause: (projectIdOrSandboxId: string, sandboxId?: string) =>
-      this.request({
-        method: "POST",
-        path: sandboxId
-          ? `/v1/projects/${projectIdOrSandboxId}/sandboxes/${sandboxId}/pause`
-          : `/v1/sandboxes/${projectIdOrSandboxId}/pause`,
-        schema: SandboxSchema,
-      }),
-    deleteFromProject: (projectId: string, sandboxId: string) =>
-      this.request({
-        method: "DELETE",
-        path: `/v1/projects/${projectId}/sandboxes/${sandboxId}`,
-        schema: SandboxSchema,
-      }),
-    create: (
-      input: {
-        project_id?: string;
-        provider?:
-          | "blaxel"
-          | "cloudflare"
-          | "codesandbox"
-          | "daytona"
-          | "e2b"
-          | "modal"
-          | "northflank"
-          | "runloop"
-          | "vercel";
-        image?: string;
-        language?: string;
-        ttl_minutes?: number;
-      } = {},
-      options?: { idempotencyKey?: string },
-    ) =>
+    createAsync: (input: CreateSandboxRequest, options?: { idempotencyKey?: string }) =>
       this.request({
         method: "POST",
         path: "/v1/sandboxes",
-        body: input,
+        body: CreateSandboxRequestSchema.parse(input),
         idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
-        schema: SandboxSchema,
-      }),
+        schema: SandboxMutationSchema,
+      }) as Promise<SandboxMutation>,
+    create: async (
+      input: CreateSandboxRequest,
+      options?: {
+        idempotencyKey?: string;
+        timeoutMs?: number;
+        signal?: AbortSignal;
+      },
+    ) => {
+      const mutation = await this.sandboxes.createAsync(input, options);
+      const operation = await this.operations.wait(mutation.operation, options);
+      if (operation.state !== "succeeded") {
+        throw new Error(operation.error?.message ?? "sandbox creation failed");
+      }
+      return this.sandboxes.get(mutation.sandbox.id);
+    },
     get: (sandboxId: string) =>
       this.request({
         method: "GET",
         path: `/v1/sandboxes/${sandboxId}`,
         schema: SandboxSchema,
       }),
-    delete: (sandboxId: string) =>
+    pauseAsync: (sandboxId: string, options?: { idempotencyKey?: string }) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/actions/pause`,
+        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        schema: SandboxMutationSchema,
+      }) as Promise<SandboxMutation>,
+    pause: async (
+      projectIdOrSandboxId: string,
+      maybeSandboxId?: string,
+      options?: { timeoutMs?: number; signal?: AbortSignal },
+    ) => {
+      const sandboxId = maybeSandboxId ?? projectIdOrSandboxId;
+      const mutation = await this.sandboxes.pauseAsync(sandboxId);
+      const operation = await this.operations.wait(mutation.operation, options);
+      if (operation.state !== "succeeded") {
+        throw new Error(operation.error?.message ?? "sandbox pause failed");
+      }
+      return this.sandboxes.get(sandboxId);
+    },
+    resumeAsync: (sandboxId: string, options?: { idempotencyKey?: string }) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/actions/resume`,
+        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        schema: SandboxMutationSchema,
+      }) as Promise<SandboxMutation>,
+    resume: async (sandboxId: string, options?: { timeoutMs?: number; signal?: AbortSignal }) => {
+      const mutation = await this.sandboxes.resumeAsync(sandboxId);
+      const operation = await this.operations.wait(mutation.operation, options);
+      if (operation.state !== "succeeded") {
+        throw new Error(operation.error?.message ?? "sandbox resume failed");
+      }
+      return this.sandboxes.get(sandboxId);
+    },
+    deleteAsync: (sandboxId: string, options?: { idempotencyKey?: string }) =>
       this.request({
         method: "DELETE",
         path: `/v1/sandboxes/${sandboxId}`,
-        schema: SandboxSchema,
-      }),
+        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        schema: SandboxMutationSchema,
+      }) as Promise<SandboxMutation>,
+    delete: async (sandboxId: string, options?: { timeoutMs?: number; signal?: AbortSignal }) => {
+      const mutation = await this.sandboxes.deleteAsync(sandboxId);
+      const operation = await this.operations.wait(mutation.operation, options);
+      if (operation.state !== "succeeded") {
+        throw new Error(operation.error?.message ?? "sandbox destroy failed");
+      }
+      return this.sandboxes.get(sandboxId);
+    },
+    deleteFromProject: async (
+      _projectId: string,
+      sandboxId: string,
+      options?: { timeoutMs?: number; signal?: AbortSignal },
+    ) => this.sandboxes.delete(sandboxId, options),
   };
 
   readonly events = {

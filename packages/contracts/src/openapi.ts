@@ -14,6 +14,8 @@ import {
   UpdateProjectRequestSchema,
 } from "./projects.js";
 import { CursorEventPageSchema, ListEventsQuerySchema } from "./events.js";
+import { CreateSandboxRequestSchema, SandboxMutationSchema, SandboxSchema } from "./sandboxes.js";
+import { OperationSchema } from "./operations.js";
 
 const json = <T extends z.ZodType>(schema: T) =>
   z.toJSONSchema(schema, { target: "draft-7" }) as Record<string, unknown>;
@@ -282,6 +284,136 @@ export function buildOpenApiDocument(): Record<string, unknown> {
             "401": errorResponse,
             "403": errorResponse,
             "404": errorResponse,
+          },
+        },
+      },
+      "/v1/sandboxes": {
+        post: {
+          operationId: "createSandbox",
+          tags: ["sandboxes"],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "Idempotency-Key",
+              in: "header",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: json(CreateSandboxRequestSchema) } },
+          },
+          responses: {
+            "202": {
+              description: "Sandbox provisioning operation accepted",
+              content: { "application/json": { schema: json(SandboxMutationSchema) } },
+            },
+            "401": errorResponse,
+            "409": errorResponse,
+            "422": errorResponse,
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}": {
+        get: {
+          operationId: "getSandbox",
+          tags: ["sandboxes"],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "sandbox_id",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^sbx_[A-Za-z0-9]+$" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Sandbox",
+              content: { "application/json": { schema: json(SandboxSchema) } },
+            },
+            "404": errorResponse,
+          },
+        },
+        delete: {
+          operationId: "destroySandbox",
+          tags: ["sandboxes"],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "sandbox_id",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^sbx_[A-Za-z0-9]+$" },
+            },
+          ],
+          responses: {
+            "202": {
+              description: "Sandbox destruction accepted",
+              content: { "application/json": { schema: json(SandboxMutationSchema) } },
+            },
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/actions/pause": {
+        post: {
+          operationId: "pauseSandbox",
+          tags: ["sandboxes"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "202": {
+              description: "Sandbox pause accepted",
+              content: { "application/json": { schema: json(SandboxMutationSchema) } },
+            },
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/actions/resume": {
+        post: {
+          operationId: "resumeSandbox",
+          tags: ["sandboxes"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "202": {
+              description: "Sandbox resume accepted",
+              content: { "application/json": { schema: json(SandboxMutationSchema) } },
+            },
+          },
+        },
+      },
+      "/v1/operations/{operation_id}": {
+        get: {
+          operationId: "getOperation",
+          tags: ["operations"],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "operation_id",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^op_[A-Za-z0-9]+$" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Operation",
+              content: { "application/json": { schema: json(OperationSchema) } },
+            },
+            "404": errorResponse,
+          },
+        },
+      },
+      "/v1/operations/{operation_id}/events": {
+        get: {
+          operationId: "streamOperationEvents",
+          tags: ["operations"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": {
+              description: "Resumable operation events",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
           },
         },
       },

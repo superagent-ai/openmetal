@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
   ProviderDestroyResult,
@@ -78,7 +79,12 @@ class VercelRequestError extends Error {
 
 export class VercelSandboxProvider implements SandboxProvider {
   readonly name = "vercel" as const;
-  readonly capabilities = { pause: false, cost: true } as const;
+  readonly capabilities = {
+    pause: false,
+    cost: true,
+    sizing: "fixed",
+    sources: ["environment", "oci_image"],
+  } as const;
   private readonly token: string;
   private readonly projectId: string;
   private readonly teamId?: string;
@@ -96,6 +102,7 @@ export class VercelSandboxProvider implements SandboxProvider {
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
+    const resolved = resolveProviderResources("vercel", input.resources, input.providerOptions);
     const name = `metal-${input.metalSandboxId}`;
     const existing = await this.getNamedSandbox(name, input.signal);
     const response =
@@ -128,6 +135,7 @@ export class VercelSandboxProvider implements SandboxProvider {
           ...(session ? { session } : {}),
         },
       },
+      resolvedResources: resolved,
     };
   }
 

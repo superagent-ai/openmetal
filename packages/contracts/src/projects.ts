@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { IsoDateTimeSchema, OpaqueIdSchema } from "./primitives.js";
+import { IsoDateTimeSchema, OpaqueIdSchema, ProjectIdSchema } from "./primitives.js";
 import { OrganizationNameSchema, ResourceSlugSchema } from "./organizations.js";
 
 export const ProjectSchema = z.object({
-  id: OpaqueIdSchema,
+  id: ProjectIdSchema,
   organization_id: OpaqueIdSchema,
   name: OrganizationNameSchema,
   slug: ResourceSlugSchema,

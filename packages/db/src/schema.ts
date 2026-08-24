@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   index,
   integer,
   jsonb,
@@ -45,6 +46,9 @@ export const projects = pgTable(
   "projects",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    publicId: text("public_id")
+      .notNull()
+      .default(sql`'prj_' || replace(gen_random_uuid()::text, '-', '')`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -58,6 +62,7 @@ export const projects = pgTable(
     uniqueIndex("projects_organization_id_slug_key")
       .on(table.organizationId, table.slug)
       .where(sql`${table.deletedAt} is null`),
+    uniqueIndex("projects_public_id_key").on(table.publicId),
     index("projects_organization_id_idx").on(table.organizationId),
   ],
 );
@@ -66,12 +71,18 @@ export const metalSchema = pgSchema("metal");
 
 export const sandboxStatusEnum = metalSchema.enum("sandbox_status", [
   "requested",
+  "routing",
   "provisioning",
+  "provision_unknown",
   "ready",
   "pausing",
   "paused",
-  "provision_unknown",
+  "resuming",
+  "runtime_unknown",
+  "stopping",
+  "stopped",
   "failed",
+  // Legacy values remain valid while existing rows are migrated.
   "deleting",
   "deleted",
   "cleanup_pending",
@@ -105,6 +116,9 @@ export const sandboxes = metalSchema.table(
   "sandboxes",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    publicId: text("public_id")
+      .notNull()
+      .default(sql`'sbx_' || replace(gen_random_uuid()::text, '-', '')`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id),
@@ -112,12 +126,28 @@ export const sandboxes = metalSchema.table(
       .notNull()
       .references(() => projects.id),
     provider: text("provider").notNull().default("daytona"),
+    primaryProvider: text("primary_provider").notNull().default("daytona"),
     providerResourceId: text("provider_resource_id"),
     providerOrganizationId: text("provider_organization_id"),
     providerMetadata: jsonb("provider_metadata")
       .$type<Record<string, unknown>>()
       .notNull()
       .default({}),
+    source: jsonb("source").$type<Record<string, unknown>>().notNull().default({}),
+    resourceRequirements: jsonb("resource_requirements")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    resolvedResources: jsonb("resolved_resources").$type<Record<string, unknown>>(),
+    lifecycle: jsonb("lifecycle").$type<Record<string, unknown>>().notNull().default({}),
+    fallback: jsonb("fallback").$type<Record<string, unknown>>().notNull().default({}),
+    providerOptions: jsonb("provider_options")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    environment: jsonb("environment").$type<Record<string, string>>().notNull().default({}),
+    secretRefs: jsonb("secret_refs").$type<Record<string, string>>().notNull().default({}),
+    metadata: jsonb("metadata").$type<Record<string, string>>().notNull().default({}),
     providerCostMicrousd: bigint("provider_cost_microusd", { mode: "bigint" }),
     providerCostMeasuredThrough: timestamp("provider_cost_measured_through", {
       withTimezone: true,
@@ -142,9 +172,92 @@ export const sandboxes = metalSchema.table(
   },
   (table) => [
     index("sandboxes_project_created_idx").on(table.projectId, table.createdAt),
+    uniqueIndex("sandboxes_public_id_key").on(table.publicId),
     uniqueIndex("sandboxes_provider_resource_key")
       .on(table.provider, table.providerResourceId)
       .where(sql`${table.providerResourceId} is not null`),
+  ],
+);
+
+export const operations = metalSchema.table(
+  "operations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    publicId: text("public_id")
+      .notNull()
+      .default(sql`'op_' || replace(gen_random_uuid()::text, '-', '')`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    sandboxId: uuid("sandbox_id")
+      .notNull()
+      .references(() => sandboxes.id),
+    type: text("type").notNull(),
+    state: text("state").notNull().default("queued"),
+    retryable: boolean("retryable").notNull().default(false),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("operations_public_id_key").on(table.publicId),
+    index("operations_project_created_idx").on(table.projectId, table.createdAt),
+    index("operations_sandbox_created_idx").on(table.sandboxId, table.createdAt),
+  ],
+);
+
+export const operationEvents = metalSchema.table(
+  "operation_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operationId: uuid("operation_id")
+      .notNull()
+      .references(() => operations.id, { onDelete: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    type: text("type").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operation_events_operation_sequence_key").on(table.operationId, table.sequence),
+  ],
+);
+
+export const providerAttempts = metalSchema.table(
+  "provider_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operationId: uuid("operation_id")
+      .notNull()
+      .references(() => operations.id, { onDelete: "cascade" }),
+    sandboxId: uuid("sandbox_id")
+      .notNull()
+      .references(() => sandboxes.id),
+    attemptIndex: integer("attempt_index").notNull(),
+    provider: text("provider").notNull(),
+    state: text("state").notNull().default("queued"),
+    providerResourceId: text("provider_resource_id"),
+    providerMetadata: jsonb("provider_metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    resolvedResources: jsonb("resolved_resources").$type<Record<string, unknown>>(),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    outcome: text("outcome"),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("provider_attempts_operation_index_key").on(table.operationId, table.attemptIndex),
   ],
 );
 
@@ -260,6 +373,9 @@ export const schema = {
   projects,
   projectApiKeys,
   sandboxes,
+  operations,
+  operationEvents,
+  providerAttempts,
   domainEvents,
   outboxJobs,
   idempotencyKeys,

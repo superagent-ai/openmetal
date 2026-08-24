@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
   ProviderSandbox,
@@ -78,7 +79,13 @@ class CodeSandboxRequestError extends Error {
 
 export class CodeSandboxProvider implements SandboxProvider {
   readonly name = "codesandbox" as const;
-  readonly capabilities = { pause: true, cost: true } as const;
+  readonly capabilities = {
+    pause: true,
+    resume: true,
+    cost: true,
+    sizing: "tier",
+    sources: ["environment", "provider_template"],
+  } as const;
   private readonly apiKey: string;
   private readonly apiUrl: string;
   private readonly templateId: string;
@@ -105,11 +112,20 @@ export class CodeSandboxProvider implements SandboxProvider {
       signal: input.signal,
     });
     const tag = `metal-sandbox-${input.metalSandboxId}`;
+    const options = input.providerOptions ?? {};
+    const resolved = resolveProviderResources("codesandbox", input.resources, options);
+    const vmTier = VmTierSchema.parse(resolved.providerSize ?? this.vmTier);
+    const templateId =
+      typeof options.template_id === "string"
+        ? options.template_id
+        : input.source.kind === "provider_template"
+          ? (input.source.template ?? this.templateId)
+          : (input.image ?? this.templateId);
     const existing = await this.findByTag(tag, input.signal);
     const sandbox =
       existing ??
       ForkResponseSchema.parse(
-        await this.request(`/sandbox/${encodeURIComponent(input.image ?? this.templateId)}/fork`, {
+        await this.request(`/sandbox/${encodeURIComponent(templateId)}/fork`, {
           method: "POST",
           body: JSON.stringify({
             title: `metal-${input.metalSandboxId}`,
@@ -134,7 +150,7 @@ export class CodeSandboxProvider implements SandboxProvider {
         await this.request(`/vm/${encodeURIComponent(sandbox.id)}/start`, {
           method: "POST",
           body: JSON.stringify({
-            tier: this.vmTier,
+            tier: vmTier,
             hibernation_timeout_seconds: Math.max(60, Math.min(86_400, input.ttlMinutes * 60)),
             automatic_wakeup_config: {
               http: false,
@@ -148,7 +164,7 @@ export class CodeSandboxProvider implements SandboxProvider {
       await this.destroy(sandbox.id, input.signal).catch(() => undefined);
       throw error;
     }
-    const hourlyRateMicrousd = tierCreditsPerHour[this.vmTier] * this.creditRateMicrousd;
+    const hourlyRateMicrousd = tierCreditsPerHour[vmTier] * this.creditRateMicrousd;
     return {
       providerResourceId: sandbox.id,
       providerOrganizationId: this.workspaceId,
@@ -157,11 +173,12 @@ export class CodeSandboxProvider implements SandboxProvider {
           sandbox,
           start: started,
         },
-        vmTier: this.vmTier,
+        vmTier,
         creditRateMicrousd: this.creditRateMicrousd.toString(),
         hourlyRateMicrousd: hourlyRateMicrousd.toString(),
         startedAt: startedAt.toISOString(),
       },
+      resolvedResources: resolved,
     };
   }
 
@@ -172,6 +189,57 @@ export class CodeSandboxProvider implements SandboxProvider {
       signal,
       allowNotFound: true,
     });
+  }
+
+  async reconcileCreate(
+    metalSandboxId: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderSandbox | null> {
+    const sandbox = await this.findByTag(`metal-sandbox-${metalSandboxId}`, signal);
+    if (!sandbox) return null;
+    const startedAt = new Date();
+    const started = StartResponseSchema.parse(
+      await this.request(`/vm/${encodeURIComponent(sandbox.id)}/start`, {
+        method: "POST",
+        body: JSON.stringify({
+          tier: this.vmTier,
+          automatic_wakeup_config: { http: false, websocket: false },
+        }),
+        signal,
+      }),
+    );
+    return {
+      providerResourceId: sandbox.id,
+      providerOrganizationId: this.workspaceId,
+      providerMetadata: {
+        codesandbox: { sandbox, start: started },
+        vmTier: this.vmTier,
+        hourlyRateMicrousd: (tierCreditsPerHour[this.vmTier] * this.creditRateMicrousd).toString(),
+        startedAt: startedAt.toISOString(),
+      },
+    };
+  }
+
+  async resume(providerResourceId: string, signal?: AbortSignal): Promise<ProviderSandbox> {
+    const started = StartResponseSchema.parse(
+      await this.request(`/vm/${encodeURIComponent(providerResourceId)}/start`, {
+        method: "POST",
+        body: JSON.stringify({
+          tier: this.vmTier,
+          automatic_wakeup_config: { http: false, websocket: false },
+        }),
+        signal,
+      }),
+    );
+    return {
+      providerResourceId,
+      providerOrganizationId: this.workspaceId,
+      providerMetadata: {
+        vmTier: this.vmTier,
+        startedAt: new Date().toISOString(),
+        codesandbox: { start: started },
+      },
+    };
   }
 
   async destroy(providerResourceId: string, signal?: AbortSignal): Promise<void> {

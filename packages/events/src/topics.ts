@@ -1,4 +1,4 @@
-import { OpaqueIdSchema } from "@openmetal/contracts";
+import { OpaqueIdSchema, ProjectIdSchema } from "@openmetal/contracts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -24,15 +24,25 @@ export function organizationTopic(organizationId: string): string {
 }
 
 export function projectTopic(projectId: string): string {
-  return `project:${assertUuid(projectId, "project_id")}`;
+  const parsed = ProjectIdSchema.safeParse(projectId);
+  if (!parsed.success) throw new TopicError("invalid project_id");
+  return `project:${parsed.data}`;
 }
 
 export function parseTopic(topic: string): { kind: TopicKind; id: string } {
-  const match = /^(organization|project):([0-9a-f-]{36})$/i.exec(topic);
+  const match = /^(organization|project):([A-Za-z0-9_-]+)$/i.exec(topic);
   if (!match) {
     throw new TopicError("invalid topic");
   }
   const kind = match[1] as TopicKind;
-  const id = assertUuid(match[2] ?? "", `${kind}_id`);
+  const rawId = match[2] ?? "";
+  let id: string;
+  if (kind === "project") {
+    const parsed = ProjectIdSchema.safeParse(rawId);
+    if (!parsed.success) throw new TopicError("invalid project_id");
+    id = parsed.data;
+  } else {
+    id = assertUuid(rawId, `${kind}_id`);
+  }
   return { kind, id };
 }

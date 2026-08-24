@@ -4,7 +4,9 @@ import { DurableEventEnvelopeSchema } from "@openmetal/contracts";
 export const OutboxJobTypeSchema = z.enum([
   "realtime.broadcast",
   "sandbox.provision",
+  "sandbox.reconcile",
   "sandbox.pause",
+  "sandbox.resume",
   "sandbox.cost.sync",
   "sandbox.destroy",
 ]);
@@ -18,14 +20,28 @@ export const RealtimeBroadcastJobPayloadSchema = z.object({
 export const SandboxProvisionJobPayloadSchema = z.object({
   job_type: z.literal("sandbox.provision"),
   sandbox_id: z.uuid(),
+  operation_id: z.uuid(),
+});
+export const SandboxReconcileJobPayloadSchema = z.object({
+  job_type: z.literal("sandbox.reconcile"),
+  sandbox_id: z.uuid(),
+  operation_id: z.uuid(),
+  attempt_index: z.number().int().nonnegative(),
 });
 export const SandboxDestroyJobPayloadSchema = z.object({
   job_type: z.literal("sandbox.destroy"),
   sandbox_id: z.uuid(),
+  operation_id: z.uuid().optional(),
 });
 export const SandboxPauseJobPayloadSchema = z.object({
   job_type: z.literal("sandbox.pause"),
   sandbox_id: z.uuid(),
+  operation_id: z.uuid(),
+});
+export const SandboxResumeJobPayloadSchema = z.object({
+  job_type: z.literal("sandbox.resume"),
+  sandbox_id: z.uuid(),
+  operation_id: z.uuid(),
 });
 export const SandboxCostSyncJobPayloadSchema = z.object({
   job_type: z.literal("sandbox.cost.sync"),
@@ -35,7 +51,9 @@ export const SandboxCostSyncJobPayloadSchema = z.object({
 export const OutboxJobPayloadSchema = z.discriminatedUnion("job_type", [
   RealtimeBroadcastJobPayloadSchema,
   SandboxProvisionJobPayloadSchema,
+  SandboxReconcileJobPayloadSchema,
   SandboxPauseJobPayloadSchema,
+  SandboxResumeJobPayloadSchema,
   SandboxCostSyncJobPayloadSchema,
   SandboxDestroyJobPayloadSchema,
 ]);

@@ -38,7 +38,11 @@ export function createRealtimePublisher(input: {
 export function parseJobPayload(payload: unknown) {
   const parsed = RealtimeBroadcastJobPayloadSchema.parse(payload);
   const topic = parseTopic(parsed.topic);
-  if (topic.kind === "project" && parsed.event.project_id !== topic.id) {
+  if (
+    topic.kind === "project" &&
+    parsed.event.project_id?.replace(/^prj_/, "").toLowerCase() !==
+      topic.id.replace(/^prj_/, "").replaceAll("-", "").toLowerCase()
+  ) {
     throw new Error("outbox project topic does not match event");
   }
   if (topic.kind === "organization" && parsed.event.organization_id !== topic.id) {

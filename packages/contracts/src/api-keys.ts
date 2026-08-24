@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { IsoDateTimeSchema, OpaqueIdSchema } from "./primitives.js";
+import { IsoDateTimeSchema, OpaqueIdSchema, ProjectIdSchema } from "./primitives.js";
 
 export const ProjectApiKeySchema = z.object({
   id: OpaqueIdSchema,
-  project_id: OpaqueIdSchema,
+  project_id: ProjectIdSchema,
   name: z.string().trim().min(1).max(120),
   prefix: z.string().min(8).max(32),
   created_at: IsoDateTimeSchema,

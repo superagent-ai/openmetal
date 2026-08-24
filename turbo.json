@@ -47,6 +47,10 @@
       "dependsOn": ["^build"],
       "cache": false
     },
+    "test:live": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
     "openapi:generate": {
       "dependsOn": ["^build"],
       "outputs": ["openapi.json"]

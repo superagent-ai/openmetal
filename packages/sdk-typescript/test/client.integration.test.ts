@@ -37,6 +37,7 @@ describe("MetalClient HTTP integration", () => {
           code: "not_found",
           message: "route not found",
           request_id: "req_http",
+          retryable: false,
         }),
       );
     });

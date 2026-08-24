@@ -52,9 +52,8 @@ type Sandbox = {
     | "runloop"
     | "vercel"
     | null;
-  provider_cost_microusd: string | null;
-  provider_cost_measured_through: string | null;
-  provider_cost_updated_at: string | null;
+  cost_microusd: string | null;
+  cost_updated_at: string | null;
   state: string;
   created_at: string;
   ready_at: string | null;
@@ -377,17 +376,13 @@ export function ProjectResourcesTable({
                     <TableCell
                       title={
                         sandbox.provider === "modal"
-                          ? "Modal does not expose per-sandbox provider cost"
-                          : sandbox.provider_cost_updated_at
-                            ? `Updated ${dateFormatter.format(
-                                new Date(sandbox.provider_cost_updated_at),
-                              )}`
+                          ? "Cost is not available for this sandbox"
+                          : sandbox.cost_updated_at
+                            ? `Updated ${dateFormatter.format(new Date(sandbox.cost_updated_at))}`
                             : `Waiting for ${sandbox.provider} usage data`
                       }
                     >
-                      {sandbox.provider === "modal"
-                        ? "—"
-                        : formatMicrousd(sandbox.provider_cost_microusd)}
+                      {sandbox.provider === "modal" ? "—" : formatMicrousd(sandbox.cost_microusd)}
                     </TableCell>
                     <TableCell className="pr-4 text-right">
                       <DropdownMenu>

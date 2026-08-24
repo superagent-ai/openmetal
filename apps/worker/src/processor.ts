@@ -214,10 +214,16 @@ async function provisionSandbox(
   }
   await setOperationState(db, operationId, "running");
   const fallback = sandbox.fallback as { providers?: SandboxProviderName[]; max_attempts?: number };
-  const candidates = [
-    sandbox.primaryProvider as SandboxProviderName,
-    ...(fallback.providers ?? []),
-  ].slice(0, fallback.max_attempts ?? 9);
+  const configuredProviders = Object.keys(providers) as SandboxProviderName[];
+  const fallbackProviders = fallback.providers ?? [];
+  const candidates = (
+    sandbox.primaryProvider === "auto"
+      ? [
+          ...fallbackProviders,
+          ...configuredProviders.filter((provider) => !fallbackProviders.includes(provider)),
+        ]
+      : [sandbox.primaryProvider as SandboxProviderName, ...fallbackProviders]
+  ).slice(0, fallback.max_attempts ?? 9);
   const source = sandbox.source as ProviderCreateSandboxInput["source"];
   const environmentSource = resolveMetalEnvironment(source);
   const requested = sandbox.resourceRequirements as {
@@ -664,8 +670,8 @@ async function syncSandboxCost(
       if (updated) {
         await recordSandboxEvent(tx, updated, "sandbox.cost_updated", {
           provider: provider.name,
-          provider_cost_microusd: cost.amountMicrousd.toString(),
-          provider_cost_updated_at: measuredAt.toISOString(),
+          cost_microusd: cost.amountMicrousd.toString(),
+          cost_updated_at: measuredAt.toISOString(),
         });
       }
     }

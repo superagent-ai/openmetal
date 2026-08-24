@@ -303,6 +303,10 @@ export async function createSandbox(
   },
 ) {
   const request = input.request;
+  const requestedProvider = request.provider ?? "auto";
+  const primaryProvider =
+    request.source.kind === "provider_template" ? request.source.provider : requestedProvider;
+  const storedProvider = primaryProvider === "auto" ? "daytona" : primaryProvider;
   const sandboxId = crypto.randomUUID();
   const image =
     request.source.kind === "oci_image"
@@ -317,16 +321,19 @@ export async function createSandbox(
       publicId: `sbx_${sandboxId.replaceAll("-", "")}`,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      provider: request.provider,
-      primaryProvider: request.provider,
+      provider: storedProvider,
+      primaryProvider,
       source: request.source,
       resourceRequirements: request.resources,
       lifecycle: request.lifecycle,
-      fallback: request.fallback,
-      providerOptions: request.provider_options,
-      environment: request.environment,
-      secretRefs: request.secret_refs,
-      metadata: request.metadata,
+      regions: request.regions ?? [],
+      features: request.features ?? {},
+      network: request.network ?? {},
+      fallback: request.fallback ?? { providers: [] },
+      providerOptions: request.provider_options ?? {},
+      environment: request.environment ?? {},
+      secretRefs: request.secret_refs ?? {},
+      metadata: request.metadata ?? {},
       image,
       language: request.source.kind === "environment" ? request.source.environment : "custom",
       ttlMinutes: Math.ceil(request.lifecycle.runtime_timeout_seconds / 60),
@@ -342,7 +349,7 @@ export async function createSandbox(
     organizationId: input.organizationId,
     projectId: input.projectId,
     actorId: input.actorId,
-    data: { sandbox_id: sandbox.publicId, provider: request.provider },
+    data: { sandbox_id: sandbox.publicId, provider: requestedProvider },
     topic: projectTopic(`prj_${input.projectId.replaceAll("-", "")}`),
   });
   const operation = await createOperation(tx, {
@@ -393,6 +400,33 @@ export async function listProjectSandboxes(db: MetalDb, userId: string, projectI
     .from(sandboxes)
     .where(eq(sandboxes.projectId, project.id))
     .orderBy(desc(sandboxes.createdAt));
+}
+
+export async function listScopedSandboxes(
+  db: MetalDb,
+  input: { organizationId: string; projectId: string; cursor?: string; limit: number },
+) {
+  const rows = await db
+    .select()
+    .from(sandboxes)
+    .where(
+      and(
+        eq(sandboxes.organizationId, input.organizationId),
+        eq(sandboxes.projectId, input.projectId),
+      ),
+    )
+    .orderBy(desc(sandboxes.createdAt), desc(sandboxes.id));
+  const start = input.cursor
+    ? rows.findIndex((sandbox) => sandbox.publicId === input.cursor) + 1
+    : 0;
+  if (input.cursor && start === 0) {
+    throw new ApiError(422, "validation_error", "invalid sandbox cursor");
+  }
+  const page = rows.slice(start, start + input.limit);
+  return {
+    rows: page,
+    nextCursor: rows.length > start + input.limit ? (page.at(-1)?.publicId ?? null) : null,
+  };
 }
 
 export async function requestSandboxPause(

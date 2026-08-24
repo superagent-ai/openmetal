@@ -9,6 +9,7 @@ import {
   CreateProjectRequestSchema,
   CreateSandboxRequestSchema,
   ListEventsQuerySchema,
+  ListSandboxesQuerySchema,
   OpaqueIdSchema,
   OperationIdSchema,
   ProjectIdSchema,
@@ -39,6 +40,7 @@ import {
   getProject,
   listOrganizations,
   listProjectSandboxes,
+  listScopedSandboxes,
   listProjects,
   getSandbox,
   requestSandboxDeletion,
@@ -119,17 +121,21 @@ function serializeSandbox(row: {
   organizationId: string;
   projectId: string;
   provider: string;
+  primaryProvider?: string;
+  providerResourceId?: string | null;
   source?: Record<string, unknown>;
   resourceRequirements?: Record<string, unknown>;
   resolvedResources?: Record<string, unknown> | null;
   lifecycle?: Record<string, unknown>;
+  regions?: string[];
+  features?: Record<string, unknown>;
+  network?: Record<string, unknown>;
   fallback?: Record<string, unknown>;
   providerOptions?: Record<string, unknown>;
   environment?: Record<string, string>;
   secretRefs?: Record<string, string>;
   metadata?: Record<string, string>;
   providerCostMicrousd: bigint | null;
-  providerCostMeasuredThrough: Date | null;
   providerCostUpdatedAt: Date | null;
   status: string;
   image: string | null;
@@ -147,23 +153,25 @@ function serializeSandbox(row: {
     id: row.publicId ?? `sbx_${row.id.replaceAll("-", "")}`,
     type: "sandbox" as const,
     project_id: `prj_${row.projectId.replaceAll("-", "")}`,
-    provider: row.provider as
-      | "blaxel"
-      | "cloudflare"
-      | "codesandbox"
-      | "daytona"
-      | "e2b"
-      | "modal"
-      | "northflank"
-      | "runloop"
-      | "vercel",
-    provider_cost_microusd: row.providerCostMicrousd?.toString() ?? null,
-    provider_cost_measured_through: row.providerCostMeasuredThrough?.toISOString() ?? null,
-    provider_cost_updated_at: row.providerCostUpdatedAt?.toISOString() ?? null,
+    provider:
+      row.primaryProvider === "auto" && !row.providerResourceId
+        ? null
+        : (row.provider as
+            | "blaxel"
+            | "cloudflare"
+            | "codesandbox"
+            | "daytona"
+            | "e2b"
+            | "modal"
+            | "northflank"
+            | "runloop"
+            | "vercel"),
+    cost_microusd: row.providerCostMicrousd?.toString() ?? null,
+    cost_updated_at: row.providerCostUpdatedAt?.toISOString() ?? null,
     state,
     state_reason: row.errorCode,
     requested: {
-      provider: row.provider,
+      provider: row.primaryProvider ?? row.provider,
       source:
         row.source && Object.keys(row.source).length
           ? row.source
@@ -180,11 +188,19 @@ function serializeSandbox(row: {
               on_runtime_timeout: "destroy",
               on_idle_timeout: "destroy",
             },
-      fallback: row.fallback ?? { providers: [] },
-      provider_options: row.providerOptions ?? {},
-      environment: row.environment ?? {},
-      secret_refs: row.secretRefs ?? {},
-      metadata: row.metadata ?? {},
+      regions: row.regions?.length ? row.regions : undefined,
+      features: row.features && Object.keys(row.features).length ? row.features : undefined,
+      network: row.network && Object.keys(row.network).length ? row.network : undefined,
+      fallback: row.fallback && Object.keys(row.fallback).length ? row.fallback : undefined,
+      provider_options:
+        row.providerOptions && Object.keys(row.providerOptions).length
+          ? row.providerOptions
+          : undefined,
+      environment:
+        row.environment && Object.keys(row.environment).length ? row.environment : undefined,
+      secret_refs:
+        row.secretRefs && Object.keys(row.secretRefs).length ? row.secretRefs : undefined,
+      metadata: row.metadata && Object.keys(row.metadata).length ? row.metadata : undefined,
     },
     resolved_resources: row.resolvedResources ?? null,
     created_at: row.createdAt.toISOString(),
@@ -192,7 +208,7 @@ function serializeSandbox(row: {
     ready_at: row.readyAt?.toISOString() ?? null,
     paused_at: row.pausedAt?.toISOString() ?? null,
     stopped_at: row.deletedAt?.toISOString() ?? null,
-    metadata: row.metadata ?? {},
+    metadata: row.metadata && Object.keys(row.metadata).length ? row.metadata : undefined,
   };
 }
 
@@ -299,6 +315,27 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
       throw new ApiError(401, "unauthenticated", "project API key required");
     }
     return authenticateProjectApiKey(db.db, token);
+  }
+
+  async function requireProjectScope(request: {
+    headers: {
+      authorization?: string;
+      "x-metal-project-id"?: string | string[];
+    };
+  }) {
+    const principal = await requireApiKeyPrincipal(request);
+    const projectId = headerValue(request.headers["x-metal-project-id"]);
+    if (!projectId) {
+      throw new ApiError(400, "validation_error", "X-Metal-Project-ID is required");
+    }
+    const parsedProjectId = ProjectIdSchema.safeParse(projectId);
+    if (!parsedProjectId.success) {
+      throw new ApiError(422, "validation_error", "X-Metal-Project-ID must be a prj_* public ID");
+    }
+    if (parsedProjectId.data !== principal.projectPublicId) {
+      throw new ApiError(403, "forbidden", "API key is scoped to another project");
+    }
+    return principal;
   }
 
   app.get("/health", async () => ({ status: "ok" as const }));
@@ -561,8 +598,28 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     return { id: row.id, deleted: true as const };
   });
 
+  app.get(`/${API_VERSION}/sandboxes`, async (request) => {
+    const principal = await requireProjectScope(request);
+    const parsed = ListSandboxesQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid sandbox list query", {
+        issues: parsed.error.issues,
+      });
+    }
+    const page = await listScopedSandboxes(db.db, {
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+      cursor: parsed.data.cursor,
+      limit: parsed.data.limit,
+    });
+    return {
+      sandboxes: page.rows.map(serializeSandbox),
+      next_cursor: page.nextCursor,
+    };
+  });
+
   app.post(`/${API_VERSION}/sandboxes`, async (request, reply) => {
-    const principal = await requireApiKeyPrincipal(request);
+    const principal = await requireProjectScope(request);
     const parsed = CreateSandboxRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new ApiError(422, "validation_error", "invalid sandbox payload", {
@@ -613,7 +670,7 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
   });
 
   app.get(`/${API_VERSION}/sandboxes/:sandbox_id`, async (request) => {
-    const principal = await requireApiKeyPrincipal(request);
+    const principal = await requireProjectScope(request);
     const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
     return serializeSandbox(
       await getSandbox(db.db, {
@@ -624,40 +681,46 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     );
   });
 
-  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/actions/pause`, async (request) => {
-    const principal = await requireApiKeyPrincipal(request);
+  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/actions/pause`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
     const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
-    return serializeMutation(
+    const mutation = serializeMutation(
       await requestSandboxPause(db.db, {
         sandboxId,
         organizationId: principal.organizationId,
         projectId: principal.projectId,
       }),
     );
+    reply.header("location", `/${API_VERSION}/operations/${mutation.operation.id}`);
+    return reply.status(202).send(mutation);
   });
 
-  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/actions/resume`, async (request) => {
-    const principal = await requireApiKeyPrincipal(request);
+  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/actions/resume`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
     const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
-    return serializeMutation(
+    const mutation = serializeMutation(
       await requestSandboxResume(db.db, {
         sandboxId,
         organizationId: principal.organizationId,
         projectId: principal.projectId,
       }),
     );
+    reply.header("location", `/${API_VERSION}/operations/${mutation.operation.id}`);
+    return reply.status(202).send(mutation);
   });
 
-  app.delete(`/${API_VERSION}/sandboxes/:sandbox_id`, async (request) => {
-    const principal = await requireApiKeyPrincipal(request);
+  app.delete(`/${API_VERSION}/sandboxes/:sandbox_id`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
     const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
-    return serializeMutation(
+    const mutation = serializeMutation(
       await requestSandboxDeletion(db.db, {
         sandboxId,
         organizationId: principal.organizationId,
         projectId: principal.projectId,
       }),
     );
+    reply.header("location", `/${API_VERSION}/operations/${mutation.operation.id}`);
+    return reply.status(202).send(mutation);
   });
 
   app.get(`/${API_VERSION}/operations/:operation_id`, async (request) => {
@@ -675,6 +738,9 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     );
     const operation = await getOperationForPrincipal(db.db, principal.keyId, operationId);
     const header = request.headers["last-event-id"];
+    if (header !== undefined && (typeof header !== "string" || !/^\d+$/.test(header))) {
+      throw new ApiError(422, "validation_error", "Last-Event-ID must be an event sequence");
+    }
     const after = typeof header === "string" && /^\d+$/.test(header) ? Number(header) : 0;
     const events = await listOperationEvents(db.db, operation.id, after);
     reply.header("content-type", "text/event-stream");

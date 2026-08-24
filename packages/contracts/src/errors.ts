@@ -31,6 +31,7 @@ export const ErrorEnvelopeSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
   request_id: z.string().min(1),
+  retryable: z.boolean(),
   details: JsonObjectSchema.optional(),
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;

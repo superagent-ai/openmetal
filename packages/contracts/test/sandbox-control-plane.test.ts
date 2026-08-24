@@ -25,6 +25,29 @@ describe("unified sandbox contracts", () => {
     expect(parsed.fallback.providers).toEqual(["e2b", "runloop"]);
   });
 
+  it("accepts auto routing and omits empty optional objects", () => {
+    const parsed = CreateSandboxRequestSchema.parse({
+      source: { kind: "environment", environment: "metal/node" },
+      resources: { vcpu: 1, memory_mb: 1024 },
+      lifecycle: { runtime_timeout_seconds: 600 },
+      regions: ["iad1", "fra1"],
+      features: {
+        isolation: ["microvm"],
+        pty: true,
+        pause_resume: true,
+        public_ports: [3000],
+      },
+      network: {
+        internet_access: true,
+        deny_domains: ["example.invalid"],
+      },
+    });
+    expect(parsed.provider).toBeUndefined();
+    expect(parsed.fallback).toBeUndefined();
+    expect(parsed.provider_options).toBeUndefined();
+    expect(parsed.features?.public_ports).toEqual([3000]);
+  });
+
   it("rejects duplicate candidates and options for unselected providers", () => {
     expect(() =>
       CreateSandboxRequestSchema.parse({
@@ -78,9 +101,8 @@ describe("unified sandbox contracts", () => {
           requested: request,
           provider: null,
           resolved_resources: null,
-          provider_cost_microusd: null,
-          provider_cost_measured_through: null,
-          provider_cost_updated_at: null,
+          cost_microusd: null,
+          cost_updated_at: null,
           created_at: "2026-08-24T00:00:00.000Z",
           updated_at: "2026-08-24T00:00:00.000Z",
           ready_at: null,

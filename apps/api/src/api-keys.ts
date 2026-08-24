@@ -116,6 +116,7 @@ export async function authenticateProjectApiKey(db: MetalDb, key: string) {
     .select({
       keyId: projectApiKeys.id,
       projectId: projectApiKeys.projectId,
+      projectPublicId: projects.publicId,
       organizationId: projects.organizationId,
       expiresAt: projectApiKeys.expiresAt,
     })

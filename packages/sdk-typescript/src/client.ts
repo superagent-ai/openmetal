@@ -4,6 +4,7 @@ import {
   OperationSchema,
   ProjectApiKeySchema,
   SandboxMutationSchema,
+  SandboxListResponseSchema,
   SandboxSchema,
   type CreateSandboxRequest,
   type Operation,
@@ -17,6 +18,7 @@ export type AccessTokenProvider = () =>
 export type MetalClientOptions = {
   baseUrl: string;
   accessToken: AccessTokenProvider;
+  projectId?: string;
   timeoutMs?: number;
   fetch?: typeof fetch;
   retry?: {
@@ -31,6 +33,7 @@ type RequestOptions = {
   body?: unknown;
   query?: Record<string, string | number | undefined>;
   idempotencyKey?: string;
+  projectId?: string;
   schema: z.ZodType;
   timeoutMs?: number;
 };
@@ -46,6 +49,7 @@ function jitter(ms: number): number {
 export class MetalClient {
   private readonly baseUrl: string;
   private readonly accessToken: AccessTokenProvider;
+  private readonly projectId?: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly retryAttempts: number;
@@ -54,6 +58,7 @@ export class MetalClient {
   constructor(options: MetalClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.accessToken = options.accessToken;
+    this.projectId = options.projectId;
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetchImpl =
       options.fetch ??
@@ -285,18 +290,31 @@ export class MetalClient {
         path: `/v1/projects/${projectId}/sandboxes`,
         schema: z.object({ sandboxes: z.array(SandboxSchema) }),
       }),
-    createAsync: (input: CreateSandboxRequest, options?: { idempotencyKey?: string }) =>
+    listScoped: (options?: { projectId?: string; cursor?: string; limit?: number }) =>
+      this.request({
+        method: "GET",
+        path: "/v1/sandboxes",
+        projectId: options?.projectId,
+        query: { cursor: options?.cursor, limit: options?.limit },
+        schema: SandboxListResponseSchema,
+      }),
+    createAsync: (
+      input: CreateSandboxRequest,
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) =>
       this.request({
         method: "POST",
         path: "/v1/sandboxes",
         body: CreateSandboxRequestSchema.parse(input),
         idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        projectId: options?.projectId,
         schema: SandboxMutationSchema,
       }) as Promise<SandboxMutation>,
     create: async (
       input: CreateSandboxRequest,
       options?: {
         idempotencyKey?: string;
+        projectId?: string;
         timeoutMs?: number;
         signal?: AbortSignal;
       },
@@ -306,69 +324,80 @@ export class MetalClient {
       if (operation.state !== "succeeded") {
         throw new Error(operation.error?.message ?? "sandbox creation failed");
       }
-      return this.sandboxes.get(mutation.sandbox.id);
+      return this.sandboxes.get(mutation.sandbox.id, options);
     },
-    get: (sandboxId: string) =>
+    get: (sandboxId: string, options?: { projectId?: string }) =>
       this.request({
         method: "GET",
         path: `/v1/sandboxes/${sandboxId}`,
+        projectId: options?.projectId,
         schema: SandboxSchema,
       }),
-    pauseAsync: (sandboxId: string, options?: { idempotencyKey?: string }) =>
+    pauseAsync: (sandboxId: string, options?: { idempotencyKey?: string; projectId?: string }) =>
       this.request({
         method: "POST",
         path: `/v1/sandboxes/${sandboxId}/actions/pause`,
         idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        projectId: options?.projectId,
         schema: SandboxMutationSchema,
       }) as Promise<SandboxMutation>,
     pause: async (
       projectIdOrSandboxId: string,
       maybeSandboxId?: string,
-      options?: { timeoutMs?: number; signal?: AbortSignal },
+      options?: { timeoutMs?: number; signal?: AbortSignal; projectId?: string },
     ) => {
       const sandboxId = maybeSandboxId ?? projectIdOrSandboxId;
-      const mutation = await this.sandboxes.pauseAsync(sandboxId);
+      const projectId = maybeSandboxId ? projectIdOrSandboxId : options?.projectId;
+      const mutation = await this.sandboxes.pauseAsync(sandboxId, { projectId });
       const operation = await this.operations.wait(mutation.operation, options);
       if (operation.state !== "succeeded") {
         throw new Error(operation.error?.message ?? "sandbox pause failed");
       }
-      return this.sandboxes.get(sandboxId);
+      return this.sandboxes.get(sandboxId, { projectId });
     },
-    resumeAsync: (sandboxId: string, options?: { idempotencyKey?: string }) =>
+    resumeAsync: (sandboxId: string, options?: { idempotencyKey?: string; projectId?: string }) =>
       this.request({
         method: "POST",
         path: `/v1/sandboxes/${sandboxId}/actions/resume`,
         idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        projectId: options?.projectId,
         schema: SandboxMutationSchema,
       }) as Promise<SandboxMutation>,
-    resume: async (sandboxId: string, options?: { timeoutMs?: number; signal?: AbortSignal }) => {
-      const mutation = await this.sandboxes.resumeAsync(sandboxId);
+    resume: async (
+      sandboxId: string,
+      options?: { timeoutMs?: number; signal?: AbortSignal; projectId?: string },
+    ) => {
+      const mutation = await this.sandboxes.resumeAsync(sandboxId, options);
       const operation = await this.operations.wait(mutation.operation, options);
       if (operation.state !== "succeeded") {
         throw new Error(operation.error?.message ?? "sandbox resume failed");
       }
-      return this.sandboxes.get(sandboxId);
+      return this.sandboxes.get(sandboxId, options);
     },
-    deleteAsync: (sandboxId: string, options?: { idempotencyKey?: string }) =>
+    deleteAsync: (sandboxId: string, options?: { idempotencyKey?: string; projectId?: string }) =>
       this.request({
         method: "DELETE",
         path: `/v1/sandboxes/${sandboxId}`,
         idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        projectId: options?.projectId,
         schema: SandboxMutationSchema,
       }) as Promise<SandboxMutation>,
-    delete: async (sandboxId: string, options?: { timeoutMs?: number; signal?: AbortSignal }) => {
-      const mutation = await this.sandboxes.deleteAsync(sandboxId);
+    delete: async (
+      sandboxId: string,
+      options?: { timeoutMs?: number; signal?: AbortSignal; projectId?: string },
+    ) => {
+      const mutation = await this.sandboxes.deleteAsync(sandboxId, options);
       const operation = await this.operations.wait(mutation.operation, options);
       if (operation.state !== "succeeded") {
         throw new Error(operation.error?.message ?? "sandbox destroy failed");
       }
-      return this.sandboxes.get(sandboxId);
+      return this.sandboxes.get(sandboxId, options);
     },
     deleteFromProject: async (
       _projectId: string,
       sandboxId: string,
       options?: { timeoutMs?: number; signal?: AbortSignal },
-    ) => this.sandboxes.delete(sandboxId, options),
+    ) => this.sandboxes.delete(sandboxId, { ...options, projectId: _projectId }),
   };
 
   readonly events = {
@@ -408,10 +437,7 @@ export class MetalClient {
         return await this.dispatch(options);
       } catch (error) {
         lastError = error;
-        const retryable =
-          idempotent &&
-          error instanceof MetalError &&
-          (error.status >= 500 || error.code === "timeout");
+        const retryable = idempotent && error instanceof MetalError && error.retryable;
         if (!retryable || attempt === attempts - 1) {
           throw error;
         }
@@ -447,6 +473,10 @@ export class MetalClient {
     }
     if (options.idempotencyKey) {
       headers["idempotency-key"] = options.idempotencyKey;
+    }
+    const projectId = options.projectId ?? this.projectId;
+    if (projectId) {
+      headers["x-metal-project-id"] = projectId;
     }
 
     try {
@@ -494,6 +524,7 @@ export class MetalClient {
           code: "timeout",
           message: "request timed out",
           requestId,
+          retryable: true,
         });
       }
       throw new MetalError({
@@ -501,6 +532,7 @@ export class MetalClient {
         code: "internal_error",
         message: error instanceof Error ? error.message : "network error",
         requestId,
+        retryable: true,
       });
     } finally {
       clearTimeout(timer);

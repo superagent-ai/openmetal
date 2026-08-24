@@ -4,6 +4,7 @@ export class MetalError extends Error {
   readonly status: number;
   readonly code: string;
   readonly requestId: string;
+  readonly retryable: boolean;
   readonly details?: Record<string, unknown>;
 
   constructor(input: {
@@ -11,6 +12,7 @@ export class MetalError extends Error {
     status: number;
     code: string;
     requestId: string;
+    retryable?: boolean;
     details?: Record<string, unknown>;
   }) {
     super(input.message);
@@ -18,6 +20,7 @@ export class MetalError extends Error {
     this.status = input.status;
     this.code = input.code;
     this.requestId = input.requestId;
+    this.retryable = input.retryable ?? false;
     this.details = input.details;
   }
 
@@ -27,6 +30,7 @@ export class MetalError extends Error {
       message: envelope.message,
       code: envelope.code,
       requestId: envelope.request_id,
+      retryable: envelope.retryable,
       details: envelope.details,
     });
   }

@@ -1,41 +1,77 @@
 import { z } from "zod";
-import { API_SEMVER, API_VERSION } from "./primitives.js";
 import { ErrorEnvelopeSchema } from "./errors.js";
+import { CursorEventPageSchema, ListEventsQuerySchema } from "./events.js";
+import { OperationSchema } from "./operations.js";
 import { ApiMetadataResponseSchema, HealthResponseSchema, ReadinessResponseSchema } from "./ops.js";
 import {
   CreateOrganizationRequestSchema,
   OrganizationListResponseSchema,
   OrganizationSchema,
 } from "./organizations.js";
+import { API_SEMVER, API_VERSION, ProjectIdSchema } from "./primitives.js";
 import {
   CreateProjectRequestSchema,
   ProjectListResponseSchema,
   ProjectSchema,
   UpdateProjectRequestSchema,
 } from "./projects.js";
-import { CursorEventPageSchema, ListEventsQuerySchema } from "./events.js";
-import { CreateSandboxRequestSchema, SandboxMutationSchema, SandboxSchema } from "./sandboxes.js";
-import { OperationSchema } from "./operations.js";
+import {
+  CreateSandboxRequestSchema,
+  SandboxListResponseSchema,
+  SandboxMutationSchema,
+  SandboxSchema,
+} from "./sandboxes.js";
+
+type OpenApiObject = Record<string, unknown>;
+
+function cleanSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cleanSchema);
+  if (!value || typeof value !== "object") return value;
+  const input = value as OpenApiObject;
+  const output: OpenApiObject = {};
+  for (const [key, child] of Object.entries(input)) {
+    if (key === "$schema") continue;
+    if (key === "pattern" && (input.format === "date-time" || input.format === "uuid")) {
+      continue;
+    }
+    output[key] = cleanSchema(child);
+  }
+  return output;
+}
 
 const json = <T extends z.ZodType>(schema: T) =>
-  z.toJSONSchema(schema, { target: "draft-7" }) as Record<string, unknown>;
+  cleanSchema(z.toJSONSchema(schema, { target: "draft-2020-12" })) as OpenApiObject;
 
-export function buildOpenApiDocument(): Record<string, unknown> {
-  const errorResponse = {
-    description: "Stable Metal error envelope",
-    content: {
-      "application/json": {
-        schema: json(ErrorEnvelopeSchema),
-      },
-    },
-  };
+const ref = (name: string): OpenApiObject => ({
+  $ref: `#/components/schemas/${name}`,
+});
+const parameterRef = (name: string): OpenApiObject => ({
+  $ref: `#/components/parameters/${name}`,
+});
+const jsonContent = (name: string): OpenApiObject => ({
+  "application/json": { schema: ref(name) },
+});
+const response = (description: string, schemaName: string): OpenApiObject => ({
+  description,
+  content: jsonContent(schemaName),
+});
+const errorResponse = (description: string): OpenApiObject => ({
+  description,
+  content: jsonContent("Error"),
+});
 
+const ProjectDeleteResponseSchema = z.object({
+  id: ProjectIdSchema,
+  deleted: z.literal(true),
+});
+
+export function buildOpenApiDocument(): OpenApiObject {
   return {
     openapi: "3.1.0",
     info: {
       title: "Metal API",
       version: API_SEMVER,
-      description: `Superagent Metal control plane ${API_VERSION}. Milestone 1 product API.`,
+      description: `Superagent Metal control plane ${API_VERSION}.`,
     },
     servers: [{ url: "/", description: "Configured Metal API origin" }],
     components: {
@@ -43,7 +79,100 @@ export function buildOpenApiDocument(): Record<string, unknown> {
         bearerAuth: {
           type: "http",
           scheme: "bearer",
-          bearerFormat: "JWT",
+        },
+      },
+      schemas: {
+        Error: json(ErrorEnvelopeSchema),
+        HealthResponse: json(HealthResponseSchema),
+        ReadinessResponse: json(ReadinessResponseSchema),
+        ApiMetadataResponse: json(ApiMetadataResponseSchema),
+        Organization: json(OrganizationSchema),
+        OrganizationListResponse: json(OrganizationListResponseSchema),
+        CreateOrganizationRequest: json(CreateOrganizationRequestSchema),
+        Project: json(ProjectSchema),
+        ProjectListResponse: json(ProjectListResponseSchema),
+        CreateProjectRequest: json(CreateProjectRequestSchema),
+        UpdateProjectRequest: json(UpdateProjectRequestSchema),
+        ProjectDeleteResponse: json(ProjectDeleteResponseSchema),
+        CreateSandboxRequest: json(CreateSandboxRequestSchema),
+        Sandbox: json(SandboxSchema),
+        SandboxMutation: json(SandboxMutationSchema),
+        SandboxListResponse: json(SandboxListResponseSchema),
+        Operation: json(OperationSchema),
+        CursorEventPage: json(CursorEventPageSchema),
+        ProjectId: json(ProjectIdSchema),
+        SandboxId: {
+          type: "string",
+          pattern: "^sbx_[A-Za-z0-9]+$",
+        },
+        OperationId: {
+          type: "string",
+          pattern: "^op_[A-Za-z0-9]+$",
+        },
+        Cursor: { type: "string", minLength: 1, maxLength: 512 },
+      },
+      parameters: {
+        OrganizationIdPath: {
+          name: "organization_id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+        ProjectIdPath: {
+          name: "project_id",
+          in: "path",
+          required: true,
+          schema: ref("ProjectId"),
+        },
+        SandboxIdPath: {
+          name: "sandbox_id",
+          in: "path",
+          required: true,
+          schema: ref("SandboxId"),
+        },
+        OperationIdPath: {
+          name: "operation_id",
+          in: "path",
+          required: true,
+          schema: ref("OperationId"),
+        },
+        ProjectScopeHeader: {
+          name: "X-Metal-Project-ID",
+          in: "header",
+          required: true,
+          description: "Public project ID used to scope sandbox access.",
+          schema: ref("ProjectId"),
+        },
+        IdempotencyKeyHeader: {
+          name: "Idempotency-Key",
+          in: "header",
+          required: true,
+          schema: { type: "string", minLength: 1, maxLength: 512 },
+        },
+        OptionalIdempotencyKeyHeader: {
+          name: "Idempotency-Key",
+          in: "header",
+          required: false,
+          schema: { type: "string", minLength: 1, maxLength: 512 },
+        },
+        LastEventIdHeader: {
+          name: "Last-Event-ID",
+          in: "header",
+          required: false,
+          description: "Resume after the last received operation event sequence.",
+          schema: { type: "integer", minimum: 0 },
+        },
+        CursorQuery: {
+          name: "cursor",
+          in: "query",
+          required: false,
+          schema: ref("Cursor"),
+        },
+        LimitQuery: {
+          name: "limit",
+          in: "query",
+          required: false,
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
         },
       },
     },
@@ -53,10 +182,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           operationId: "getHealth",
           tags: ["ops"],
           responses: {
-            "200": {
-              description: "Process is alive",
-              content: { "application/json": { schema: json(HealthResponseSchema) } },
-            },
+            "200": response("Process is alive", "HealthResponse"),
           },
         },
       },
@@ -65,14 +191,8 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           operationId: "getReady",
           tags: ["ops"],
           responses: {
-            "200": {
-              description: "Dependencies are ready",
-              content: { "application/json": { schema: json(ReadinessResponseSchema) } },
-            },
-            "503": {
-              description: "Dependencies are not ready",
-              content: { "application/json": { schema: json(ReadinessResponseSchema) } },
-            },
+            "200": response("Dependencies are ready", "ReadinessResponse"),
+            "503": response("Dependencies are not ready", "ReadinessResponse"),
           },
         },
       },
@@ -81,10 +201,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           operationId: "getMeta",
           tags: ["ops"],
           responses: {
-            "200": {
-              description: "API metadata",
-              content: { "application/json": { schema: json(ApiMetadataResponseSchema) } },
-            },
+            "200": response("API metadata", "ApiMetadataResponse"),
           },
         },
       },
@@ -94,326 +211,234 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           tags: ["organizations"],
           security: [{ bearerAuth: [] }],
           responses: {
-            "200": {
-              description: "Organizations for the authenticated principal",
-              content: { "application/json": { schema: json(OrganizationListResponseSchema) } },
-            },
-            "401": errorResponse,
+            "200": response(
+              "Organizations for the authenticated principal",
+              "OrganizationListResponse",
+            ),
+            "401": errorResponse("Authentication required"),
           },
         },
         post: {
           operationId: "createOrganization",
           tags: ["organizations"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "Idempotency-Key",
-              in: "header",
-              required: false,
-              schema: { type: "string" },
-            },
-          ],
+          parameters: [parameterRef("OptionalIdempotencyKeyHeader")],
           requestBody: {
             required: true,
-            content: { "application/json": { schema: json(CreateOrganizationRequestSchema) } },
+            content: jsonContent("CreateOrganizationRequest"),
           },
           responses: {
-            "201": {
-              description: "Organization created",
-              content: { "application/json": { schema: json(OrganizationSchema) } },
-            },
-            "401": errorResponse,
-            "409": errorResponse,
-            "422": errorResponse,
+            "201": response("Organization created", "Organization"),
+            "401": errorResponse("Authentication required"),
+            "409": errorResponse("Organization conflict"),
+            "422": errorResponse("Invalid request"),
           },
         },
       },
       "/v1/organizations/{organization_id}": {
+        parameters: [parameterRef("OrganizationIdPath")],
         get: {
           operationId: "getOrganization",
           tags: ["organizations"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "organization_id",
-              in: "path",
-              required: true,
-              schema: { type: "string", format: "uuid" },
-            },
-          ],
           responses: {
-            "200": {
-              description: "Organization",
-              content: { "application/json": { schema: json(OrganizationSchema) } },
-            },
-            "401": errorResponse,
-            "403": errorResponse,
-            "404": errorResponse,
+            "200": response("Organization", "Organization"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Organization not found"),
           },
         },
       },
       "/v1/organizations/{organization_id}/projects": {
+        parameters: [parameterRef("OrganizationIdPath")],
         get: {
           operationId: "listProjects",
           tags: ["projects"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "organization_id",
-              in: "path",
-              required: true,
-              schema: { type: "string", format: "uuid" },
-            },
-          ],
           responses: {
-            "200": {
-              description: "Projects in the organization",
-              content: { "application/json": { schema: json(ProjectListResponseSchema) } },
-            },
-            "401": errorResponse,
-            "403": errorResponse,
-            "404": errorResponse,
+            "200": response("Projects in the organization", "ProjectListResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Organization not found"),
           },
         },
         post: {
           operationId: "createProject",
           tags: ["projects"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "organization_id",
-              in: "path",
-              required: true,
-              schema: { type: "string", format: "uuid" },
-            },
-            {
-              name: "Idempotency-Key",
-              in: "header",
-              required: false,
-              schema: { type: "string" },
-            },
-          ],
+          parameters: [parameterRef("OptionalIdempotencyKeyHeader")],
           requestBody: {
             required: true,
-            content: { "application/json": { schema: json(CreateProjectRequestSchema) } },
+            content: jsonContent("CreateProjectRequest"),
           },
           responses: {
-            "201": {
-              description: "Project created",
-              content: { "application/json": { schema: json(ProjectSchema) } },
-            },
-            "401": errorResponse,
-            "403": errorResponse,
-            "409": errorResponse,
-            "422": errorResponse,
+            "201": response("Project created", "Project"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "409": errorResponse("Project conflict"),
+            "422": errorResponse("Invalid request"),
           },
         },
       },
       "/v1/projects/{project_id}": {
+        parameters: [parameterRef("ProjectIdPath")],
+        get: {
+          operationId: "getProject",
+          tags: ["projects"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Project", "Project"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Project not found"),
+          },
+        },
         patch: {
           operationId: "updateProject",
           tags: ["projects"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "project_id",
-              in: "path",
-              required: true,
-              schema: { type: "string", format: "uuid" },
-            },
-          ],
           requestBody: {
             required: true,
-            content: { "application/json": { schema: json(UpdateProjectRequestSchema) } },
+            content: jsonContent("UpdateProjectRequest"),
           },
           responses: {
-            "200": {
-              description: "Project updated",
-              content: { "application/json": { schema: json(ProjectSchema) } },
-            },
-            "401": errorResponse,
-            "403": errorResponse,
-            "404": errorResponse,
-            "409": errorResponse,
-            "422": errorResponse,
+            "200": response("Project updated", "Project"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Project not found"),
+            "409": errorResponse("Project conflict"),
+            "422": errorResponse("Invalid request"),
           },
         },
         delete: {
           operationId: "deleteProject",
           tags: ["projects"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "project_id",
-              in: "path",
-              required: true,
-              schema: { type: "string", format: "uuid" },
-            },
-          ],
           responses: {
-            "200": {
-              description: "Project deleted",
-              content: {
-                "application/json": {
-                  schema: json(z.object({ id: z.string(), deleted: z.literal(true) })),
-                },
-              },
-            },
-            "401": errorResponse,
-            "403": errorResponse,
-            "404": errorResponse,
-          },
-        },
-        get: {
-          operationId: "getProject",
-          tags: ["projects"],
-          security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "project_id",
-              in: "path",
-              required: true,
-              schema: { type: "string", format: "uuid" },
-            },
-          ],
-          responses: {
-            "200": {
-              description: "Project",
-              content: { "application/json": { schema: json(ProjectSchema) } },
-            },
-            "401": errorResponse,
-            "403": errorResponse,
-            "404": errorResponse,
+            "200": response("Project deleted", "ProjectDeleteResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Project not found"),
           },
         },
       },
       "/v1/sandboxes": {
+        parameters: [parameterRef("ProjectScopeHeader")],
+        get: {
+          operationId: "listSandboxes",
+          tags: ["sandboxes"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("CursorQuery"), parameterRef("LimitQuery")],
+          responses: {
+            "200": response("Sandbox page", "SandboxListResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "422": errorResponse("Invalid cursor"),
+          },
+        },
         post: {
           operationId: "createSandbox",
           tags: ["sandboxes"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "Idempotency-Key",
-              in: "header",
-              required: true,
-              schema: { type: "string" },
-            },
-          ],
+          parameters: [parameterRef("IdempotencyKeyHeader")],
           requestBody: {
             required: true,
-            content: { "application/json": { schema: json(CreateSandboxRequestSchema) } },
+            content: jsonContent("CreateSandboxRequest"),
           },
           responses: {
-            "202": {
-              description: "Sandbox provisioning operation accepted",
-              content: { "application/json": { schema: json(SandboxMutationSchema) } },
-            },
-            "401": errorResponse,
-            "409": errorResponse,
-            "422": errorResponse,
+            "202": response("Sandbox provisioning operation accepted", "SandboxMutation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "409": errorResponse("Idempotency conflict"),
+            "422": errorResponse("Invalid request"),
           },
         },
       },
       "/v1/sandboxes/{sandbox_id}": {
+        parameters: [parameterRef("SandboxIdPath"), parameterRef("ProjectScopeHeader")],
         get: {
           operationId: "getSandbox",
           tags: ["sandboxes"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "sandbox_id",
-              in: "path",
-              required: true,
-              schema: { type: "string", pattern: "^sbx_[A-Za-z0-9]+$" },
-            },
-          ],
           responses: {
-            "200": {
-              description: "Sandbox",
-              content: { "application/json": { schema: json(SandboxSchema) } },
-            },
-            "404": errorResponse,
+            "200": response("Sandbox", "Sandbox"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
           },
         },
         delete: {
           operationId: "destroySandbox",
           tags: ["sandboxes"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "sandbox_id",
-              in: "path",
-              required: true,
-              schema: { type: "string", pattern: "^sbx_[A-Za-z0-9]+$" },
-            },
-          ],
           responses: {
-            "202": {
-              description: "Sandbox destruction accepted",
-              content: { "application/json": { schema: json(SandboxMutationSchema) } },
-            },
+            "202": response("Sandbox destruction accepted", "SandboxMutation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
           },
         },
       },
       "/v1/sandboxes/{sandbox_id}/actions/pause": {
+        parameters: [parameterRef("SandboxIdPath"), parameterRef("ProjectScopeHeader")],
         post: {
           operationId: "pauseSandbox",
           tags: ["sandboxes"],
           security: [{ bearerAuth: [] }],
           responses: {
-            "202": {
-              description: "Sandbox pause accepted",
-              content: { "application/json": { schema: json(SandboxMutationSchema) } },
-            },
+            "202": response("Sandbox pause accepted", "SandboxMutation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
+            "409": errorResponse("Sandbox cannot be paused"),
           },
         },
       },
       "/v1/sandboxes/{sandbox_id}/actions/resume": {
+        parameters: [parameterRef("SandboxIdPath"), parameterRef("ProjectScopeHeader")],
         post: {
           operationId: "resumeSandbox",
           tags: ["sandboxes"],
           security: [{ bearerAuth: [] }],
           responses: {
-            "202": {
-              description: "Sandbox resume accepted",
-              content: { "application/json": { schema: json(SandboxMutationSchema) } },
-            },
+            "202": response("Sandbox resume accepted", "SandboxMutation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
+            "409": errorResponse("Sandbox cannot be resumed"),
           },
         },
       },
       "/v1/operations/{operation_id}": {
+        parameters: [parameterRef("OperationIdPath")],
         get: {
           operationId: "getOperation",
           tags: ["operations"],
           security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "operation_id",
-              in: "path",
-              required: true,
-              schema: { type: "string", pattern: "^op_[A-Za-z0-9]+$" },
-            },
-          ],
           responses: {
-            "200": {
-              description: "Operation",
-              content: { "application/json": { schema: json(OperationSchema) } },
-            },
-            "404": errorResponse,
+            "200": response("Operation", "Operation"),
+            "401": errorResponse("Authentication required"),
+            "404": errorResponse("Operation not found"),
           },
         },
       },
       "/v1/operations/{operation_id}/events": {
+        parameters: [parameterRef("OperationIdPath"), parameterRef("LastEventIdHeader")],
         get: {
           operationId: "streamOperationEvents",
           tags: ["operations"],
           security: [{ bearerAuth: [] }],
           responses: {
             "200": {
-              description: "Resumable operation events",
-              content: { "text/event-stream": { schema: { type: "string" } } },
+              description: "Resumable operation events ordered by sequence",
+              content: {
+                "text/event-stream": {
+                  schema: { type: "string" },
+                },
+              },
             },
+            "401": errorResponse("Authentication required"),
+            "404": errorResponse("Operation not found"),
           },
         },
       },
@@ -427,24 +452,21 @@ export function buildOpenApiDocument(): Record<string, unknown> {
               name: "project_id",
               in: "query",
               required: true,
-              schema: { type: "string", format: "uuid" },
+              schema: ref("ProjectId"),
             },
-            { name: "after", in: "query", required: false, schema: { type: "string" } },
             {
-              name: "limit",
+              name: "after",
               in: "query",
               required: false,
-              schema: { type: "integer", minimum: 1, maximum: 100 },
+              schema: ref("Cursor"),
             },
+            parameterRef("LimitQuery"),
           ],
           responses: {
-            "200": {
-              description: "Durable event page",
-              content: { "application/json": { schema: json(CursorEventPageSchema) } },
-            },
-            "401": errorResponse,
-            "403": errorResponse,
-            "422": errorResponse,
+            "200": response("Durable event page", "CursorEventPage"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "422": errorResponse("Invalid request"),
           },
         },
       },

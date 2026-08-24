@@ -222,12 +222,12 @@ describe("worker outbox", () => {
         ${orgId},
         ${projectId},
         'codesandbox',
-        'codesandbox',
+        'auto',
         'routing',
         ${JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" })}::jsonb,
         ${JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" })}::jsonb,
         ${JSON.stringify({ runtime_timeout_seconds: 300 })}::jsonb,
-        ${JSON.stringify({ providers: ["e2b"] })}::jsonb,
+        ${JSON.stringify({ providers: [] })}::jsonb,
         '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
         ${user.user.id}
       )

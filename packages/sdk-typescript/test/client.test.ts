@@ -18,6 +18,7 @@ describe("MetalClient unit", () => {
           code: "unauthenticated",
           message: "missing token",
           request_id: "req_1",
+          retryable: false,
         }),
     });
     await expect(client.organizations.list()).rejects.toMatchObject({
@@ -78,6 +79,7 @@ describe("MetalClient unit", () => {
           code: "service_unavailable",
           message: "try later",
           request_id: "r1",
+          retryable: true,
         }),
       )
       .mockResolvedValueOnce(jsonResponse(200, { status: "ok" }));
@@ -99,6 +101,7 @@ describe("MetalClient unit", () => {
           code: "service_unavailable",
           message: "try later",
           request_id: "r1",
+          retryable: true,
         }),
       );
     const client = new MetalClient({

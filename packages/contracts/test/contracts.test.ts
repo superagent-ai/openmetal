@@ -45,6 +45,7 @@ describe("contract parsing", () => {
         code: "forbidden",
         message: "not a member",
         request_id: "req_1",
+        retryable: false,
         details: { organization_id: "x" },
       }),
     ).toMatchObject({ code: "forbidden" });

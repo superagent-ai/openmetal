@@ -66,6 +66,7 @@ describe("metal api integration", () => {
       code: "not_found",
       message: "route not found",
       request_id: requestId,
+      retryable: false,
     });
 
     const allowed = await runningApp.inject({
@@ -143,6 +144,7 @@ describe("metal api integration", () => {
       code: "validation_error",
       message: "invalid organization payload",
       request_id: invalidRequestId,
+      retryable: false,
     });
 
     const slug = `org-${crypto.randomUUID().slice(0, 8)}`;
@@ -635,6 +637,7 @@ describe("metal api integration", () => {
     const projectClient = new MetalClient({
       baseUrl: appUrl,
       accessToken: () => createdKey.key,
+      projectId: project.id,
       retry: { attempts: 1 },
     });
     const request = {
@@ -666,11 +669,76 @@ describe("metal api integration", () => {
     expect(first.sandbox.state).toBe("routing");
     expect(first.sandbox.requested.resources.memory_mb).toBe(4096);
     expect(replay).toEqual(first);
+    const automatic = await projectClient.sandboxes.createAsync(
+      {
+        source: {
+          kind: "environment",
+          environment: "metal/node",
+          version: "1",
+        },
+        resources: {
+          vcpu: 1,
+          memory_mb: 1024,
+          architecture: "any",
+        },
+        lifecycle: { runtime_timeout_seconds: 600 },
+        regions: ["iad1"],
+        features: { pty: true, pause_resume: true },
+        network: { internet_access: false },
+      },
+      { idempotencyKey: "automatic-create" },
+    );
+    expect(automatic.sandbox.requested.provider).toBe("auto");
+    expect(automatic.sandbox.provider).toBeNull();
+    const firstPage = await projectClient.sandboxes.listScoped({ limit: 1 });
+    expect(firstPage.sandboxes).toHaveLength(1);
+    expect(firstPage.next_cursor).toBe(firstPage.sandboxes[0]?.id);
+    await expect(
+      projectClient.sandboxes.listScoped({
+        cursor: firstPage.next_cursor ?? undefined,
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({
+      sandboxes: [expect.objectContaining({ id: first.sandbox.id })],
+    });
+    const unscopedClient = new MetalClient({
+      baseUrl: appUrl,
+      accessToken: () => createdKey.key,
+      retry: { attempts: 1 },
+    });
+    await expect(unscopedClient.sandboxes.get(first.sandbox.id)).rejects.toMatchObject({
+      status: 400,
+      code: "validation_error",
+    });
+    await expect(
+      projectClient.sandboxes.get(first.sandbox.id, {
+        projectId: `prj_${crypto.randomUUID().replaceAll("-", "")}`,
+      }),
+    ).rejects.toMatchObject({ status: 403, code: "forbidden" });
     await expect(projectClient.operations.get(first.operation.id)).resolves.toMatchObject({
       id: first.operation.id,
       state: "queued",
       resource_id: first.sandbox.id,
     });
+    const operationEvents = await fetch(`${appUrl}/v1/operations/${first.operation.id}/events`, {
+      headers: { authorization: `Bearer ${createdKey.key}` },
+    });
+    expect(operationEvents.status).toBe(200);
+    expect(await operationEvents.text()).toContain("id: 1");
+    const resumedEvents = await fetch(`${appUrl}/v1/operations/${first.operation.id}/events`, {
+      headers: {
+        authorization: `Bearer ${createdKey.key}`,
+        "last-event-id": "1",
+      },
+    });
+    expect(await resumedEvents.text()).toBe("");
+    const invalidSequence = await fetch(`${appUrl}/v1/operations/${first.operation.id}/events`, {
+      headers: {
+        authorization: `Bearer ${createdKey.key}`,
+        "last-event-id": "not-a-sequence",
+      },
+    });
+    expect(invalidSequence.status).toBe(422);
     const [counts] = await database.sql`
       select
         (select count(*)::int from metal.operations where public_id = ${first.operation.id}) operations,

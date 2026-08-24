@@ -140,6 +140,9 @@ export const sandboxes = metalSchema.table(
       .default({}),
     resolvedResources: jsonb("resolved_resources").$type<Record<string, unknown>>(),
     lifecycle: jsonb("lifecycle").$type<Record<string, unknown>>().notNull().default({}),
+    regions: jsonb("regions").$type<string[]>().notNull().default([]),
+    features: jsonb("features").$type<Record<string, unknown>>().notNull().default({}),
+    network: jsonb("network").$type<Record<string, unknown>>().notNull().default({}),
     fallback: jsonb("fallback").$type<Record<string, unknown>>().notNull().default({}),
     providerOptions: jsonb("provider_options")
       .$type<Record<string, unknown>>()

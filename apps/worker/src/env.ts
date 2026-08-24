@@ -41,6 +41,10 @@ export const WorkerEnvSchema = z.object({
   DAYTONA_API_URL: z.string().url().optional(),
   DAYTONA_ANALYTICS_API_URL: z.string().url().optional(),
   DAYTONA_TARGET: z.string().min(1).optional(),
+  DAYTONA_PAUSE_SUPPORTED: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
   CLOUDFLARE_SANDBOX_API_URL: z.string().url().optional(),
   CLOUDFLARE_SANDBOX_API_KEY: z.string().min(1).optional(),
   CLOUDFLARE_ACCOUNT_ID: z.string().min(1).optional(),
@@ -112,6 +116,7 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     DAYTONA_API_URL: source.DAYTONA_API_URL,
     DAYTONA_ANALYTICS_API_URL: source.DAYTONA_ANALYTICS_API_URL,
     DAYTONA_TARGET: source.DAYTONA_TARGET,
+    DAYTONA_PAUSE_SUPPORTED: source.DAYTONA_PAUSE_SUPPORTED,
     CLOUDFLARE_SANDBOX_API_URL: source.CLOUDFLARE_SANDBOX_API_URL,
     CLOUDFLARE_SANDBOX_API_KEY: source.CLOUDFLARE_SANDBOX_API_KEY,
     CLOUDFLARE_ACCOUNT_ID: source.CLOUDFLARE_ACCOUNT_ID,

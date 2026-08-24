@@ -5,6 +5,7 @@ import {
   organizations,
   outboxJobs,
   projects,
+  operations,
   sandboxes,
   withTransaction,
   type MetalDb,
@@ -16,7 +17,9 @@ import {
   serializeCursor,
   toPublicEvent,
 } from "@openmetal/events";
+import type { CreateSandboxRequest } from "@openmetal/contracts";
 import { ApiError } from "./errors.js";
+import { createOperation } from "./operation-service.js";
 
 type Tx = MetalDb;
 
@@ -64,7 +67,14 @@ async function requireProjectAccess(
         eq(organizationMembers.userId, userId),
       ),
     )
-    .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+    .where(
+      and(
+        projectId.startsWith("prj_")
+          ? eq(projects.publicId, projectId)
+          : eq(projects.id, projectId),
+        isNull(projects.deletedAt),
+      ),
+    )
     .then((rows) => rows[0]);
   if (!row) {
     throw new ApiError(404, "not_found", "project not found");
@@ -109,7 +119,7 @@ async function insertEventAndOutbox(
     eventId: event.eventId,
     type: event.type,
     organizationId: event.organizationId,
-    projectId: event.projectId,
+    projectId: event.projectId ? `prj_${event.projectId.replaceAll("-", "")}` : undefined,
     occurredAt: event.occurredAt,
     data: event.payload,
   });
@@ -184,9 +194,12 @@ export async function createProject(
   input: { userId: string; organizationId: string; name: string; slug: string },
 ) {
   await requireMembership(tx, input.userId, input.organizationId, ["owner", "admin"]);
+  const projectId = crypto.randomUUID();
   const [project] = await tx
     .insert(projects)
     .values({
+      id: projectId,
+      publicId: `prj_${projectId.replaceAll("-", "")}`,
       organizationId: input.organizationId,
       name: input.name,
       slug: input.slug,
@@ -201,7 +214,7 @@ export async function createProject(
     projectId: project.id,
     actorId: input.userId,
     data: { name: project.name, slug: project.slug },
-    topic: projectTopic(project.id),
+    topic: projectTopic(project.publicId),
   });
   return project;
 }
@@ -211,7 +224,10 @@ export async function updateProject(
   input: { userId: string; projectId: string; name: string; slug: string },
 ) {
   return withTransaction(db, async (tx) => {
-    await requireProjectAccess(tx, input.userId, input.projectId, ["owner", "admin"]);
+    const existing = await requireProjectAccess(tx, input.userId, input.projectId, [
+      "owner",
+      "admin",
+    ]);
     const [project] = await tx
       .update(projects)
       .set({
@@ -219,7 +235,7 @@ export async function updateProject(
         slug: input.slug,
         updatedAt: new Date(),
       })
-      .where(and(eq(projects.id, input.projectId), isNull(projects.deletedAt)))
+      .where(and(eq(projects.id, existing.id), isNull(projects.deletedAt)))
       .returning();
     if (!project) {
       throw new ApiError(404, "not_found", "project not found");
@@ -231,7 +247,7 @@ export async function updateProject(
       projectId: project.id,
       actorId: input.userId,
       data: { name: project.name, slug: project.slug },
-      topic: projectTopic(project.id),
+      topic: projectTopic(project.publicId),
     });
     return project;
   });
@@ -239,12 +255,15 @@ export async function updateProject(
 
 export async function deleteProject(db: MetalDb, input: { userId: string; projectId: string }) {
   return withTransaction(db, async (tx) => {
-    await requireProjectAccess(tx, input.userId, input.projectId, ["owner", "admin"]);
+    const existing = await requireProjectAccess(tx, input.userId, input.projectId, [
+      "owner",
+      "admin",
+    ]);
     const now = new Date();
     const [project] = await tx
       .update(projects)
       .set({ deletedAt: now, updatedAt: now })
-      .where(and(eq(projects.id, input.projectId), isNull(projects.deletedAt)))
+      .where(and(eq(projects.id, existing.id), isNull(projects.deletedAt)))
       .returning();
     if (!project) {
       throw new ApiError(404, "not_found", "project not found");
@@ -256,7 +275,7 @@ export async function deleteProject(db: MetalDb, input: { userId: string; projec
       projectId: project.id,
       actorId: input.userId,
       data: { name: project.name, slug: project.slug },
-      topic: projectTopic(project.id),
+      topic: projectTopic(project.publicId),
     });
     return project;
   });
@@ -280,30 +299,45 @@ export async function createSandbox(
     organizationId: string;
     projectId: string;
     actorId: string;
-    provider:
-      | "blaxel"
-      | "cloudflare"
-      | "codesandbox"
-      | "daytona"
-      | "e2b"
-      | "modal"
-      | "northflank"
-      | "runloop"
-      | "vercel";
-    image?: string;
-    language: string;
-    ttlMinutes: number;
+    request: CreateSandboxRequest;
   },
 ) {
+  const request = input.request;
+  const requestedProvider = request.provider ?? "auto";
+  const primaryProvider =
+    request.source.kind === "provider_template" ? request.source.provider : requestedProvider;
+  const storedProvider = primaryProvider === "auto" ? "daytona" : primaryProvider;
+  const sandboxId = crypto.randomUUID();
+  const image =
+    request.source.kind === "oci_image"
+      ? request.source.image
+      : request.source.kind === "provider_template"
+        ? request.source.template
+        : undefined;
   const [sandbox] = await tx
     .insert(sandboxes)
     .values({
+      id: sandboxId,
+      publicId: `sbx_${sandboxId.replaceAll("-", "")}`,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      provider: input.provider,
-      image: input.image,
-      language: input.language,
-      ttlMinutes: input.ttlMinutes,
+      provider: storedProvider,
+      primaryProvider,
+      source: request.source,
+      resourceRequirements: request.resources,
+      lifecycle: request.lifecycle,
+      regions: request.regions ?? [],
+      features: request.features ?? {},
+      network: request.network ?? {},
+      fallback: request.fallback ?? { providers: [] },
+      providerOptions: request.provider_options ?? {},
+      environment: request.environment ?? {},
+      secretRefs: request.secret_refs ?? {},
+      metadata: request.metadata ?? {},
+      image,
+      language: request.source.kind === "environment" ? request.source.environment : "custom",
+      ttlMinutes: Math.ceil(request.lifecycle.runtime_timeout_seconds / 60),
+      status: "routing",
       createdBy: input.actorId,
     })
     .returning();
@@ -315,15 +349,25 @@ export async function createSandbox(
     organizationId: input.organizationId,
     projectId: input.projectId,
     actorId: input.actorId,
-    data: { sandbox_id: sandbox.id, provider: input.provider },
-    topic: projectTopic(input.projectId),
+    data: { sandbox_id: sandbox.publicId, provider: requestedProvider },
+    topic: projectTopic(`prj_${input.projectId.replaceAll("-", "")}`),
+  });
+  const operation = await createOperation(tx, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    sandboxId: sandbox.id,
+    type: "sandbox_create",
   });
   await tx.insert(outboxJobs).values({
     jobType: "sandbox.provision",
     dedupeKey: `sandbox:provision:${sandbox.id}`,
-    payload: { job_type: "sandbox.provision", sandbox_id: sandbox.id },
+    payload: {
+      job_type: "sandbox.provision",
+      sandbox_id: sandbox.id,
+      operation_id: operation.id,
+    },
   });
-  return sandbox;
+  return { sandbox, operation };
 }
 
 export async function getSandbox(
@@ -335,7 +379,9 @@ export async function getSandbox(
     .from(sandboxes)
     .where(
       and(
-        eq(sandboxes.id, input.sandboxId),
+        input.sandboxId.startsWith("sbx_")
+          ? eq(sandboxes.publicId, input.sandboxId)
+          : eq(sandboxes.id, input.sandboxId),
         eq(sandboxes.organizationId, input.organizationId),
         eq(sandboxes.projectId, input.projectId),
       ),
@@ -348,12 +394,39 @@ export async function getSandbox(
 }
 
 export async function listProjectSandboxes(db: MetalDb, userId: string, projectId: string) {
-  await getProject(db, userId, projectId);
+  const project = await getProject(db, userId, projectId);
   return db
     .select()
     .from(sandboxes)
-    .where(eq(sandboxes.projectId, projectId))
+    .where(eq(sandboxes.projectId, project.id))
     .orderBy(desc(sandboxes.createdAt));
+}
+
+export async function listScopedSandboxes(
+  db: MetalDb,
+  input: { organizationId: string; projectId: string; cursor?: string; limit: number },
+) {
+  const rows = await db
+    .select()
+    .from(sandboxes)
+    .where(
+      and(
+        eq(sandboxes.organizationId, input.organizationId),
+        eq(sandboxes.projectId, input.projectId),
+      ),
+    )
+    .orderBy(desc(sandboxes.createdAt), desc(sandboxes.id));
+  const start = input.cursor
+    ? rows.findIndex((sandbox) => sandbox.publicId === input.cursor) + 1
+    : 0;
+  if (input.cursor && start === 0) {
+    throw new ApiError(422, "validation_error", "invalid sandbox cursor");
+  }
+  const page = rows.slice(start, start + input.limit);
+  return {
+    rows: page,
+    nextCursor: rows.length > start + input.limit ? (page.at(-1)?.publicId ?? null) : null,
+  };
 }
 
 export async function requestSandboxPause(
@@ -362,8 +435,18 @@ export async function requestSandboxPause(
 ) {
   return withTransaction(db, async (tx) => {
     const sandbox = await getSandbox(tx, input);
-    if (sandbox.status === "paused" || sandbox.status === "pausing") {
-      return sandbox;
+    const operation = await createOperation(tx, {
+      organizationId: sandbox.organizationId,
+      projectId: sandbox.projectId,
+      sandboxId: sandbox.id,
+      type: "sandbox_pause",
+    });
+    if (sandbox.status === "paused") {
+      await tx
+        .update(operations)
+        .set({ state: "succeeded", completedAt: new Date(), updatedAt: new Date() })
+        .where(eq(operations.id, operation.id));
+      return { sandbox, operation: { ...operation, state: "succeeded" as const } };
     }
     if (
       sandbox.provider === "blaxel" ||
@@ -377,23 +460,30 @@ export async function requestSandboxPause(
         `${sandbox.provider} sandboxes do not support pause`,
       );
     }
-    if (sandbox.status !== "ready") {
+    if (sandbox.status !== "ready" && sandbox.status !== "pausing") {
       throw new ApiError(409, "invalid_sandbox_state", "only ready sandboxes can be paused");
     }
-    const [updated] = await tx
-      .update(sandboxes)
-      .set({ status: "pausing", updatedAt: new Date() })
-      .where(eq(sandboxes.id, sandbox.id))
-      .returning();
+    const [updated] =
+      sandbox.status === "pausing"
+        ? [sandbox]
+        : await tx
+            .update(sandboxes)
+            .set({ status: "pausing", updatedAt: new Date() })
+            .where(eq(sandboxes.id, sandbox.id))
+            .returning();
     await tx
       .insert(outboxJobs)
       .values({
         jobType: "sandbox.pause",
         dedupeKey: `sandbox:pause:${sandbox.id}`,
-        payload: { job_type: "sandbox.pause", sandbox_id: sandbox.id },
+        payload: {
+          job_type: "sandbox.pause",
+          sandbox_id: sandbox.id,
+          operation_id: operation.id,
+        },
       })
       .onConflictDoNothing();
-    return updated ?? sandbox;
+    return { sandbox: updated ?? sandbox, operation };
   });
 }
 
@@ -403,12 +493,22 @@ export async function requestSandboxDeletion(
 ) {
   return withTransaction(db, async (tx) => {
     const sandbox = await getSandbox(tx, input);
-    if (sandbox.status === "deleted" || sandbox.status === "deleting") {
-      return sandbox;
+    const operation = await createOperation(tx, {
+      organizationId: sandbox.organizationId,
+      projectId: sandbox.projectId,
+      sandboxId: sandbox.id,
+      type: "sandbox_destroy",
+    });
+    if (sandbox.status === "stopped" || sandbox.status === "deleted") {
+      await tx
+        .update(operations)
+        .set({ state: "succeeded", completedAt: new Date(), updatedAt: new Date() })
+        .where(eq(operations.id, operation.id));
+      return { sandbox, operation: { ...operation, state: "succeeded" as const } };
     }
     const [updated] = await tx
       .update(sandboxes)
-      .set({ status: "deleting", updatedAt: new Date() })
+      .set({ status: "stopping", updatedAt: new Date() })
       .where(eq(sandboxes.id, sandbox.id))
       .returning();
     await tx
@@ -416,7 +516,11 @@ export async function requestSandboxDeletion(
       .values({
         jobType: "sandbox.destroy",
         dedupeKey: `sandbox:destroy:${sandbox.id}`,
-        payload: { job_type: "sandbox.destroy", sandbox_id: sandbox.id },
+        payload: {
+          job_type: "sandbox.destroy",
+          sandbox_id: sandbox.id,
+          operation_id: operation.id,
+        },
       })
       .onConflictDoUpdate({
         target: outboxJobs.dedupeKey,
@@ -431,7 +535,53 @@ export async function requestSandboxDeletion(
           updatedAt: new Date(),
         },
       });
-    return updated ?? sandbox;
+    return { sandbox: updated ?? sandbox, operation };
+  });
+}
+
+export async function requestSandboxResume(
+  db: MetalDb,
+  input: { sandboxId: string; organizationId: string; projectId: string },
+) {
+  return withTransaction(db, async (tx) => {
+    const sandbox = await getSandbox(tx, input);
+    if (!["codesandbox", "e2b", "northflank", "runloop"].includes(sandbox.provider)) {
+      throw new ApiError(
+        409,
+        "capability_unsupported",
+        `${sandbox.provider} sandboxes do not support resume`,
+      );
+    }
+    if (sandbox.status !== "paused" && sandbox.status !== "resuming") {
+      throw new ApiError(409, "invalid_sandbox_state", "only paused sandboxes can be resumed");
+    }
+    const operation = await createOperation(tx, {
+      organizationId: sandbox.organizationId,
+      projectId: sandbox.projectId,
+      sandboxId: sandbox.id,
+      type: "sandbox_resume",
+    });
+    const [updated] =
+      sandbox.status === "resuming"
+        ? [sandbox]
+        : await tx
+            .update(sandboxes)
+            .set({ status: "resuming", updatedAt: new Date() })
+            .where(eq(sandboxes.id, sandbox.id))
+            .returning();
+    await tx
+      .insert(outboxJobs)
+      .values({
+        jobType: "sandbox.resume",
+        dedupeKey: `sandbox:resume:${sandbox.id}`,
+        payload: {
+          job_type: "sandbox.resume",
+          sandbox_id: sandbox.id,
+          operation_id: operation.id,
+        },
+      })
+      .onConflictDoNothing();
+    return { sandbox: updated ?? sandbox, operation };
   });
 }
 

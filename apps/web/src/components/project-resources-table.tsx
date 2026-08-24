@@ -50,15 +50,15 @@ type Sandbox = {
     | "modal"
     | "northflank"
     | "runloop"
-    | "vercel";
-  provider_cost_microusd: string | null;
-  provider_cost_measured_through: string | null;
-  provider_cost_updated_at: string | null;
-  status: string;
+    | "vercel"
+    | null;
+  cost_microusd: string | null;
+  cost_updated_at: string | null;
+  state: string;
   created_at: string;
   ready_at: string | null;
   paused_at: string | null;
-  deleted_at: string | null;
+  stopped_at: string | null;
 };
 
 const dateFormatter = new Intl.DateTimeFormat("en", {
@@ -115,6 +115,9 @@ function formatMicrousd(value: string | null) {
 }
 
 function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
+  if (!provider) {
+    return null;
+  }
   if (provider === "blaxel") {
     return <Image src="/providers/blaxel.png" alt="" width={13} height={13} />;
   }
@@ -143,6 +146,9 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
 }
 
 function providerLabel(provider: Sandbox["provider"]) {
+  if (!provider) {
+    return "Pending";
+  }
   if (provider === "codesandbox") {
     return "CodeSandbox";
   }
@@ -159,7 +165,7 @@ function statusBadgeClass(status: string) {
   if (status === "requested" || status === "provisioning") {
     return "bg-sky-500/15 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300";
   }
-  if (status === "pausing" || status === "deleting" || status === "cleanup_pending") {
+  if (status === "pausing" || status === "stopping" || status === "cleanup_pending") {
     return "bg-amber-500/15 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300";
   }
   if (status === "failed" || status === "cleanup_failed") {
@@ -262,7 +268,7 @@ export function ProjectResourcesTable({
       const result = await metal.sandboxes.list(projectId);
       setSandboxRows(result.sandboxes);
       const sandbox = result.sandboxes.find((candidate) => candidate.id === sandboxId);
-      if (!sandbox || terminalStatuses.includes(sandbox.status)) {
+      if (!sandbox || terminalStatuses.includes(sandbox.state)) {
         return;
       }
     }
@@ -290,7 +296,7 @@ export function ProjectResourcesTable({
     try {
       updateSandbox(await metal.sandboxes.deleteFromProject(projectId, deletingSandbox.id));
       setDeletingSandbox(undefined);
-      await refreshUntil(deletingSandbox.id, ["deleted", "cleanup_failed"]);
+      await refreshUntil(deletingSandbox.id, ["stopped", "cleanup_failed"]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not delete the sandbox");
     } finally {
@@ -347,9 +353,9 @@ export function ProjectResourcesTable({
                     <TableCell>
                       <Badge
                         variant="secondary"
-                        className={cn("capitalize", statusBadgeClass(sandbox.status))}
+                        className={cn("capitalize", statusBadgeClass(sandbox.state))}
                       >
-                        {sandbox.status.replaceAll("_", " ")}
+                        {sandbox.state.replaceAll("_", " ")}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
@@ -363,24 +369,20 @@ export function ProjectResourcesTable({
                     <TableCell className="text-muted-foreground">
                       {formatDuration(
                         sandbox.ready_at,
-                        sandbox.paused_at ?? sandbox.deleted_at,
+                        sandbox.paused_at ?? sandbox.stopped_at,
                         now,
                       )}
                     </TableCell>
                     <TableCell
                       title={
                         sandbox.provider === "modal"
-                          ? "Modal does not expose per-sandbox provider cost"
-                          : sandbox.provider_cost_updated_at
-                            ? `Updated ${dateFormatter.format(
-                                new Date(sandbox.provider_cost_updated_at),
-                              )}`
+                          ? "Cost is not available for this sandbox"
+                          : sandbox.cost_updated_at
+                            ? `Updated ${dateFormatter.format(new Date(sandbox.cost_updated_at))}`
                             : `Waiting for ${sandbox.provider} usage data`
                       }
                     >
-                      {sandbox.provider === "modal"
-                        ? "—"
-                        : formatMicrousd(sandbox.provider_cost_microusd)}
+                      {sandbox.provider === "modal" ? "—" : formatMicrousd(sandbox.cost_microusd)}
                     </TableCell>
                     <TableCell className="pr-4 text-right">
                       <DropdownMenu>
@@ -391,9 +393,7 @@ export function ProjectResourcesTable({
                               variant="ghost"
                               size="icon-sm"
                               aria-label={`Open actions for ${sandbox.id}`}
-                              disabled={
-                                busySandboxId === sandbox.id || sandbox.status === "deleted"
-                              }
+                              disabled={busySandboxId === sandbox.id || sandbox.state === "stopped"}
                             />
                           }
                         >
@@ -406,7 +406,7 @@ export function ProjectResourcesTable({
                               sandbox.provider === "modal" ||
                               sandbox.provider === "cloudflare" ||
                               sandbox.provider === "vercel" ||
-                              sandbox.status !== "ready"
+                              sandbox.state !== "ready"
                             }
                             onClick={() => void pauseSandbox(sandbox)}
                           >
@@ -416,7 +416,7 @@ export function ProjectResourcesTable({
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             variant="destructive"
-                            disabled={sandbox.status === "deleting"}
+                            disabled={sandbox.state === "stopping"}
                             onClick={() => setDeletingSandbox(sandbox)}
                           >
                             <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />

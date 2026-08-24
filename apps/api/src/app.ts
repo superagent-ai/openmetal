@@ -9,7 +9,11 @@ import {
   CreateProjectRequestSchema,
   CreateSandboxRequestSchema,
   ListEventsQuerySchema,
+  ListSandboxesQuerySchema,
   OpaqueIdSchema,
+  OperationIdSchema,
+  ProjectIdSchema,
+  SandboxIdSchema,
   UpdateProjectRequestSchema,
 } from "@openmetal/contracts";
 import { createDatabase, type MetalDatabase } from "@openmetal/db";
@@ -36,12 +40,15 @@ import {
   getProject,
   listOrganizations,
   listProjectSandboxes,
+  listScopedSandboxes,
   listProjects,
   getSandbox,
   requestSandboxDeletion,
   requestSandboxPause,
+  requestSandboxResume,
   updateProject,
 } from "./services.js";
+import { getOperationForPrincipal, listOperationEvents } from "./operation-service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -67,6 +74,7 @@ function serializeOrg(row: {
 
 function serializeProject(row: {
   id: string;
+  publicId?: string;
   organizationId: string;
   name: string;
   slug: string;
@@ -74,7 +82,7 @@ function serializeProject(row: {
   updatedAt: Date;
 }) {
   return {
-    id: row.id,
+    id: row.publicId ?? `prj_${row.id.replaceAll("-", "")}`,
     organization_id: row.organizationId,
     name: row.name,
     slug: row.slug,
@@ -96,7 +104,7 @@ function serializeApiKey(row: {
 }) {
   return {
     id: row.id,
-    project_id: row.projectId,
+    project_id: `prj_${row.projectId.replaceAll("-", "")}`,
     name: row.name,
     prefix: row.prefix,
     created_at: row.createdAt.toISOString(),
@@ -109,11 +117,25 @@ function serializeApiKey(row: {
 
 function serializeSandbox(row: {
   id: string;
+  publicId?: string;
   organizationId: string;
   projectId: string;
   provider: string;
+  primaryProvider?: string;
+  providerResourceId?: string | null;
+  source?: Record<string, unknown>;
+  resourceRequirements?: Record<string, unknown>;
+  resolvedResources?: Record<string, unknown> | null;
+  lifecycle?: Record<string, unknown>;
+  regions?: string[];
+  features?: Record<string, unknown>;
+  network?: Record<string, unknown>;
+  fallback?: Record<string, unknown>;
+  providerOptions?: Record<string, unknown>;
+  environment?: Record<string, string>;
+  secretRefs?: Record<string, string>;
+  metadata?: Record<string, string>;
   providerCostMicrousd: bigint | null;
-  providerCostMeasuredThrough: Date | null;
   providerCostUpdatedAt: Date | null;
   status: string;
   image: string | null;
@@ -125,33 +147,105 @@ function serializeSandbox(row: {
   pausedAt: Date | null;
   deletedAt: Date | null;
 }) {
+  const state =
+    row.status === "deleting" ? "stopping" : row.status === "deleted" ? "stopped" : row.status;
   return {
-    id: row.id,
+    id: row.publicId ?? `sbx_${row.id.replaceAll("-", "")}`,
     type: "sandbox" as const,
-    organization_id: row.organizationId,
-    project_id: row.projectId,
-    provider: row.provider as
-      | "blaxel"
-      | "cloudflare"
-      | "codesandbox"
-      | "daytona"
-      | "e2b"
-      | "modal"
-      | "northflank"
-      | "runloop"
-      | "vercel",
-    provider_cost_microusd: row.providerCostMicrousd?.toString() ?? null,
-    provider_cost_measured_through: row.providerCostMeasuredThrough?.toISOString() ?? null,
-    provider_cost_updated_at: row.providerCostUpdatedAt?.toISOString() ?? null,
-    status: row.status,
-    image: row.image,
-    language: row.language,
-    error_code: row.errorCode,
+    project_id: `prj_${row.projectId.replaceAll("-", "")}`,
+    provider:
+      row.primaryProvider === "auto" && !row.providerResourceId
+        ? null
+        : (row.provider as
+            | "blaxel"
+            | "cloudflare"
+            | "codesandbox"
+            | "daytona"
+            | "e2b"
+            | "modal"
+            | "northflank"
+            | "runloop"
+            | "vercel"),
+    cost_microusd: row.providerCostMicrousd?.toString() ?? null,
+    cost_updated_at: row.providerCostUpdatedAt?.toISOString() ?? null,
+    state,
+    state_reason: row.errorCode,
+    requested: {
+      provider: row.primaryProvider ?? row.provider,
+      source:
+        row.source && Object.keys(row.source).length
+          ? row.source
+          : { kind: "environment", environment: row.language, version: "legacy" },
+      resources:
+        row.resourceRequirements && Object.keys(row.resourceRequirements).length
+          ? row.resourceRequirements
+          : { vcpu: 1, memory_mb: 2048, architecture: "any" },
+      lifecycle:
+        row.lifecycle && Object.keys(row.lifecycle).length
+          ? row.lifecycle
+          : {
+              runtime_timeout_seconds: 1800,
+              on_runtime_timeout: "destroy",
+              on_idle_timeout: "destroy",
+            },
+      regions: row.regions?.length ? row.regions : undefined,
+      features: row.features && Object.keys(row.features).length ? row.features : undefined,
+      network: row.network && Object.keys(row.network).length ? row.network : undefined,
+      fallback: row.fallback && Object.keys(row.fallback).length ? row.fallback : undefined,
+      provider_options:
+        row.providerOptions && Object.keys(row.providerOptions).length
+          ? row.providerOptions
+          : undefined,
+      environment:
+        row.environment && Object.keys(row.environment).length ? row.environment : undefined,
+      secret_refs:
+        row.secretRefs && Object.keys(row.secretRefs).length ? row.secretRefs : undefined,
+      metadata: row.metadata && Object.keys(row.metadata).length ? row.metadata : undefined,
+    },
+    resolved_resources: row.resolvedResources ?? null,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
     ready_at: row.readyAt?.toISOString() ?? null,
     paused_at: row.pausedAt?.toISOString() ?? null,
-    deleted_at: row.deletedAt?.toISOString() ?? null,
+    stopped_at: row.deletedAt?.toISOString() ?? null,
+    metadata: row.metadata && Object.keys(row.metadata).length ? row.metadata : undefined,
+  };
+}
+
+function serializeOperation(row: {
+  publicId: string;
+  projectId: string;
+  sandboxId: string;
+  type: string;
+  state: string;
+  retryable: boolean;
+  error: Record<string, unknown> | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
+}) {
+  return {
+    id: row.publicId,
+    project_id: `prj_${row.projectId.replaceAll("-", "")}`,
+    type: row.type,
+    state: row.state,
+    resource_type: "sandbox" as const,
+    resource_id: `sbx_${row.sandboxId.replaceAll("-", "")}`,
+    retryable: row.retryable,
+    error: row.error,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+    completed_at: row.completedAt?.toISOString() ?? null,
+  };
+}
+
+function serializeMutation(input: {
+  sandbox: Parameters<typeof serializeSandbox>[0];
+  operation: Parameters<typeof serializeOperation>[0];
+}) {
+  return {
+    sandbox: serializeSandbox(input.sandbox),
+    operation: serializeOperation(input.operation),
   };
 }
 
@@ -221,6 +315,27 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
       throw new ApiError(401, "unauthenticated", "project API key required");
     }
     return authenticateProjectApiKey(db.db, token);
+  }
+
+  async function requireProjectScope(request: {
+    headers: {
+      authorization?: string;
+      "x-metal-project-id"?: string | string[];
+    };
+  }) {
+    const principal = await requireApiKeyPrincipal(request);
+    const projectId = headerValue(request.headers["x-metal-project-id"]);
+    if (!projectId) {
+      throw new ApiError(400, "validation_error", "X-Metal-Project-ID is required");
+    }
+    const parsedProjectId = ProjectIdSchema.safeParse(projectId);
+    if (!parsedProjectId.success) {
+      throw new ApiError(422, "validation_error", "X-Metal-Project-ID must be a prj_* public ID");
+    }
+    if (parsedProjectId.data !== principal.projectPublicId) {
+      throw new ApiError(403, "forbidden", "API key is scoped to another project");
+    }
+    return principal;
   }
 
   app.get("/health", async () => ({ status: "ok" as const }));
@@ -348,13 +463,13 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
 
   app.get(`/${API_VERSION}/projects/:project_id`, async (request) => {
     const principal = await requirePrincipal(request);
-    const projectId = OpaqueIdSchema.parse((request.params as { project_id: string }).project_id);
+    const projectId = ProjectIdSchema.parse((request.params as { project_id: string }).project_id);
     return serializeProject(await getProject(db.db, principal.userId, projectId));
   });
 
   app.patch(`/${API_VERSION}/projects/:project_id`, async (request) => {
     const principal = await requirePrincipal(request);
-    const projectId = OpaqueIdSchema.parse((request.params as { project_id: string }).project_id);
+    const projectId = ProjectIdSchema.parse((request.params as { project_id: string }).project_id);
     const parsed = UpdateProjectRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new ApiError(422, "validation_error", "invalid project payload", {
@@ -381,17 +496,17 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
 
   app.delete(`/${API_VERSION}/projects/:project_id`, async (request) => {
     const principal = await requirePrincipal(request);
-    const projectId = OpaqueIdSchema.parse((request.params as { project_id: string }).project_id);
+    const projectId = ProjectIdSchema.parse((request.params as { project_id: string }).project_id);
     const project = await deleteProject(db.db, {
       userId: principal.userId,
       projectId,
     });
-    return { id: project.id, deleted: true as const };
+    return { id: project.publicId, deleted: true as const };
   });
 
   app.post(`/${API_VERSION}/projects/:project_id/api-keys`, async (request, reply) => {
     const principal = await requirePrincipal(request);
-    const projectId = OpaqueIdSchema.parse((request.params as { project_id: string }).project_id);
+    const projectId = ProjectIdSchema.parse((request.params as { project_id: string }).project_id);
     const parsed = CreateProjectApiKeyRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new ApiError(422, "validation_error", "invalid API key payload", {
@@ -412,7 +527,7 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
 
   app.get(`/${API_VERSION}/projects/:project_id/api-keys`, async (request) => {
     const principal = await requirePrincipal(request);
-    const projectId = OpaqueIdSchema.parse((request.params as { project_id: string }).project_id);
+    const projectId = ProjectIdSchema.parse((request.params as { project_id: string }).project_id);
     const rows = await listProjectApiKeys(db.db, {
       userId: principal.userId,
       projectId,
@@ -422,7 +537,7 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
 
   app.get(`/${API_VERSION}/projects/:project_id/sandboxes`, async (request) => {
     const principal = await requirePrincipal(request);
-    const projectId = OpaqueIdSchema.parse((request.params as { project_id: string }).project_id);
+    const projectId = ProjectIdSchema.parse((request.params as { project_id: string }).project_id);
     const rows = await listProjectSandboxes(db.db, principal.userId, projectId);
     return { sandboxes: rows.map(serializeSandbox) };
   });
@@ -430,10 +545,10 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
   app.post(`/${API_VERSION}/projects/:project_id/sandboxes/:sandbox_id/pause`, async (request) => {
     const principal = await requirePrincipal(request);
     const params = request.params as { project_id: string; sandbox_id: string };
-    const projectId = OpaqueIdSchema.parse(params.project_id);
-    const sandboxId = OpaqueIdSchema.parse(params.sandbox_id);
+    const projectId = ProjectIdSchema.parse(params.project_id);
+    const sandboxId = SandboxIdSchema.parse(params.sandbox_id);
     const project = await getProject(db.db, principal.userId, projectId);
-    return serializeSandbox(
+    return serializeMutation(
       await requestSandboxPause(db.db, {
         sandboxId,
         organizationId: project.organizationId,
@@ -445,10 +560,10 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
   app.delete(`/${API_VERSION}/projects/:project_id/sandboxes/:sandbox_id`, async (request) => {
     const principal = await requirePrincipal(request);
     const params = request.params as { project_id: string; sandbox_id: string };
-    const projectId = OpaqueIdSchema.parse(params.project_id);
-    const sandboxId = OpaqueIdSchema.parse(params.sandbox_id);
+    const projectId = ProjectIdSchema.parse(params.project_id);
+    const sandboxId = SandboxIdSchema.parse(params.sandbox_id);
     const project = await getProject(db.db, principal.userId, projectId);
-    return serializeSandbox(
+    return serializeMutation(
       await requestSandboxDeletion(db.db, {
         sandboxId,
         organizationId: project.organizationId,
@@ -460,7 +575,7 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
   app.post(`/${API_VERSION}/projects/:project_id/api-keys/:api_key_id/revoke`, async (request) => {
     const principal = await requirePrincipal(request);
     const params = request.params as { project_id: string; api_key_id: string };
-    const projectId = OpaqueIdSchema.parse(params.project_id);
+    const projectId = ProjectIdSchema.parse(params.project_id);
     const apiKeyId = OpaqueIdSchema.parse(params.api_key_id);
     const row = await revokeProjectApiKey(db.db, {
       userId: principal.userId,
@@ -473,7 +588,7 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
   app.delete(`/${API_VERSION}/projects/:project_id/api-keys/:api_key_id`, async (request) => {
     const principal = await requirePrincipal(request);
     const params = request.params as { project_id: string; api_key_id: string };
-    const projectId = OpaqueIdSchema.parse(params.project_id);
+    const projectId = ProjectIdSchema.parse(params.project_id);
     const apiKeyId = OpaqueIdSchema.parse(params.api_key_id);
     const row = await deleteProjectApiKey(db.db, {
       userId: principal.userId,
@@ -483,16 +598,33 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     return { id: row.id, deleted: true as const };
   });
 
+  app.get(`/${API_VERSION}/sandboxes`, async (request) => {
+    const principal = await requireProjectScope(request);
+    const parsed = ListSandboxesQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid sandbox list query", {
+        issues: parsed.error.issues,
+      });
+    }
+    const page = await listScopedSandboxes(db.db, {
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+      cursor: parsed.data.cursor,
+      limit: parsed.data.limit,
+    });
+    return {
+      sandboxes: page.rows.map(serializeSandbox),
+      next_cursor: page.nextCursor,
+    };
+  });
+
   app.post(`/${API_VERSION}/sandboxes`, async (request, reply) => {
-    const principal = await requireApiKeyPrincipal(request);
+    const principal = await requireProjectScope(request);
     const parsed = CreateSandboxRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new ApiError(422, "validation_error", "invalid sandbox payload", {
         issues: parsed.error.issues,
       });
-    }
-    if (parsed.data.project_id && parsed.data.project_id !== principal.projectId) {
-      throw new ApiError(403, "forbidden", "API key is scoped to another project");
     }
     const key = headerValue(request.headers["idempotency-key"]);
     if (!key) {
@@ -507,24 +639,39 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
         body: parsed.data,
       },
       async (tx) => {
-        const sandbox = await createSandbox(tx, {
+        const mutation = await createSandbox(tx, {
           organizationId: principal.organizationId,
           projectId: principal.projectId,
           actorId: principal.keyId,
-          provider: parsed.data.provider,
-          image: parsed.data.image,
-          language: parsed.data.language,
-          ttlMinutes: parsed.data.ttl_minutes,
+          request: parsed.data,
         });
-        return { status: 202, body: serializeSandbox(sandbox) };
+        return {
+          status: 202,
+          body: {
+            sandbox: serializeSandbox(mutation.sandbox),
+            operation: serializeOperation(mutation.operation),
+          },
+        };
       },
     );
+    const operationId =
+      typeof result.body === "object" &&
+      result.body !== null &&
+      "operation" in result.body &&
+      typeof result.body.operation === "object" &&
+      result.body.operation !== null &&
+      "id" in result.body.operation
+        ? String(result.body.operation.id)
+        : undefined;
+    if (operationId) {
+      reply.header("location", `/${API_VERSION}/operations/${operationId}`);
+    }
     return reply.status(result.status).send(result.body);
   });
 
   app.get(`/${API_VERSION}/sandboxes/:sandbox_id`, async (request) => {
-    const principal = await requireApiKeyPrincipal(request);
-    const sandboxId = OpaqueIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
     return serializeSandbox(
       await getSandbox(db.db, {
         sandboxId,
@@ -534,28 +681,82 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     );
   });
 
-  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/pause`, async (request) => {
-    const principal = await requireApiKeyPrincipal(request);
-    const sandboxId = OpaqueIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
-    return serializeSandbox(
+  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/actions/pause`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    const mutation = serializeMutation(
       await requestSandboxPause(db.db, {
         sandboxId,
         organizationId: principal.organizationId,
         projectId: principal.projectId,
       }),
     );
+    reply.header("location", `/${API_VERSION}/operations/${mutation.operation.id}`);
+    return reply.status(202).send(mutation);
   });
 
-  app.delete(`/${API_VERSION}/sandboxes/:sandbox_id`, async (request) => {
-    const principal = await requireApiKeyPrincipal(request);
-    const sandboxId = OpaqueIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
-    return serializeSandbox(
+  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/actions/resume`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    const mutation = serializeMutation(
+      await requestSandboxResume(db.db, {
+        sandboxId,
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+      }),
+    );
+    reply.header("location", `/${API_VERSION}/operations/${mutation.operation.id}`);
+    return reply.status(202).send(mutation);
+  });
+
+  app.delete(`/${API_VERSION}/sandboxes/:sandbox_id`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    const mutation = serializeMutation(
       await requestSandboxDeletion(db.db, {
         sandboxId,
         organizationId: principal.organizationId,
         projectId: principal.projectId,
       }),
     );
+    reply.header("location", `/${API_VERSION}/operations/${mutation.operation.id}`);
+    return reply.status(202).send(mutation);
+  });
+
+  app.get(`/${API_VERSION}/operations/:operation_id`, async (request) => {
+    const principal = await requireApiKeyPrincipal(request);
+    const operationId = OperationIdSchema.parse(
+      (request.params as { operation_id: string }).operation_id,
+    );
+    return serializeOperation(await getOperationForPrincipal(db.db, principal.keyId, operationId));
+  });
+
+  app.get(`/${API_VERSION}/operations/:operation_id/events`, async (request, reply) => {
+    const principal = await requireApiKeyPrincipal(request);
+    const operationId = OperationIdSchema.parse(
+      (request.params as { operation_id: string }).operation_id,
+    );
+    const operation = await getOperationForPrincipal(db.db, principal.keyId, operationId);
+    const header = request.headers["last-event-id"];
+    if (header !== undefined && (typeof header !== "string" || !/^\d+$/.test(header))) {
+      throw new ApiError(422, "validation_error", "Last-Event-ID must be an event sequence");
+    }
+    const after = typeof header === "string" && /^\d+$/.test(header) ? Number(header) : 0;
+    const events = await listOperationEvents(db.db, operation.id, after);
+    reply.header("content-type", "text/event-stream");
+    reply.header("cache-control", "no-cache");
+    return events
+      .map(
+        (event) =>
+          `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify({
+            sequence: event.sequence,
+            operation_id: operation.publicId,
+            type: event.type,
+            occurred_at: event.occurredAt.toISOString(),
+            data: event.data,
+          })}\n\n`,
+      )
+      .join("");
   });
 
   app.get(`/${API_VERSION}/events`, async (request) => {

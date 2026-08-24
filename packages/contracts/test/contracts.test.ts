@@ -45,6 +45,7 @@ describe("contract parsing", () => {
         code: "forbidden",
         message: "not a member",
         request_id: "req_1",
+        retryable: false,
         details: { organization_id: "x" },
       }),
     ).toMatchObject({ code: "forbidden" });
@@ -86,7 +87,7 @@ describe("contract parsing", () => {
       event_id: "11111111-1111-4111-8111-111111111111",
       type: "project.created",
       organization_id: "22222222-2222-4222-8222-222222222222",
-      project_id: "33333333-3333-4333-8333-333333333333",
+      project_id: "prj_33333333333343338333333333333333",
       occurred_at: "2026-08-20T08:00:00.000Z",
       data: { name: "alpha" },
     });

@@ -1,4 +1,5 @@
 import { AlreadyExistsError, ModalClient, NotFoundError } from "modal";
+import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
   ProviderSandbox,
@@ -17,7 +18,12 @@ export type ModalProviderOptions = {
 
 export class ModalSandboxProvider implements SandboxProvider {
   readonly name = "modal" as const;
-  readonly capabilities = { pause: false, cost: false } as const;
+  readonly capabilities = {
+    pause: false,
+    cost: false,
+    sizing: "fixed",
+    sources: ["environment", "oci_image"],
+  } as const;
   private readonly client: ModalClient;
   private readonly appName: string;
   private readonly environment?: string;
@@ -34,6 +40,7 @@ export class ModalSandboxProvider implements SandboxProvider {
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
+    const resolved = resolveProviderResources("modal", input.resources, input.providerOptions);
     const app = await this.client.apps.fromName(this.appName, {
       createIfMissing: true,
       environment: this.environment,
@@ -67,6 +74,7 @@ export class ModalSandboxProvider implements SandboxProvider {
     return {
       providerResourceId: sandbox.sandboxId,
       providerOrganizationId: app.appId,
+      resolvedResources: resolved,
     };
   }
 

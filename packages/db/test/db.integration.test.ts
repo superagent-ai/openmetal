@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { config as loadEnv } from "dotenv";
 import { createDatabase } from "@openmetal/db";
+
+loadEnv({ path: "../../.env", override: true });
 
 const env = {
   DATABASE_URL: process.env.DATABASE_URL ?? "",

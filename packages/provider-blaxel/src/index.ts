@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
   ProviderSandbox,
@@ -45,7 +46,7 @@ class BlaxelRequestError extends Error {
 
 export class BlaxelSandboxProvider implements SandboxProvider {
   readonly name = "blaxel" as const;
-  readonly capabilities: { pause: false; cost: boolean };
+  readonly capabilities: SandboxProvider["capabilities"];
   private readonly apiKey: string;
   private readonly workspace: string;
   private accountId?: string;
@@ -70,11 +71,23 @@ export class BlaxelSandboxProvider implements SandboxProvider {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 65_000;
     this.startupTimeoutMs = options.startupTimeoutMs ?? 90_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.capabilities = { pause: false, cost: true };
+    this.capabilities = {
+      pause: false,
+      cost: true,
+      sizing: "direct",
+      sources: ["environment", "oci_image"],
+    };
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
-    const name = `metal-${input.metalSandboxId}`;
+    const resolved = resolveProviderResources("blaxel", input.resources, input.providerOptions);
+    const memoryMb = Math.max(
+      this.defaultMemoryMb,
+      input.resources.memoryMb,
+      Math.ceil(input.resources.vcpu * 2_048),
+    );
+    const externalId = input.metalSandboxId.replace(/[^a-zA-Z0-9-]/g, "-");
+    const name = `metal-${externalId}`;
     let created: z.infer<typeof SandboxSchema> | undefined;
     try {
       created = SandboxSchema.parse(
@@ -83,7 +96,7 @@ export class BlaxelSandboxProvider implements SandboxProvider {
           body: JSON.stringify({
             metadata: {
               name,
-              externalId: input.metalSandboxId,
+              externalId,
               labels: {
                 "metal.organization_id": input.organizationId,
                 "metal.project_id": input.projectId,
@@ -95,7 +108,7 @@ export class BlaxelSandboxProvider implements SandboxProvider {
               ...(this.region ? { region: this.region } : {}),
               runtime: {
                 image: input.image ?? this.defaultImage,
-                memory: this.defaultMemoryMb,
+                memory: memoryMb,
                 ttl: `${input.ttlMinutes}m`,
               },
             },
@@ -118,6 +131,11 @@ export class BlaxelSandboxProvider implements SandboxProvider {
       providerMetadata: {
         blaxel: ready,
         createdStatus: created?.status ?? "CREATE_TIMEOUT_RECOVERED",
+      },
+      resolvedResources: {
+        ...resolved,
+        vcpu: memoryMb / 2_048,
+        memoryMb,
       },
     };
   }

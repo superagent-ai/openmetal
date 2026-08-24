@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
   ProviderSandbox,
@@ -88,7 +89,13 @@ class RunloopRequestError extends Error {
 
 export class RunloopSandboxProvider implements SandboxProvider {
   readonly name = "runloop" as const;
-  readonly capabilities = { pause: true, cost: true } as const;
+  readonly capabilities = {
+    pause: true,
+    resume: true,
+    cost: true,
+    sizing: "tier",
+    sources: ["environment", "provider_template"],
+  } as const;
   private readonly apiKey: string;
   private readonly apiUrl: string;
   private readonly resourceSize: RunloopResourceSize;
@@ -109,12 +116,21 @@ export class RunloopSandboxProvider implements SandboxProvider {
     this.resourceSize = ResourceSizeSchema.parse(options.resourceSize ?? "SMALL");
     this.blueprintId = options.blueprintId;
     this.usageRatesMicrousd = options.usageRatesMicrousd;
-    this.requestTimeoutMs = options.requestTimeoutMs ?? 35_000;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 240_000;
     this.startupTimeoutMs = options.startupTimeoutMs ?? 180_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
+    const options = input.providerOptions ?? {};
+    const resolved = resolveProviderResources("runloop", input.resources, options);
+    const resourceSize = ResourceSizeSchema.parse(resolved.providerSize ?? this.resourceSize);
+    const blueprintId =
+      typeof options.blueprint_id === "string"
+        ? options.blueprint_id
+        : input.source.kind === "provider_template"
+          ? input.source.template
+          : this.blueprintId;
     const existing = await this.findByMetalSandboxId(input.metalSandboxId, input.signal);
     const devbox =
       existing ??
@@ -130,11 +146,11 @@ export class RunloopSandboxProvider implements SandboxProvider {
             },
             ...(input.image
               ? { blueprint_name: input.image }
-              : this.blueprintId
-                ? { blueprint_id: this.blueprintId }
+              : blueprintId
+                ? { blueprint_id: blueprintId }
                 : {}),
             launch_parameters: {
-              resource_size_request: this.resourceSize,
+              resource_size_request: resourceSize,
               keep_alive_time_seconds: Math.min(input.ttlMinutes * 60, 172_800),
             },
           }),
@@ -156,8 +172,8 @@ export class RunloopSandboxProvider implements SandboxProvider {
       providerOrganizationId: await this.resolveAccountId(input.signal),
       providerMetadata: {
         runloop: ready,
-        resourceSize: this.resourceSize,
-        hourlyRateMicrousd: hourlyRateMicrousd[this.resourceSize].toString(),
+        resourceSize,
+        hourlyRateMicrousd: hourlyRateMicrousd[resourceSize].toString(),
         ...(this.usageRatesMicrousd
           ? {
               usageRatesMicrousd: {
@@ -168,6 +184,7 @@ export class RunloopSandboxProvider implements SandboxProvider {
             }
           : {}),
       },
+      resolvedResources: resolved,
     };
   }
 
@@ -188,6 +205,50 @@ export class RunloopSandboxProvider implements SandboxProvider {
         throw new Error(`Runloop Devbox entered ${suspended.status}`);
       }
     }
+  }
+
+  async reconcileCreate(
+    metalSandboxId: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderSandbox | null> {
+    const existing = await this.findByMetalSandboxId(metalSandboxId, signal);
+    if (!existing) return null;
+    const ready =
+      existing.status === "running"
+        ? existing
+        : await this.waitForStatus(existing.id, ["running", "failure", "shutdown"], signal);
+    if (ready.status !== "running") return null;
+    return {
+      providerResourceId: ready.id,
+      providerOrganizationId: await this.resolveAccountId(signal),
+      providerMetadata: {
+        runloop: ready,
+        resourceSize: this.resourceSize,
+        hourlyRateMicrousd: hourlyRateMicrousd[this.resourceSize].toString(),
+      },
+    };
+  }
+
+  async resume(providerResourceId: string, signal?: AbortSignal): Promise<ProviderSandbox> {
+    const response = DevboxSchema.parse(
+      await this.request(`/v1/devboxes/${encodeURIComponent(providerResourceId)}/resume`, {
+        method: "POST",
+        body: JSON.stringify({}),
+        signal,
+      }),
+    );
+    const running =
+      response.status === "running"
+        ? response
+        : await this.waitForStatus(providerResourceId, ["running", "failure", "shutdown"], signal);
+    if (running.status !== "running") {
+      throw new Error(`Runloop Devbox entered ${running.status}`);
+    }
+    return {
+      providerResourceId,
+      providerOrganizationId: await this.resolveAccountId(signal),
+      providerMetadata: { runloop: running, resourceSize: this.resourceSize },
+    };
   }
 
   async destroy(providerResourceId: string, signal?: AbortSignal): Promise<void> {

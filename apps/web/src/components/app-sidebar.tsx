@@ -79,7 +79,7 @@ const runningResourceStatuses = new Set([
   "ready",
   "pausing",
   "provision_unknown",
-  "deleting",
+  "stopping",
   "cleanup_pending",
   "cleanup_failed",
 ]);
@@ -224,7 +224,7 @@ export function AppSidebar({
       if (!cancelled) {
         updateProjectStatus(
           project.id,
-          sandboxes.some((sandbox) => runningResourceStatuses.has(sandbox.status)),
+          sandboxes.some((sandbox) => runningResourceStatuses.has(sandbox.state)),
         );
       }
     }
@@ -233,7 +233,7 @@ export function AppSidebar({
       const results = await Promise.all(
         projects.map(async (project) => {
           const { sandboxes } = await metal.sandboxes.list(project.id);
-          return sandboxes.some((sandbox) => runningResourceStatuses.has(sandbox.status))
+          return sandboxes.some((sandbox) => runningResourceStatuses.has(sandbox.state))
             ? project.id
             : undefined;
         }),

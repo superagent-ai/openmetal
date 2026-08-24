@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
   ProviderSandbox,
@@ -13,6 +14,7 @@ export type DaytonaProviderOptions = {
   analyticsApiUrl?: string;
   organizationId?: string;
   target?: string;
+  pauseSupported?: boolean;
   requestTimeoutMs?: number;
   fetchImpl?: typeof fetch;
 };
@@ -25,7 +27,7 @@ class DaytonaRequestError extends Error {
 
 export class DaytonaSandboxProvider implements SandboxProvider {
   readonly name = "daytona" as const;
-  readonly capabilities = { pause: true, cost: true } as const;
+  readonly capabilities: SandboxProvider["capabilities"];
   private readonly apiKey: string;
   private readonly apiUrl: string;
   private readonly analyticsApiUrl: string;
@@ -35,6 +37,12 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   private organizationId?: string;
 
   constructor(options: DaytonaProviderOptions) {
+    this.capabilities = {
+      pause: options.pauseSupported ?? false,
+      cost: true,
+      sizing: "template",
+      sources: ["environment", "oci_image"],
+    };
     this.apiKey = options.apiKey;
     this.apiUrl = (options.apiUrl ?? "https://app.daytona.io/api").replace(/\/$/, "");
     this.analyticsApiUrl = (options.analyticsApiUrl ?? "https://analytics.app.daytona.io").replace(
@@ -48,6 +56,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
+    const resolved = resolveProviderResources("daytona", input.resources, input.providerOptions);
     const name = `metal-${input.metalSandboxId}`;
     let response: unknown;
     try {
@@ -88,6 +97,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     return {
       providerResourceId: parsed.id,
       providerOrganizationId: parsed.organizationId,
+      resolvedResources: resolved,
     };
   }
 

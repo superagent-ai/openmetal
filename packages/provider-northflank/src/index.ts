@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
   ProviderSandbox,
@@ -93,7 +94,13 @@ function findResourceCost(
 
 export class NorthflankSandboxProvider implements SandboxProvider {
   readonly name = "northflank" as const;
-  readonly capabilities = { pause: true, cost: true } as const;
+  readonly capabilities = {
+    pause: true,
+    resume: true,
+    cost: true,
+    sizing: "tier",
+    sources: ["environment", "oci_image"],
+  } as const;
   private readonly apiToken: string;
   private readonly projectId: string;
   private readonly teamId?: string;
@@ -119,14 +126,25 @@ export class NorthflankSandboxProvider implements SandboxProvider {
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
-    const serviceId = `metal-${input.metalSandboxId}`;
+    const options = input.providerOptions ?? {};
+    const deploymentPlan =
+      typeof options.deployment_plan === "string" ? options.deployment_plan : this.deploymentPlan;
+    const ephemeralStorageMb =
+      typeof options.ephemeral_storage_mb === "number"
+        ? options.ephemeral_storage_mb
+        : Math.max(this.ephemeralStorageMb, input.resources.diskMb ?? 0);
+    const resolved = resolveProviderResources("northflank", input.resources, {
+      ...options,
+      size: deploymentPlan,
+    });
+    const serviceId = `metal-${input.metalSandboxId.replace(/[^a-zA-Z0-9-]/g, "-")}`;
     const response = await this.request(`${this.projectPath()}/services/deployment`, {
       method: "POST",
       body: JSON.stringify({
         name: serviceId,
         description: `Metal sandbox ${input.metalSandboxId}`,
         billing: {
-          deploymentPlan: this.deploymentPlan,
+          deploymentPlan,
         },
         deployment: {
           instances: 1,
@@ -139,7 +157,7 @@ export class NorthflankSandboxProvider implements SandboxProvider {
           },
           storage: {
             ephemeralStorage: {
-              storageSize: this.ephemeralStorageMb,
+              storageSize: ephemeralStorageMb,
             },
           },
         },
@@ -159,8 +177,13 @@ export class NorthflankSandboxProvider implements SandboxProvider {
         northflank: ready,
         projectId: this.projectId,
         teamId: this.teamId,
-        deploymentPlan: this.deploymentPlan,
+        deploymentPlan,
         createdStatus: created?.status?.deployment?.status,
+      },
+      resolvedResources: {
+        ...resolved,
+        diskMb: ephemeralStorageMb,
+        providerSize: deploymentPlan,
       },
     };
   }
@@ -173,6 +196,23 @@ export class NorthflankSandboxProvider implements SandboxProvider {
         signal,
       },
     );
+  }
+
+  async resume(providerResourceId: string, signal?: AbortSignal): Promise<ProviderSandbox> {
+    await this.request(
+      `${this.projectPath()}/services/${encodeURIComponent(providerResourceId)}/resume`,
+      {
+        method: "POST",
+        body: JSON.stringify({ instances: 1 }),
+        signal,
+      },
+    );
+    const ready = await this.waitUntilReady(providerResourceId, signal);
+    return {
+      providerResourceId,
+      providerOrganizationId: this.teamId ?? this.projectId,
+      providerMetadata: { northflank: ready, projectId: this.projectId, teamId: this.teamId },
+    };
   }
 
   async destroy(providerResourceId: string, signal?: AbortSignal): Promise<void> {

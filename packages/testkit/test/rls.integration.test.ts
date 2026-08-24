@@ -187,6 +187,7 @@ describe("rls isolation", () => {
       "has_organization_role",
       "is_organization_member",
       "is_project_member",
+      "project_topic_id",
     ]);
     expect(
       definerHelpers.every(

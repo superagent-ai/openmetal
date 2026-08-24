@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
   ProviderSandbox,
@@ -38,7 +39,7 @@ const AnalyticsGroupSchema = z.object({
 
 export class CloudflareSandboxProvider implements SandboxProvider {
   readonly name = "cloudflare" as const;
-  readonly capabilities: { pause: false; cost: boolean };
+  readonly capabilities: SandboxProvider["capabilities"];
   private readonly apiUrl: string;
   private readonly apiKey: string;
   private readonly accountId?: string;
@@ -56,6 +57,8 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     this.capabilities = {
       pause: false,
       cost: Boolean(options.accountId && options.analyticsToken),
+      sizing: "fixed",
+      sources: ["environment"],
     };
     this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
     this.startupTimeoutMs = options.startupTimeoutMs ?? 90_000;
@@ -63,6 +66,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
+    const resolved = resolveProviderResources("cloudflare", input.resources, input.providerOptions);
     let sandboxId = this.createdByMetalId.get(input.metalSandboxId);
     if (!sandboxId) {
       const created = z.object({ id: z.string().min(1) }).parse(
@@ -83,6 +87,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         containerUuid: instanceId,
         metalSandboxId: input.metalSandboxId,
       },
+      resolvedResources: resolved,
     };
   }
 

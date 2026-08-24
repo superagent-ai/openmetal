@@ -33,7 +33,7 @@ export async function listProjectEvents(
       eventId: row.eventId,
       type: row.type,
       organizationId: row.organizationId,
-      projectId: row.projectId,
+      projectId: row.projectId ? project.publicId : undefined,
       occurredAt: row.occurredAt,
       data: row.payload,
     }),

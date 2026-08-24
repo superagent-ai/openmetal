@@ -2,7 +2,10 @@ import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   claimOutboxJobs,
   domainEvents,
+  operationEvents,
+  operations,
   outboxJobs,
+  providerAttempts,
   providerCostSnapshots,
   sandboxes,
   withTransaction,
@@ -17,7 +20,14 @@ import {
   type OutboxJobPayload,
 } from "@openmetal/events";
 import { createLogger, redactString } from "@openmetal/logger";
-import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
+import {
+  ProviderError,
+  resolveMetalEnvironment,
+  resolveProviderResources,
+  type ProviderCreateSandboxInput,
+  type SandboxProvider,
+  type SandboxProviderName,
+} from "@openmetal/provider-core";
 import type { WorkerEnv } from "./env.js";
 import type { BroadcastPublisher } from "./publisher.js";
 
@@ -39,6 +49,86 @@ function safeError(error: unknown): string {
     return redactString(error.message.slice(0, 500));
   }
   return "unknown error";
+}
+
+async function appendOperationEvent(
+  db: MetalDb,
+  operationId: string,
+  type: string,
+  data: Record<string, unknown> = {},
+) {
+  const rows = await db
+    .select({ sequence: operationEvents.sequence })
+    .from(operationEvents)
+    .where(eq(operationEvents.operationId, operationId));
+  await db.insert(operationEvents).values({
+    operationId,
+    sequence: rows.reduce((max, row) => Math.max(max, row.sequence), 0) + 1,
+    type,
+    data,
+  });
+}
+
+async function setOperationState(
+  db: MetalDb,
+  operationId: string | undefined,
+  state: string,
+  error?: Record<string, unknown> | null,
+) {
+  if (!operationId) return;
+  const now = new Date();
+  const terminal = ["succeeded", "failed", "cancelled"].includes(state);
+  await db
+    .update(operations)
+    .set({
+      state,
+      error,
+      retryable: Boolean(error?.retryable),
+      updatedAt: now,
+      completedAt: terminal ? now : null,
+    })
+    .where(eq(operations.id, operationId));
+  await appendOperationEvent(db, operationId, terminal ? "completed" : "state_changed", { state });
+}
+
+function classifyProviderFailure(error: unknown): {
+  kind: string;
+  retryable: boolean;
+  fallbackSafe: boolean;
+  unknown: boolean;
+} {
+  if (error instanceof ProviderError) {
+    return {
+      kind: error.kind,
+      retryable: error.retryable,
+      fallbackSafe: ["capacity", "unavailable", "timeout_absent"].includes(error.kind),
+      unknown: error.kind === "unknown_outcome",
+    };
+  }
+  const message = safeError(error).toLowerCase();
+  if (/401|403|auth/.test(message)) {
+    return { kind: "provider_auth_error", retryable: false, fallbackSafe: false, unknown: false };
+  }
+  if (/429|capacity|quota/.test(message)) {
+    return {
+      kind: "provider_capacity_unavailable",
+      retryable: true,
+      fallbackSafe: true,
+      unknown: false,
+    };
+  }
+  if (/timeout|abort/.test(message)) {
+    return {
+      kind: "provider_unknown_outcome",
+      retryable: true,
+      fallbackSafe: false,
+      unknown: true,
+    };
+  }
+  if (/500|502|503|unavailable/.test(message)) {
+    return { kind: "provider_unavailable", retryable: true, fallbackSafe: true, unknown: false };
+  }
+  return { kind: "provider_error", retryable: false, fallbackSafe: false, unknown: false };
 }
 
 async function scheduleCostSync(tx: MetalDb, sandboxId: string, availableAt: Date, final: boolean) {
@@ -63,6 +153,7 @@ async function recordSandboxEvent(
   type:
     | "sandbox.ready"
     | "sandbox.paused"
+    | "sandbox.resumed"
     | "sandbox.cost_updated"
     | "sandbox.failed"
     | "sandbox.deleted",
@@ -87,7 +178,7 @@ async function recordSandboxEvent(
     eventId: event.eventId,
     type: event.type,
     organizationId: event.organizationId,
-    projectId: event.projectId,
+    projectId: event.projectId ? `prj_${event.projectId.replaceAll("-", "")}` : undefined,
     occurredAt: event.occurredAt,
     data: event.payload,
   });
@@ -96,13 +187,18 @@ async function recordSandboxEvent(
     dedupeKey: publicationDedupeKey(event.eventId),
     payload: {
       job_type: "realtime.broadcast",
-      topic: projectTopic(sandbox.projectId),
+      topic: projectTopic(`prj_${sandbox.projectId.replaceAll("-", "")}`),
       event: publicEvent,
     },
   });
 }
 
-async function provisionSandbox(db: MetalDb, provider: SandboxProvider, sandboxId: string) {
+async function provisionSandbox(
+  db: MetalDb,
+  providers: SandboxProviders,
+  sandboxId: string,
+  operationId: string,
+) {
   const sandbox = await db
     .select()
     .from(sandboxes)
@@ -111,74 +207,274 @@ async function provisionSandbox(db: MetalDb, provider: SandboxProvider, sandboxI
   if (
     !sandbox ||
     sandbox.status === "ready" ||
-    sandbox.status === "deleting" ||
-    sandbox.status === "deleted"
+    sandbox.status === "stopping" ||
+    sandbox.status === "stopped"
   ) {
     return;
   }
-  if (sandbox.status === "requested") {
-    await db
-      .update(sandboxes)
-      .set({ status: "provisioning", updatedAt: new Date() })
-      .where(and(eq(sandboxes.id, sandbox.id), eq(sandboxes.status, "requested")));
-  }
-  const remote = await provider.create({
-    metalSandboxId: sandbox.id,
-    organizationId: sandbox.organizationId,
-    projectId: sandbox.projectId,
-    language: sandbox.language,
-    image: sandbox.image ?? undefined,
-    ttlMinutes: sandbox.ttlMinutes,
-  });
-  await withTransaction(db, async (tx) => {
-    const [updated] = await tx
-      .update(sandboxes)
-      .set({
-        status: "ready",
-        providerResourceId: remote.providerResourceId,
-        providerOrganizationId: remote.providerOrganizationId,
-        providerMetadata: remote.providerMetadata ?? {},
-        readyAt: new Date(),
-        updatedAt: new Date(),
-        errorCode: null,
+  await setOperationState(db, operationId, "running");
+  const fallback = sandbox.fallback as { providers?: SandboxProviderName[]; max_attempts?: number };
+  const configuredProviders = Object.keys(providers) as SandboxProviderName[];
+  const fallbackProviders = fallback.providers ?? [];
+  const candidates = (
+    sandbox.primaryProvider === "auto"
+      ? [
+          ...fallbackProviders,
+          ...configuredProviders.filter((provider) => !fallbackProviders.includes(provider)),
+        ]
+      : [sandbox.primaryProvider as SandboxProviderName, ...fallbackProviders]
+  ).slice(0, fallback.max_attempts ?? 9);
+  const source = sandbox.source as ProviderCreateSandboxInput["source"];
+  const environmentSource = resolveMetalEnvironment(source);
+  const requested = sandbox.resourceRequirements as {
+    vcpu: number;
+    memory_mb: number;
+    disk_mb?: number;
+    architecture?: "x86_64" | "arm64" | "any";
+  };
+  const lifecycle = sandbox.lifecycle as {
+    runtime_timeout_seconds: number;
+    idle_timeout_seconds?: number;
+    on_runtime_timeout?: "destroy" | "pause";
+    on_idle_timeout?: "destroy" | "pause";
+  };
+  const allOptions = sandbox.providerOptions as Record<string, Record<string, unknown> | undefined>;
+
+  for (const [attemptIndex, providerName] of candidates.entries()) {
+    const provider = providers[providerName];
+    const options = allOptions[providerName] ?? {};
+    const [attempt] = await db
+      .insert(providerAttempts)
+      .values({
+        operationId,
+        sandboxId: sandbox.id,
+        attemptIndex,
+        provider: providerName,
+        state: "running",
+        startedAt: new Date(),
       })
-      .where(eq(sandboxes.id, sandbox.id))
+      .onConflictDoUpdate({
+        target: [providerAttempts.operationId, providerAttempts.attemptIndex],
+        set: { state: "running", startedAt: new Date(), updatedAt: new Date() },
+      })
       .returning();
-    if (updated) {
-      await recordSandboxEvent(tx, updated, "sandbox.ready", { provider: provider.name });
-      if (provider.capabilities.cost && provider.name !== "northflank") {
-        await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
-      }
-      if (
-        provider.name === "cloudflare" ||
-        provider.name === "codesandbox" ||
-        provider.name === "northflank" ||
-        provider.name === "runloop"
-      ) {
+    await appendOperationEvent(db, operationId, "attempt_started", {
+      attempt_index: attemptIndex,
+      provider: providerName,
+    });
+    if (!provider) {
+      const error = `${providerName} sandbox provider is not configured`;
+      await db
+        .update(providerAttempts)
+        .set({ state: "failed", errorCode: "provider_auth_error", errorMessage: error })
+        .where(eq(providerAttempts.id, attempt!.id));
+      continue;
+    }
+    if (provider.capabilities.sources && !provider.capabilities.sources.includes(source.kind)) {
+      await db
+        .update(providerAttempts)
+        .set({
+          state: "failed",
+          errorCode: "capability_unsupported",
+          errorMessage: `${providerName} does not support ${source.kind} sources`,
+          outcome: "ineligible",
+          completedAt: new Date(),
+        })
+        .where(eq(providerAttempts.id, attempt!.id));
+      continue;
+    }
+    try {
+      const resolved = resolveProviderResources(
+        providerName,
+        {
+          vcpu: requested.vcpu,
+          memoryMb: requested.memory_mb,
+          diskMb: requested.disk_mb,
+          architecture: requested.architecture ?? "any",
+        },
+        options,
+      );
+      const remote = await provider.create({
+        metalSandboxId: sandbox.publicId,
+        organizationId: sandbox.organizationId,
+        projectId: sandbox.projectId,
+        language: environmentSource.language,
+        image: environmentSource.image ?? sandbox.image ?? undefined,
+        ttlMinutes: Math.ceil(lifecycle.runtime_timeout_seconds / 60),
+        source,
+        resources: {
+          vcpu: requested.vcpu,
+          memoryMb: requested.memory_mb,
+          diskMb: requested.disk_mb,
+          architecture: requested.architecture ?? "any",
+        },
+        lifecycle: {
+          runtimeTimeoutSeconds: lifecycle.runtime_timeout_seconds,
+          idleTimeoutSeconds: lifecycle.idle_timeout_seconds,
+          onRuntimeTimeout: lifecycle.on_runtime_timeout ?? "destroy",
+          onIdleTimeout: lifecycle.on_idle_timeout ?? "destroy",
+        },
+        providerOptions: options,
+        environment: sandbox.environment,
+        secretRefs: sandbox.secretRefs,
+        metadata: sandbox.metadata,
+      });
+      await withTransaction(db, async (tx) => {
         await tx
-          .insert(outboxJobs)
-          .values({
-            jobType: "sandbox.destroy",
-            dedupeKey: `sandbox:destroy:${updated.id}`,
-            payload: {
-              job_type: "sandbox.destroy",
-              sandbox_id: updated.id,
+          .update(providerAttempts)
+          .set({
+            state: "succeeded",
+            providerResourceId: remote.providerResourceId,
+            providerMetadata: remote.providerMetadata ?? {},
+            resolvedResources: remote.resolvedResources ?? {
+              vcpu: resolved.vcpu,
+              memoryMb: resolved.memoryMb,
+              diskMb: resolved.diskMb,
+              architecture: resolved.architecture,
+              providerSize: resolved.providerSize,
             },
-            availableAt: new Date(Date.now() + updated.ttlMinutes * 60_000),
+            outcome: "created",
+            completedAt: new Date(),
+            updatedAt: new Date(),
           })
-          .onConflictDoNothing();
+          .where(eq(providerAttempts.id, attempt!.id));
+        const [updated] = await tx
+          .update(sandboxes)
+          .set({
+            provider: providerName,
+            status: "ready",
+            providerResourceId: remote.providerResourceId,
+            providerOrganizationId: remote.providerOrganizationId,
+            providerMetadata: remote.providerMetadata ?? {},
+            resolvedResources: remote.resolvedResources ?? {
+              vcpu: resolved.vcpu,
+              memory_mb: resolved.memoryMb,
+              disk_mb: resolved.diskMb,
+              architecture: resolved.architecture,
+              provider_size: resolved.providerSize,
+            },
+            readyAt: new Date(),
+            updatedAt: new Date(),
+            errorCode: null,
+          })
+          .where(eq(sandboxes.id, sandbox.id))
+          .returning();
+        if (updated) {
+          await recordSandboxEvent(tx, updated, "sandbox.ready", { provider: providerName });
+          if (provider.capabilities.cost && provider.name !== "northflank") {
+            await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
+          }
+          await tx
+            .insert(outboxJobs)
+            .values({
+              jobType: "sandbox.destroy",
+              dedupeKey: `sandbox:destroy:${updated.id}`,
+              payload: { job_type: "sandbox.destroy", sandbox_id: updated.id },
+              availableAt: new Date(Date.now() + lifecycle.runtime_timeout_seconds * 1_000),
+            })
+            .onConflictDoNothing();
+        }
+      });
+      await setOperationState(db, operationId, "succeeded");
+      return;
+    } catch (error) {
+      const classification = classifyProviderFailure(error);
+      await db
+        .update(providerAttempts)
+        .set({
+          state: classification.unknown ? "reconciling" : "failed",
+          errorCode: classification.kind,
+          errorMessage: safeError(error),
+          outcome: classification.unknown ? "unknown" : "absent",
+          completedAt: classification.unknown ? null : new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(providerAttempts.id, attempt!.id));
+      await appendOperationEvent(db, operationId, "attempt_failed", {
+        attempt_index: attemptIndex,
+        provider: providerName,
+        code: classification.kind,
+      });
+      if (classification.unknown) {
+        let reconciliationCompleted = false;
+        const reconciled = provider.reconcileCreate
+          ? await provider
+              .reconcileCreate(sandbox.publicId)
+              .then((result) => {
+                reconciliationCompleted = true;
+                return result;
+              })
+              .catch(() => null)
+          : null;
+        if (reconciled) {
+          await db
+            .update(providerAttempts)
+            .set({
+              state: "succeeded",
+              providerResourceId: reconciled.providerResourceId,
+              providerMetadata: reconciled.providerMetadata ?? {},
+              outcome: "found",
+              completedAt: new Date(),
+            })
+            .where(eq(providerAttempts.id, attempt!.id));
+          await db
+            .update(sandboxes)
+            .set({
+              provider: providerName,
+              status: "ready",
+              providerResourceId: reconciled.providerResourceId,
+              providerOrganizationId: reconciled.providerOrganizationId,
+              providerMetadata: reconciled.providerMetadata ?? {},
+              readyAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(sandboxes.id, sandbox.id));
+          await setOperationState(db, operationId, "succeeded");
+          return;
+        }
+        if (reconciliationCompleted) {
+          continue;
+        }
+        await db
+          .update(sandboxes)
+          .set({ status: "provision_unknown", updatedAt: new Date() })
+          .where(eq(sandboxes.id, sandbox.id));
+        await setOperationState(db, operationId, "reconciling", {
+          code: "provider_unknown_outcome",
+          message: safeError(error),
+          retryable: true,
+        });
+        return;
+      }
+      if (!classification.fallbackSafe) {
+        break;
       }
     }
+  }
+  await db
+    .update(sandboxes)
+    .set({ status: "failed", errorCode: "no_eligible_provider", updatedAt: new Date() })
+    .where(eq(sandboxes.id, sandbox.id));
+  await setOperationState(db, operationId, "failed", {
+    code: "no_eligible_provider",
+    message: "all selected providers failed or were ineligible",
+    retryable: false,
   });
 }
 
-async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId: string) {
+async function destroySandbox(
+  db: MetalDb,
+  provider: SandboxProvider,
+  sandboxId: string,
+  operationId?: string,
+) {
   const sandbox = await db
     .select()
     .from(sandboxes)
     .where(eq(sandboxes.id, sandboxId))
     .then((rows) => rows[0]);
-  if (!sandbox || sandbox.status === "deleted") {
+  if (!sandbox || sandbox.status === "stopped" || sandbox.status === "deleted") {
+    await setOperationState(db, operationId, "succeeded");
     return;
   }
   const destroyResult = sandbox.providerResourceId
@@ -188,7 +484,7 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
     const [updated] = await tx
       .update(sandboxes)
       .set({
-        status: "deleted",
+        status: "stopped",
         errorCode: null,
         errorMessage: null,
         providerMetadata: {
@@ -222,15 +518,22 @@ async function destroySandbox(db: MetalDb, provider: SandboxProvider, sandboxId:
       }
     }
   });
+  await setOperationState(db, operationId, "succeeded");
 }
 
-async function pauseSandbox(db: MetalDb, provider: SandboxProvider, sandboxId: string) {
+async function pauseSandbox(
+  db: MetalDb,
+  provider: SandboxProvider,
+  sandboxId: string,
+  operationId: string,
+) {
   const sandbox = await db
     .select()
     .from(sandboxes)
     .where(eq(sandboxes.id, sandboxId))
     .then((rows) => rows[0]);
-  if (!sandbox || sandbox.status === "paused" || sandbox.status === "deleted") {
+  if (!sandbox || sandbox.status === "paused" || sandbox.status === "stopped") {
+    await setOperationState(db, operationId, "succeeded");
     return;
   }
   if (!sandbox.providerResourceId) {
@@ -266,6 +569,48 @@ async function pauseSandbox(db: MetalDb, provider: SandboxProvider, sandboxId: s
       }
     }
   });
+  await setOperationState(db, operationId, "succeeded");
+}
+
+async function resumeSandbox(
+  db: MetalDb,
+  provider: SandboxProvider,
+  sandboxId: string,
+  operationId: string,
+) {
+  const sandbox = await db
+    .select()
+    .from(sandboxes)
+    .where(eq(sandboxes.id, sandboxId))
+    .then((rows) => rows[0]);
+  if (!sandbox || sandbox.status === "ready") {
+    await setOperationState(db, operationId, "succeeded");
+    return;
+  }
+  if (!sandbox.providerResourceId || !provider.resume) {
+    throw new ProviderError("provider does not support resume", "unsupported", false);
+  }
+  const remote = await provider.resume(sandbox.providerResourceId);
+  await withTransaction(db, async (tx) => {
+    const [updated] = await tx
+      .update(sandboxes)
+      .set({
+        status: "ready",
+        providerResourceId: remote?.providerResourceId ?? sandbox.providerResourceId,
+        providerOrganizationId: remote?.providerOrganizationId ?? sandbox.providerOrganizationId,
+        providerMetadata: remote?.providerMetadata ?? sandbox.providerMetadata,
+        pausedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(sandboxes.id, sandbox.id))
+      .returning();
+    if (updated) {
+      await recordSandboxEvent(tx, updated, "sandbox.resumed", {
+        provider: provider.name,
+      });
+    }
+  });
+  await setOperationState(db, operationId, "succeeded");
 }
 
 async function syncSandboxCost(
@@ -325,8 +670,8 @@ async function syncSandboxCost(
       if (updated) {
         await recordSandboxEvent(tx, updated, "sandbox.cost_updated", {
           provider: provider.name,
-          provider_cost_microusd: cost.amountMicrousd.toString(),
-          provider_cost_updated_at: measuredAt.toISOString(),
+          cost_microusd: cost.amountMicrousd.toString(),
+          cost_updated_at: measuredAt.toISOString(),
         });
       }
     }
@@ -349,7 +694,7 @@ async function recordTerminalSandboxFailure(
     .from(sandboxes)
     .where(eq(sandboxes.id, payload.sandbox_id))
     .then((rows) => rows[0]);
-  if (!sandbox || sandbox.status === "deleted") {
+  if (!sandbox || sandbox.status === "stopped" || sandbox.status === "deleted") {
     return;
   }
   const status =
@@ -357,7 +702,9 @@ async function recordTerminalSandboxFailure(
       ? "cleanup_failed"
       : payload.job_type === "sandbox.pause"
         ? "ready"
-        : "failed";
+        : payload.job_type === "sandbox.resume"
+          ? "paused"
+          : "failed";
   await withTransaction(db, async (tx) => {
     const [updated] = await tx
       .update(sandboxes)
@@ -425,15 +772,22 @@ export async function processOnce(
       if (payload.job_type === "realtime.broadcast") {
         await publisher.publish(payload.topic, payload.event.type, payload.event);
       } else {
-        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
         if (payload.job_type === "sandbox.provision") {
-          await provisionSandbox(db, sandboxProvider, payload.sandbox_id);
+          await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
+        } else if (payload.job_type === "sandbox.reconcile") {
+          await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
         } else if (payload.job_type === "sandbox.pause") {
-          await pauseSandbox(db, sandboxProvider, payload.sandbox_id);
+          const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+          await pauseSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
+        } else if (payload.job_type === "sandbox.resume") {
+          const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+          await resumeSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
         } else if (payload.job_type === "sandbox.cost.sync") {
+          const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
           await syncSandboxCost(db, sandboxProvider, payload.sandbox_id, payload.final);
         } else {
-          await destroySandbox(db, sandboxProvider, payload.sandbox_id);
+          const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+          await destroySandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
         }
       }
       await db
@@ -462,6 +816,13 @@ export async function processOnce(
           : backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS);
       if (terminal && payload && payload.job_type !== "realtime.broadcast") {
         await recordTerminalSandboxFailure(db, payload);
+        if ("operation_id" in payload && payload.operation_id) {
+          await setOperationState(db, payload.operation_id, "failed", {
+            code: "operation_failed",
+            message: safeError(error),
+            retryable: false,
+          });
+        }
       }
       await db
         .update(outboxJobs)

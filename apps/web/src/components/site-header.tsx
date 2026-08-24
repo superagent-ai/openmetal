@@ -118,7 +118,16 @@ export function SiteHeader({
                 </BreadcrumbItem>
                 <BreadcrumbSeparator />
                 <BreadcrumbItem>
-                  <BreadcrumbPage className="capitalize">{projectName}</BreadcrumbPage>
+                  <BreadcrumbLink
+                    className="capitalize"
+                    render={<Link href={`${parentHref}/projects/${routeProjectSlug}`} />}
+                  >
+                    {projectName}
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Resources</BreadcrumbPage>
                 </BreadcrumbItem>
               </>
             ) : (

@@ -19,9 +19,9 @@ export default async function ProjectPage({
   const { sandboxes } = await metal.sandboxes.list(project.id);
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Resources</h1>
+    <>
+      <h1 className="sr-only">Resources</h1>
       <ProjectResourcesTable projectId={project.id} sandboxes={sandboxes} />
-    </div>
+    </>
   );
 }

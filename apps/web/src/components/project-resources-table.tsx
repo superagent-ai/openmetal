@@ -3,7 +3,14 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { parsePublicEvent, projectTopic } from "@openmetal/events";
-import { Delete02Icon, MoreHorizontalIcon, PauseIcon } from "@hugeicons/core-free-icons";
+import {
+  ArrowDown01Icon,
+  ArrowUp01Icon,
+  Delete02Icon,
+  MoreHorizontalIcon,
+  PauseIcon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -21,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -34,7 +42,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ResourceSearchInput } from "@/components/resource-search-input";
 import { createMetalClient } from "@/lib/metal";
+import {
+  applyResourceTableState,
+  parseResourceSearchQuery,
+  PENDING_PROVIDER_FILTER,
+  providerLabel,
+  resourceSearchQualifiers,
+  serializeResourceSearchQuery,
+  statusLabel,
+  toggleSearchQualifier,
+  type ResourceTableSort,
+  type ResourceTableSortColumn,
+} from "@/lib/resource-table";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -145,19 +166,6 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
   return <Image src="/providers/vercel.ico" alt="" width={13} height={13} />;
 }
 
-function providerLabel(provider: Sandbox["provider"]) {
-  if (!provider) {
-    return "Pending";
-  }
-  if (provider === "codesandbox") {
-    return "CodeSandbox";
-  }
-  if (provider === "e2b") {
-    return "E2B";
-  }
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
-}
-
 function statusBadgeClass(status: string) {
   if (status === "ready") {
     return "bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300";
@@ -175,6 +183,103 @@ function statusBadgeClass(status: string) {
     return "bg-violet-500/15 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300";
   }
   return "bg-muted text-muted-foreground";
+}
+
+function sortAria(sort: ResourceTableSort, column: ResourceTableSortColumn) {
+  if (sort?.column !== column) {
+    return "none";
+  }
+  return sort.direction === "asc" ? "ascending" : "descending";
+}
+
+function ColumnHeaderMenu({
+  label,
+  column,
+  sort,
+  onSort,
+  filter,
+}: {
+  label: string;
+  column: ResourceTableSortColumn;
+  sort: ResourceTableSort;
+  onSort: (column: ResourceTableSortColumn, direction: "asc" | "desc") => void;
+  filter?: {
+    options: { value: string; label: string; count: number }[];
+    selected: string[];
+    onToggle: (value: string) => void;
+    onClear: () => void;
+  };
+}) {
+  const active = sort?.column === column;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={`Open ${label} column menu`}
+            className="-ml-2 h-7 px-2 text-sm font-medium text-foreground"
+          />
+        }
+      >
+        {label}
+        {active ? (
+          <HugeiconsIcon
+            icon={sort?.direction === "asc" ? ArrowUp01Icon : ArrowDown01Icon}
+            strokeWidth={2}
+          />
+        ) : (
+          <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="text-muted-foreground" />
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-44">
+        <DropdownMenuItem onClick={() => onSort(column, "asc")}>
+          <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} />
+          Sort ascending
+          {active && sort?.direction === "asc" ? (
+            <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="ml-auto" />
+          ) : null}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onSort(column, "desc")}>
+          <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
+          Sort descending
+          {active && sort?.direction === "desc" ? (
+            <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="ml-auto" />
+          ) : null}
+        </DropdownMenuItem>
+        {filter ? (
+          <>
+            <DropdownMenuSeparator />
+            {filter.options.length === 0 ? (
+              <DropdownMenuItem disabled>No values</DropdownMenuItem>
+            ) : (
+              filter.options.map((option) => (
+                <DropdownMenuCheckboxItem
+                  key={option.value}
+                  checked={filter.selected.includes(option.value)}
+                  aria-label={`${option.label}, ${option.count}`}
+                  onCheckedChange={() => filter.onToggle(option.value)}
+                >
+                  <span className="capitalize">{option.label}</span>
+                  <span className="ml-auto mr-6 text-xs text-muted-foreground tabular-nums">
+                    {option.count}
+                  </span>
+                </DropdownMenuCheckboxItem>
+              ))
+            )}
+            {filter.selected.length > 0 ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={filter.onClear}>Clear filters</DropdownMenuItem>
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export function ProjectResourcesTable({
@@ -198,6 +303,75 @@ export function ProjectResourcesTable({
   const [busySandboxId, setBusySandboxId] = useState<string>();
   const [deletingSandbox, setDeletingSandbox] = useState<Sandbox>();
   const [error, setError] = useState<string>();
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<ResourceTableSort>(null);
+  const [page, setPage] = useState(1);
+  const parsedQuery = useMemo(() => parseResourceSearchQuery(query), [query]);
+  const table = useMemo(
+    () =>
+      applyResourceTableState(sandboxRows, {
+        query,
+        sort,
+        page,
+        now,
+      }),
+    [now, page, query, sandboxRows, sort],
+  );
+  const providerOptions = useMemo(
+    () =>
+      [...table.providerFacets.entries()]
+        .map(([value, count]) => ({
+          value,
+          count,
+          label: providerLabel(value === PENDING_PROVIDER_FILTER ? null : value),
+        }))
+        .sort((left, right) => left.label.localeCompare(right.label, "en")),
+    [table.providerFacets],
+  );
+  const statusOptions = useMemo(
+    () =>
+      [...table.statusFacets.entries()]
+        .map(([value, count]) => ({
+          value,
+          count,
+          label: statusLabel(value),
+        }))
+        .sort((left, right) => left.label.localeCompare(right.label, "en")),
+    [table.statusFacets],
+  );
+  const searchQualifiers = useMemo(
+    () =>
+      resourceSearchQualifiers({
+        extraProviders: providerOptions,
+        extraStatuses: statusOptions,
+      }),
+    [providerOptions, statusOptions],
+  );
+
+  function updateQuery(next: string) {
+    setQuery(next);
+    setPage(1);
+  }
+
+  function toggleQualifier(qualifier: "provider" | "status", value: string) {
+    updateQuery(toggleSearchQualifier(query, qualifier, value));
+  }
+
+  function clearQualifier(qualifier: "provider" | "status") {
+    const next = parseResourceSearchQuery(query);
+    next[qualifier === "provider" ? "providers" : "statuses"] = [];
+    updateQuery(serializeResourceSearchQuery(next));
+  }
+
+  function clearFilters() {
+    setQuery("");
+    setPage(1);
+  }
+
+  function updateSort(column: ResourceTableSortColumn, direction: "asc" | "desc") {
+    setSort({ column, direction });
+    setPage(1);
+  }
 
   const refreshSandboxes = useCallback(async () => {
     const result = await metal.sandboxes.list(projectId);
@@ -312,17 +486,71 @@ export function ProjectResourcesTable({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
+        <ResourceSearchInput
+          query={query}
+          onQueryChange={updateQuery}
+          qualifiers={searchQualifiers}
+        />
         <div className="overflow-hidden rounded-xl border">
           <Table>
             <TableHeader className="bg-muted">
               <TableRow>
                 <TableHead className="pl-4">Type</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Active for</TableHead>
-                <TableHead>Cost</TableHead>
+                <TableHead aria-sort={sortAria(sort, "provider")}>
+                  <ColumnHeaderMenu
+                    label="Provider"
+                    column="provider"
+                    sort={sort}
+                    onSort={updateSort}
+                    filter={{
+                      options: providerOptions,
+                      selected: parsedQuery.providers,
+                      onToggle: (value) => toggleQualifier("provider", value),
+                      onClear: () => clearQualifier("provider"),
+                    }}
+                  />
+                </TableHead>
+                <TableHead aria-sort={sortAria(sort, "status")}>
+                  <ColumnHeaderMenu
+                    label="Status"
+                    column="status"
+                    sort={sort}
+                    onSort={updateSort}
+                    filter={{
+                      options: statusOptions,
+                      selected: parsedQuery.statuses,
+                      onToggle: (value) => toggleQualifier("status", value),
+                      onClear: () => clearQualifier("status"),
+                    }}
+                  />
+                </TableHead>
+                <TableHead aria-sort={sortAria(sort, "created")}>
+                  <ColumnHeaderMenu
+                    label="Created"
+                    column="created"
+                    sort={sort}
+                    onSort={updateSort}
+                  />
+                </TableHead>
+                <TableHead aria-sort={sortAria(sort, "started")}>
+                  <ColumnHeaderMenu
+                    label="Started"
+                    column="started"
+                    sort={sort}
+                    onSort={updateSort}
+                  />
+                </TableHead>
+                <TableHead aria-sort={sortAria(sort, "activeFor")}>
+                  <ColumnHeaderMenu
+                    label="Active for"
+                    column="activeFor"
+                    sort={sort}
+                    onSort={updateSort}
+                  />
+                </TableHead>
+                <TableHead aria-sort={sortAria(sort, "cost")}>
+                  <ColumnHeaderMenu label="Cost" column="cost" sort={sort} onSort={updateSort} />
+                </TableHead>
                 <TableHead className="w-16 pr-4 text-right">
                   <span className="sr-only">Actions</span>
                 </TableHead>
@@ -338,8 +566,19 @@ export function ProjectResourcesTable({
                     No resources in this project yet.
                   </TableCell>
                 </TableRow>
+              ) : table.total === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={8} className="h-40 whitespace-normal text-center">
+                    <div className="flex flex-col items-center gap-2">
+                      <p className="text-muted-foreground">No resources match these filters</p>
+                      <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+                        Clear filters
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ) : (
-                sandboxRows.map((sandbox) => (
+                table.rows.map((sandbox) => (
                   <TableRow key={sandbox.id}>
                     <TableCell className="pl-4">Sandbox</TableCell>
                     <TableCell>
@@ -430,6 +669,33 @@ export function ProjectResourcesTable({
               )}
             </TableBody>
           </Table>
+          {table.total > table.pageSize ? (
+            <div className="flex items-center justify-between border-t px-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                {table.from}–{table.to} of {table.total}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={table.page <= 1}
+                  onClick={() => setPage(table.page - 1)}
+                >
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={table.page >= table.pageCount}
+                  onClick={() => setPage(table.page + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 

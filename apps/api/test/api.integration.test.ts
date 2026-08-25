@@ -22,6 +22,8 @@ describe("metal api integration", () => {
       DATABASE_URL: env.DATABASE_URL,
       SUPABASE_URL: env.SUPABASE_URL,
       SUPABASE_PUBLISHABLE_KEY: env.SUPABASE_PUBLISHABLE_KEY,
+      SUPABASE_SECRET_KEY: env.SUPABASE_SECRET_KEY,
+      METAL_SITE_URL: "http://localhost:3100",
       CORS_ALLOWED_ORIGINS: "http://127.0.0.1:3100",
       API_HOST: "127.0.0.1",
       API_PORT: "0",
@@ -905,5 +907,208 @@ describe("metal api integration", () => {
         ) jobs
     `;
     expect(counts).toMatchObject({ operations: 1, jobs: 1 });
+  });
+
+  it("invites members to a specific organization and auto-accepts on login", async () => {
+    const owner = await createConfirmedUser(env);
+    const existing = await createConfirmedUser(env);
+    const member = await createConfirmedUser(env);
+    const outsider = await createConfirmedUser(env);
+    users.push(owner.user.id, existing.user.id, member.user.id, outsider.user.id);
+    const ownerClient = clientFor(owner.accessToken);
+    const existingClient = clientFor(existing.accessToken);
+    const memberClient = clientFor(member.accessToken);
+    const outsiderClient = clientFor(outsider.accessToken);
+    const organization = await ownerClient.organizations.create({
+      name: "Invite Org",
+      slug: `invite-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const otherOrganization = await ownerClient.organizations.create({
+      name: "Other Invite Org",
+      slug: `invite-other-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values (${organization.id}, ${member.user.id}, 'member')
+    `;
+
+    await expect(
+      ownerClient.invitations.create(organization.id, { email: owner.email, role: "member" }),
+    ).rejects.toMatchObject({ status: 422 });
+    await expect(
+      ownerClient.invitations.create(organization.id, { email: member.email, role: "member" }),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      memberClient.invitations.create(organization.id, {
+        email: `blocked-${crypto.randomUUID()}@example.test`,
+        role: "member",
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(outsiderClient.members.list(organization.id)).rejects.toMatchObject({
+      status: 403,
+    });
+
+    const pending = await ownerClient.invitations.create(organization.id, {
+      email: existing.email,
+      role: "admin",
+    });
+    expect(pending).toMatchObject({
+      organization_id: organization.id,
+      email: existing.email.toLowerCase(),
+      role: "admin",
+      status: "pending",
+    });
+    const duplicate = await ownerClient.invitations.create(organization.id, {
+      email: existing.email.toUpperCase(),
+      role: "admin",
+    });
+    expect(duplicate.id).toBe(pending.id);
+
+    const listedBeforeAccept = await ownerClient.members.list(organization.id);
+    expect(listedBeforeAccept.viewer).toEqual({ user_id: owner.user.id, role: "owner" });
+    expect(listedBeforeAccept.invitations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: pending.id, status: "pending" })]),
+    );
+    await expect(existingClient.organizations.list()).resolves.toMatchObject({
+      organizations: expect.arrayContaining([expect.objectContaining({ id: organization.id })]),
+    });
+    await expect(existingClient.organizations.list()).resolves.not.toMatchObject({
+      organizations: expect.arrayContaining([
+        expect.objectContaining({ id: otherOrganization.id }),
+      ]),
+    });
+    const afterAccept = await ownerClient.members.list(organization.id);
+    expect(afterAccept.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ user_id: existing.user.id, role: "admin" }),
+      ]),
+    );
+    expect(
+      afterAccept.invitations.find((invitation) => invitation.id === pending.id),
+    ).toBeUndefined();
+
+    const newEmail = `new-${crypto.randomUUID()}@example.test`;
+    const created = await ownerClient.invitations.create(organization.id, {
+      email: newEmail,
+      role: "member",
+    });
+    expect(created).toMatchObject({
+      organization_id: organization.id,
+      email: newEmail,
+      role: "member",
+      status: "pending",
+    });
+    const [invitedUser] = await database.sql`
+      select id::text as id from auth.users where lower(email) = ${newEmail}
+    `;
+    expect(invitedUser?.id).toBeTruthy();
+    if (invitedUser?.id) {
+      users.push(String(invitedUser.id));
+    }
+    const otherInvite = await ownerClient.invitations.create(otherOrganization.id, {
+      email: newEmail,
+      role: "admin",
+    });
+    expect(otherInvite.organization_id).toBe(otherOrganization.id);
+    expect(otherInvite.id).not.toBe(created.id);
+
+    await expect(ownerClient.invitations.revoke(organization.id, created.id)).resolves.toEqual({
+      id: created.id,
+      revoked: true,
+    });
+    const afterRevoke = await ownerClient.members.list(organization.id);
+    expect(
+      afterRevoke.invitations.find((invitation) => invitation.id === created.id),
+    ).toBeUndefined();
+    const otherMembers = await ownerClient.members.list(otherOrganization.id);
+    expect(otherMembers.invitations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: otherInvite.id })]),
+    );
+
+    await expect(
+      memberClient.members.remove(organization.id, existing.user.id),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(ownerClient.members.remove(organization.id, owner.user.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(ownerClient.members.remove(organization.id, existing.user.id)).resolves.toEqual({
+      user_id: existing.user.id,
+      deleted: true,
+    });
+    const afterRemove = await ownerClient.members.list(organization.id);
+    expect(afterRemove.members.find((item) => item.user_id === existing.user.id)).toBeUndefined();
+  });
+
+  it("lets owners and admins update other members and pending invite roles", async () => {
+    const owner = await createConfirmedUser(env);
+    const secondOwner = await createConfirmedUser(env);
+    const admin = await createConfirmedUser(env);
+    const member = await createConfirmedUser(env);
+    const outsider = await createConfirmedUser(env);
+    users.push(owner.user.id, secondOwner.user.id, admin.user.id, member.user.id, outsider.user.id);
+    const ownerClient = clientFor(owner.accessToken);
+    const adminClient = clientFor(admin.accessToken);
+    const memberClient = clientFor(member.accessToken);
+    const outsiderClient = clientFor(outsider.accessToken);
+    const organization = await ownerClient.organizations.create({
+      name: "Role Org",
+      slug: `role-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values
+        (${organization.id}, ${secondOwner.user.id}, 'owner'),
+        (${organization.id}, ${admin.user.id}, 'admin'),
+        (${organization.id}, ${member.user.id}, 'member')
+    `;
+
+    await expect(
+      memberClient.members.update(organization.id, admin.user.id, { role: "member" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      outsiderClient.members.update(organization.id, member.user.id, { role: "admin" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      ownerClient.members.update(organization.id, owner.user.id, { role: "admin" }),
+    ).rejects.toMatchObject({ status: 422 });
+    await expect(
+      adminClient.members.update(organization.id, owner.user.id, { role: "member" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      adminClient.members.remove(organization.id, secondOwner.user.id),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(ownerClient.members.remove(organization.id, secondOwner.user.id)).resolves.toEqual(
+      {
+        user_id: secondOwner.user.id,
+        deleted: true,
+      },
+    );
+
+    await expect(
+      ownerClient.members.update(organization.id, member.user.id, { role: "admin" }),
+    ).resolves.toMatchObject({
+      user_id: member.user.id,
+      role: "admin",
+    });
+    await expect(
+      adminClient.members.update(organization.id, member.user.id, { role: "member" }),
+    ).resolves.toMatchObject({
+      user_id: member.user.id,
+      role: "member",
+    });
+
+    const pending = await ownerClient.invitations.create(organization.id, {
+      email: outsider.email,
+      role: "member",
+    });
+    await expect(
+      memberClient.invitations.update(organization.id, pending.id, { role: "admin" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      ownerClient.invitations.update(organization.id, pending.id, { role: "admin" }),
+    ).resolves.toMatchObject({
+      id: pending.id,
+      role: "admin",
+    });
   });
 });

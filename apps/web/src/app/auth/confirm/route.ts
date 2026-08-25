@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
   );
 
   const types = Array.from(
-    new Set([requestedType, "email", "magiclink"].filter(Boolean) as EmailOtpType[]),
+    new Set([requestedType, "invite", "email", "magiclink"].filter(Boolean) as EmailOtpType[]),
   );
   for (const type of types) {
     const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });

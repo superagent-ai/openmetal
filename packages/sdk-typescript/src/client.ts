@@ -2,6 +2,11 @@ import { z } from "zod";
 import {
   CreateSandboxRequestSchema,
   ConfiguredProviderCredentialSchema,
+  OrganizationInvitationRevokeResponseSchema,
+  OrganizationInvitationSchema,
+  OrganizationMemberDeleteResponseSchema,
+  OrganizationMemberSchema,
+  OrganizationMembersResponseSchema,
   OperationSchema,
   ProjectApiKeySchema,
   ProviderCredentialDeleteResponseSchema,
@@ -11,6 +16,7 @@ import {
   SandboxListResponseSchema,
   SandboxSchema,
   type CreateSandboxRequest,
+  type InvitationRole,
   type Operation,
   type ProviderCredentialInput,
   type SandboxMutation,
@@ -146,6 +152,57 @@ export class MetalClient {
           created_at: z.string(),
           updated_at: z.string(),
         }),
+      }),
+  };
+
+  readonly members = {
+    list: (organizationId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/organizations/${organizationId}/members`,
+        schema: OrganizationMembersResponseSchema,
+      }),
+    update: (organizationId: string, userId: string, input: { role: InvitationRole }) =>
+      this.request({
+        method: "PATCH",
+        path: `/v1/organizations/${organizationId}/members/${userId}`,
+        body: input,
+        schema: OrganizationMemberSchema,
+      }),
+    remove: (organizationId: string, userId: string) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/organizations/${organizationId}/members/${userId}`,
+        schema: OrganizationMemberDeleteResponseSchema,
+      }),
+  };
+
+  readonly invitations = {
+    create: (organizationId: string, input: { email: string; role?: InvitationRole }) =>
+      this.request({
+        method: "POST",
+        path: `/v1/organizations/${organizationId}/invitations`,
+        body: input,
+        schema: OrganizationInvitationSchema,
+      }),
+    resend: (organizationId: string, invitationId: string) =>
+      this.request({
+        method: "POST",
+        path: `/v1/organizations/${organizationId}/invitations/${invitationId}/resend`,
+        schema: OrganizationInvitationSchema,
+      }),
+    update: (organizationId: string, invitationId: string, input: { role: InvitationRole }) =>
+      this.request({
+        method: "PATCH",
+        path: `/v1/organizations/${organizationId}/invitations/${invitationId}`,
+        body: input,
+        schema: OrganizationInvitationSchema,
+      }),
+    revoke: (organizationId: string, invitationId: string) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/organizations/${organizationId}/invitations/${invitationId}`,
+        schema: OrganizationInvitationRevokeResponseSchema,
       }),
   };
 

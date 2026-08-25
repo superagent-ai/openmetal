@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CreateOrganizationRequestSchema,
+  CreateOrganizationInvitationRequestSchema,
   CreateProjectRequestSchema,
   DurableEventEnvelopeSchema,
   ErrorEnvelopeSchema,
@@ -9,6 +10,7 @@ import {
   OpaqueIdSchema,
   ProviderCredentialInputSchema,
   ReadinessResponseSchema,
+  UpdateOrganizationRoleRequestSchema,
   UpdateProjectRequestSchema,
   buildOpenApiDocument,
 } from "../src/index.js";
@@ -140,5 +142,39 @@ describe("contract parsing", () => {
       document.paths["/v1/organizations/{organization_id}/provider-credentials/{provider}"]?.delete
         ?.operationId,
     ).toBe("removeProviderCredential");
+    expect(
+      document.paths["/v1/organizations/{organization_id}/members/{user_id}"]?.patch?.operationId,
+    ).toBe("updateOrganizationMember");
+    expect(
+      document.paths["/v1/organizations/{organization_id}/invitations/{invitation_id}"]?.patch
+        ?.operationId,
+    ).toBe("updateOrganizationInvitation");
+  });
+
+  it("accepts an organization invitation payload", () => {
+    expect(
+      CreateOrganizationInvitationRequestSchema.parse({
+        email: "teammate@example.com",
+      }),
+    ).toEqual({ email: "teammate@example.com", role: "member" });
+    expect(() =>
+      CreateOrganizationInvitationRequestSchema.parse({
+        email: "not-an-email",
+        role: "member",
+      }),
+    ).toThrow();
+    expect(() =>
+      CreateOrganizationInvitationRequestSchema.parse({
+        email: "teammate@example.com",
+        role: "owner",
+      }),
+    ).toThrow();
+  });
+
+  it("accepts an assignable organization role update", () => {
+    expect(UpdateOrganizationRoleRequestSchema.parse({ role: "admin" })).toEqual({
+      role: "admin",
+    });
+    expect(() => UpdateOrganizationRoleRequestSchema.parse({ role: "owner" })).toThrow();
   });
 });

@@ -58,6 +58,12 @@ describe("rls isolation", () => {
       .eq("organization_id", organizationId);
     expect(members.data ?? []).toHaveLength(0);
 
+    const invitations = await outsiderClient
+      .from("organization_invitations")
+      .select("*")
+      .eq("organization_id", organizationId);
+    expect(invitations.data ?? []).toHaveLength(0);
+
     const projects = await outsiderClient.from("projects").select("*").eq("id", projectId);
     expect(projects.data ?? []).toHaveLength(0);
 
@@ -67,6 +73,14 @@ describe("rls isolation", () => {
       role: "owner",
     });
     expect(insertSelf.error).toBeTruthy();
+
+    const insertInvite = await outsiderClient.from("organization_invitations").insert({
+      organization_id: organizationId,
+      email: outsider.email.toLowerCase(),
+      role: "member",
+      invited_by: outsider.user.id,
+    });
+    expect(insertInvite.error).toBeTruthy();
 
     const crossOrganizationInsert = await outsiderClient.from("projects").insert({
       organization_id: organizationId,
@@ -117,6 +131,7 @@ describe("rls isolation", () => {
       where (n.nspname, c.relname) in (
         ('public', 'organizations'),
         ('public', 'organization_members'),
+        ('public', 'organization_invitations'),
         ('public', 'projects'),
         ('metal', 'domain_events'),
         ('metal', 'organization_provider_credentials'),
@@ -125,7 +140,7 @@ describe("rls isolation", () => {
       )
       order by n.nspname, c.relname
     `;
-    expect(rlsRows).toHaveLength(7);
+    expect(rlsRows).toHaveLength(8);
     expect(rlsRows.every((row) => row.enabled === true)).toBe(true);
 
     const unsafeGrants = await database.sql`
@@ -134,7 +149,7 @@ describe("rls isolation", () => {
       where (
         grantee = 'anon'
         and table_schema = 'public'
-        and table_name in ('organizations', 'organization_members', 'projects')
+        and table_name in ('organizations', 'organization_members', 'organization_invitations', 'projects')
       ) or (
         grantee = 'authenticated'
         and table_schema = 'metal'
@@ -158,14 +173,24 @@ describe("rls isolation", () => {
     `;
     expect(projectGrants.map((grant) => grant.privilege_type)).toEqual(["SELECT"]);
 
+    const invitationGrants = await database.sql`
+      select privilege_type
+      from information_schema.role_table_grants
+      where grantee = 'authenticated'
+        and table_schema = 'public'
+        and table_name = 'organization_invitations'
+      order by privilege_type
+    `;
+    expect(invitationGrants.map((grant) => grant.privilege_type)).toEqual(["SELECT"]);
+
     const updatePolicies = await database.sql`
       select schemaname, tablename, policyname, qual, with_check
       from pg_policies
       where cmd = 'UPDATE'
         and schemaname = 'public'
-        and tablename in ('organization_members', 'projects')
+        and tablename in ('organization_members', 'organization_invitations', 'projects')
     `;
-    expect(updatePolicies).toHaveLength(2);
+    expect(updatePolicies).toHaveLength(3);
     expect(updatePolicies.every((policy) => policy.qual && policy.with_check)).toBe(true);
 
     const unsafeViews = await database.sql`

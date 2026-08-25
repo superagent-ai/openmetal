@@ -262,6 +262,10 @@ content_path = "./supabase/templates/magic_link.html"
 subject = "Confirm your Metal account"
 content_path = "./supabase/templates/confirmation.html"
 
+[auth.email.template.invite]
+subject = "You've been invited to Metal"
+content_path = "./supabase/templates/invite.html"
+
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
 # enabled = true

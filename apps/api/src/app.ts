@@ -4,6 +4,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import { API_SEMVER, API_VERSION, buildOpenApiDocument } from "@openmetal/contracts";
 import {
+  CreateOrganizationInvitationRequestSchema,
   CreateOrganizationRequestSchema,
   CreateProjectApiKeyRequestSchema,
   CreateProjectRequestSchema,
@@ -17,11 +18,12 @@ import {
   SandboxProviderSchema,
   SandboxIdSchema,
   UpdateProjectRequestSchema,
+  UpdateOrganizationRoleRequestSchema,
 } from "@openmetal/contracts";
 import { createDatabase, type MetalDatabase } from "@openmetal/db";
 import { createLogger } from "@openmetal/logger";
 import { CursorError } from "@openmetal/events";
-import { createAuthVerifier, type Principal } from "./auth.js";
+import { createAuthAdmin, createAuthVerifier, type Principal } from "./auth.js";
 import {
   authenticateProjectApiKey,
   createProjectApiKey,
@@ -50,6 +52,16 @@ import {
   requestSandboxResume,
   updateProject,
 } from "./services.js";
+import {
+  acceptPendingInvitations,
+  createOrganizationInvitation,
+  listOrganizationMembers,
+  removeOrganizationMember,
+  resendOrganizationInvitation,
+  revokeOrganizationInvitation,
+  updateOrganizationInvitation,
+  updateOrganizationMember,
+} from "./members.js";
 import { getOperationForPrincipal, listOperationEvents } from "./operation-service.js";
 import {
   configureOrganizationProviderCredential,
@@ -282,6 +294,7 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
   });
   const db = database ?? createDatabase({ DATABASE_URL: env.DATABASE_URL });
   const verifier = createAuthVerifier(env);
+  const authAdmin = createAuthAdmin(env);
   const app = Fastify({
     logger: false,
     genReqId: (req) => {
@@ -423,6 +436,7 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
 
   app.get(`/${API_VERSION}/organizations`, async (request) => {
     const principal = await requirePrincipal(request);
+    await acceptPendingInvitations(db.db, principal.userId);
     const rows = await listOrganizations(db.db, principal.userId);
     return { organizations: rows.map(serializeOrg) };
   });
@@ -432,8 +446,122 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     const organizationId = OpaqueIdSchema.parse(
       (request.params as { organization_id: string }).organization_id,
     );
+    await acceptPendingInvitations(db.db, principal.userId);
     return serializeOrg(await getOrganization(db.db, principal.userId, organizationId));
   });
+
+  app.get(`/${API_VERSION}/organizations/:organization_id/members`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    return listOrganizationMembers(db.db, { userId: principal.userId, organizationId });
+  });
+
+  app.delete(`/${API_VERSION}/organizations/:organization_id/members/:user_id`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const params = request.params as { organization_id: string; user_id: string };
+    const organizationId = OpaqueIdSchema.parse(params.organization_id);
+    const memberUserId = OpaqueIdSchema.parse(params.user_id);
+    return removeOrganizationMember(db.db, {
+      userId: principal.userId,
+      organizationId,
+      memberUserId,
+    });
+  });
+
+  app.patch(`/${API_VERSION}/organizations/:organization_id/members/:user_id`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const params = request.params as { organization_id: string; user_id: string };
+    const organizationId = OpaqueIdSchema.parse(params.organization_id);
+    const memberUserId = OpaqueIdSchema.parse(params.user_id);
+    const parsed = UpdateOrganizationRoleRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid member role payload", {
+        issues: parsed.error.issues,
+      });
+    }
+    return updateOrganizationMember(db.db, {
+      userId: principal.userId,
+      organizationId,
+      memberUserId,
+      role: parsed.data.role,
+    });
+  });
+
+  app.post(`/${API_VERSION}/organizations/:organization_id/invitations`, async (request, reply) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    const parsed = CreateOrganizationInvitationRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid invitation payload", {
+        issues: parsed.error.issues,
+      });
+    }
+    const result = await createOrganizationInvitation(db.db, authAdmin, {
+      userId: principal.userId,
+      organizationId,
+      email: parsed.data.email,
+      role: parsed.data.role,
+      siteUrl: env.METAL_SITE_URL,
+    });
+    return reply.status(result.created ? 201 : 200).send(result.invitation);
+  });
+
+  app.post(
+    `/${API_VERSION}/organizations/:organization_id/invitations/:invitation_id/resend`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; invitation_id: string };
+      const organizationId = OpaqueIdSchema.parse(params.organization_id);
+      const invitationId = OpaqueIdSchema.parse(params.invitation_id);
+      return resendOrganizationInvitation(db.db, authAdmin, {
+        userId: principal.userId,
+        organizationId,
+        invitationId,
+        siteUrl: env.METAL_SITE_URL,
+      });
+    },
+  );
+
+  app.delete(
+    `/${API_VERSION}/organizations/:organization_id/invitations/:invitation_id`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; invitation_id: string };
+      const organizationId = OpaqueIdSchema.parse(params.organization_id);
+      const invitationId = OpaqueIdSchema.parse(params.invitation_id);
+      return revokeOrganizationInvitation(db.db, {
+        userId: principal.userId,
+        organizationId,
+        invitationId,
+      });
+    },
+  );
+
+  app.patch(
+    `/${API_VERSION}/organizations/:organization_id/invitations/:invitation_id`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; invitation_id: string };
+      const organizationId = OpaqueIdSchema.parse(params.organization_id);
+      const invitationId = OpaqueIdSchema.parse(params.invitation_id);
+      const parsed = UpdateOrganizationRoleRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new ApiError(422, "validation_error", "invalid invitation role payload", {
+          issues: parsed.error.issues,
+        });
+      }
+      return updateOrganizationInvitation(db.db, {
+        userId: principal.userId,
+        organizationId,
+        invitationId,
+        role: parsed.data.role,
+      });
+    },
+  );
 
   app.get(
     `/${API_VERSION}/organizations/:organization_id/provider-credentials`,

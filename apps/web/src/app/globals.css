@@ -138,3 +138,94 @@
     text-wrap: pretty;
   }
 }
+
+.login-route-diagram {
+  --route-grid: rgba(0, 0, 0, 0.05);
+  --route-line: rgba(0, 0, 0, 0.2);
+  --route-trunk-line: rgba(0, 0, 0, 0.34);
+  --route-platform: #ffffff;
+  --route-platform-stroke: rgba(0, 0, 0, 0.14);
+  --route-hub-stroke: rgba(0, 0, 0, 0.18);
+  --route-shadow: rgba(0, 0, 0, 0.07);
+  --route-side-left: rgba(0, 0, 0, 0.06);
+  --route-side-right: rgba(0, 0, 0, 0.1);
+  --route-stem: rgba(0, 0, 0, 0.16);
+  --route-label: #71717a;
+  --route-hub-glow: #1c1c1c;
+  --route-signal: #2563eb;
+}
+
+.dark .login-route-diagram {
+  --route-grid: rgba(255, 255, 255, 0.07);
+  --route-line: rgba(255, 255, 255, 0.2);
+  --route-trunk-line: rgba(255, 255, 255, 0.34);
+  --route-platform: #181818;
+  --route-platform-stroke: rgba(255, 255, 255, 0.16);
+  --route-hub-stroke: rgba(255, 255, 255, 0.22);
+  --route-shadow: rgba(0, 0, 0, 0.45);
+  --route-side-left: rgba(255, 255, 255, 0.06);
+  --route-side-right: rgba(255, 255, 255, 0.12);
+  --route-stem: rgba(255, 255, 255, 0.2);
+  --route-label: #9b9b9b;
+  --route-hub-glow: #ffffff;
+  --route-signal: #60a5fa;
+}
+
+.dark .login-route-invert {
+  filter: invert(1);
+}
+
+.hero-route-flow {
+  stroke-dasharray: 16 372;
+  stroke-linejoin: round;
+  animation: login-route-flow 2.4s linear infinite;
+}
+
+.hero-route-trunk {
+  stroke-dasharray: 16 100;
+  animation: login-route-trunk 1.2s linear infinite;
+}
+
+.hero-route-pulse {
+  animation: login-route-pulse 3.2s cubic-bezier(0.32, 0.72, 0, 1) infinite;
+}
+
+@keyframes login-route-flow {
+  from {
+    stroke-dashoffset: 388;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes login-route-trunk {
+  from {
+    stroke-dashoffset: 116;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes login-route-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-route-flow,
+  .hero-route-trunk {
+    animation: none;
+    stroke-dasharray: none;
+  }
+
+  .hero-route-pulse {
+    animation: none;
+  }
+}

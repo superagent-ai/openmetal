@@ -2,6 +2,7 @@ import Link from "next/link";
 import { HexagonIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { LoginForm } from "@/components/login-form";
+import { LoginRouteDiagram } from "@/components/login-route-diagram";
 import { DEFAULT_POST_AUTH_PATH, postAuthPath } from "@/lib/auth-redirect";
 
 export default async function LoginPage({
@@ -30,14 +31,17 @@ export default async function LoginPage({
           </div>
         </div>
       </div>
-      <div className="relative hidden bg-muted lg:block">
-        <div className="absolute inset-0 bg-[#181818]" />
+      <div className="relative hidden overflow-hidden bg-muted lg:block">
+        <div className="absolute inset-10 bottom-24">
+          <LoginRouteDiagram />
+        </div>
         <div className="relative flex h-full flex-col justify-end p-10">
-          <p className="max-w-md text-3xl font-semibold text-balance">
+          <p className="max-w-md bg-gradient-to-r from-[#000000] to-[#666666] bg-clip-text text-3xl font-semibold text-balance text-transparent dark:from-white dark:to-[#9B9B9B]">
             Give your agent a computer from one control plane.
           </p>
           <p className="mt-4 max-w-md text-sm text-pretty text-muted-foreground">
-            Create an organization, add a project, and recover durable events after a disconnect.
+            Run agents across every sandbox provider with one API, automatic routing, and durable
+            lifecycle events.
           </p>
         </div>
       </div>

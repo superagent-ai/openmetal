@@ -1041,10 +1041,11 @@ describe("metal api integration", () => {
 
   it("lets owners and admins update other members and pending invite roles", async () => {
     const owner = await createConfirmedUser(env);
+    const secondOwner = await createConfirmedUser(env);
     const admin = await createConfirmedUser(env);
     const member = await createConfirmedUser(env);
     const outsider = await createConfirmedUser(env);
-    users.push(owner.user.id, admin.user.id, member.user.id, outsider.user.id);
+    users.push(owner.user.id, secondOwner.user.id, admin.user.id, member.user.id, outsider.user.id);
     const ownerClient = clientFor(owner.accessToken);
     const adminClient = clientFor(admin.accessToken);
     const memberClient = clientFor(member.accessToken);
@@ -1056,6 +1057,7 @@ describe("metal api integration", () => {
     await database.sql`
       insert into public.organization_members (organization_id, user_id, role)
       values
+        (${organization.id}, ${secondOwner.user.id}, 'owner'),
         (${organization.id}, ${admin.user.id}, 'admin'),
         (${organization.id}, ${member.user.id}, 'member')
     `;
@@ -1072,6 +1074,15 @@ describe("metal api integration", () => {
     await expect(
       adminClient.members.update(organization.id, owner.user.id, { role: "member" }),
     ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      adminClient.members.remove(organization.id, secondOwner.user.id),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(ownerClient.members.remove(organization.id, secondOwner.user.id)).resolves.toEqual(
+      {
+        user_id: secondOwner.user.id,
+        deleted: true,
+      },
+    );
 
     await expect(
       ownerClient.members.update(organization.id, member.user.id, { role: "admin" }),

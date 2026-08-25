@@ -489,7 +489,7 @@ export async function removeOrganizationMember(
   db: MetalDb,
   input: { userId: string; organizationId: string; memberUserId: string },
 ) {
-  await requireMembership(db, input.userId, input.organizationId, [...MANAGE_ROLES]);
+  const actor = await requireMembership(db, input.userId, input.organizationId, [...MANAGE_ROLES]);
   const target = await db
     .select()
     .from(organizationMembers)
@@ -504,6 +504,9 @@ export async function removeOrganizationMember(
     throw new ApiError(404, "not_found", "member not found");
   }
   if (target.role === "owner") {
+    if (actor.role !== "owner") {
+      throw new ApiError(403, "forbidden", "only owners can remove organization owners");
+    }
     const owners = await db
       .select({ userId: organizationMembers.userId })
       .from(organizationMembers)

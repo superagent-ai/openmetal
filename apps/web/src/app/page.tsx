@@ -6,7 +6,7 @@ export default async function HomePage() {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
   const href = data?.claims ? "/dashboard" : "/login";
-  const label = data?.claims ? "Open dashboard" : "Sign in with email";
+  const label = data?.claims ? "Open dashboard" : "Sign in";
 
   return (
     <main className="mx-auto flex min-h-svh max-w-3xl flex-col justify-center px-8 py-16">

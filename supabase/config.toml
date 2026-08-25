@@ -163,8 +163,14 @@ site_url = "http://localhost:3100"
 additional_redirect_urls = [
   "http://127.0.0.1:3100",
   "http://127.0.0.1:3100/auth/confirm",
+  "http://127.0.0.1:3100/auth/confirm**",
+  "http://127.0.0.1:3100/auth/callback",
+  "http://127.0.0.1:3100/auth/callback**",
   "http://localhost:3100",
   "http://localhost:3100/auth/confirm",
+  "http://localhost:3100/auth/confirm**",
+  "http://localhost:3100/auth/callback",
+  "http://localhost:3100/auth/callback**",
 ]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
@@ -340,6 +346,19 @@ url = ""
 # If enabled, the nonce check will be skipped. Required for local sign in with Google auth.
 skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
+email_optional = false
+
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+skip_nonce_check = true
+email_optional = false
+
+[auth.external.github]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET)"
 email_optional = false
 
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.

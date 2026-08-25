@@ -2,13 +2,16 @@ import Link from "next/link";
 import { HexagonIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { LoginForm } from "@/components/login-form";
+import { DEFAULT_POST_AUTH_PATH, postAuthPath } from "@/lib/auth-redirect";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; sent?: string }>;
+  searchParams: Promise<{ error?: string; sent?: string; next?: string }>;
 }) {
   const params = await searchParams;
+  const next = postAuthPath(params.next);
+  const nextValue = next === DEFAULT_POST_AUTH_PATH ? undefined : next;
 
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
@@ -22,8 +25,8 @@ export default async function LoginPage({
           </Link>
         </div>
         <div className="flex flex-1 items-center justify-center">
-          <div className="w-full max-w-xs">
-            <LoginForm sent={params.sent} error={params.error} />
+          <div className="w-full max-w-sm">
+            <LoginForm sent={params.sent} error={params.error} next={nextValue} />
           </div>
         </div>
       </div>

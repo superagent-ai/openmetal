@@ -12,10 +12,16 @@ type DecryptedCredentialRow = {
 
 export type ResolvedByokProvider = {
   credentialId: string;
-  provider: SandboxProvider;
+  provider?: SandboxProvider;
+  invalid?: true;
 };
 
-function parseCredential(row: DecryptedCredentialRow): ResolvedByokProvider {
+type ValidResolvedByokProvider = ResolvedByokProvider & {
+  provider: SandboxProvider;
+  invalid?: never;
+};
+
+function parseCredential(row: DecryptedCredentialRow): ValidResolvedByokProvider {
   const input = ProviderCredentialInputSchema.parse(JSON.parse(row.decryptedSecret));
   if (input.provider !== row.provider) {
     throw new Error("provider credential metadata does not match its encrypted payload");
@@ -44,8 +50,15 @@ export async function listOrganizationByokProviders(
 
   const providers: Partial<Record<SandboxProviderName, ResolvedByokProvider>> = {};
   for (const row of rows) {
-    const resolved = parseCredential(row);
-    providers[resolved.provider.name] = resolved;
+    try {
+      const resolved = parseCredential(row);
+      providers[resolved.provider.name] = resolved;
+    } catch {
+      providers[row.provider as SandboxProviderName] = {
+        credentialId: row.credentialId,
+        invalid: true,
+      };
+    }
   }
   return providers;
 }

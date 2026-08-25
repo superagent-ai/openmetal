@@ -5,7 +5,7 @@ import {
   withTransaction,
   type MetalDb,
 } from "@openmetal/db";
-import type { ProviderCredentialInput } from "@openmetal/contracts";
+import { ProviderCredentialInputSchema, type ProviderCredentialInput } from "@openmetal/contracts";
 import { ApiError } from "./errors.js";
 import { requireMembership } from "./services.js";
 
@@ -45,7 +45,29 @@ export async function configureOrganizationProviderCredential(
         ),
       )
       .then((rows) => rows[0]);
-    const serialized = JSON.stringify(input.credential);
+    let credentialValue = input.credential;
+    if (existing) {
+      const decryptedRows = (await tx.execute(sql`
+        select decrypted_secret as "decryptedSecret"
+        from vault.decrypted_secrets
+        where id = ${existing.secretId}
+        limit 1
+      `)) as unknown as Array<{ decryptedSecret: string }>;
+      try {
+        const previous = ProviderCredentialInputSchema.parse(
+          JSON.parse(decryptedRows[0]?.decryptedSecret ?? "null"),
+        );
+        if (previous.provider === input.credential.provider) {
+          credentialValue = ProviderCredentialInputSchema.parse({
+            ...previous,
+            ...input.credential,
+          });
+        }
+      } catch {
+        // A valid replacement repairs malformed or legacy credential payloads.
+      }
+    }
+    const serialized = JSON.stringify(credentialValue);
     const now = new Date();
 
     let credential: typeof organizationProviderCredentials.$inferSelect | undefined;

@@ -215,12 +215,33 @@ describe("worker outbox", () => {
       returning id, secret_id
     `;
     expect(credential?.id).toBeTruthy();
+    const invalidPayload = JSON.stringify({ provider: "daytona" });
+    const [invalidCredential] = await database.sql`
+      with secret as (
+        select vault.create_secret(
+          ${invalidPayload},
+          ${`worker-invalid-byok-${crypto.randomUUID()}`},
+          'Invalid Worker BYOK test'
+        ) as id
+      )
+      insert into metal.organization_provider_credentials (
+        organization_id, provider, secret_id, created_by
+      )
+      select ${orgId}, 'daytona', secret.id, ${user.user.id}
+      from secret
+      returning id, secret_id
+    `;
+    expect(invalidCredential?.id).toBeTruthy();
 
     const provider = await getByokProviderByCredentialId(database.db, String(credential!.id));
     expect(provider.name).toBe("e2b");
-    await expect(listOrganizationByokProviders(database.db, orgId)).resolves.toMatchObject({
+    const listedProviders = await listOrganizationByokProviders(database.db, orgId);
+    expect(listedProviders).toMatchObject({
       e2b: { credentialId: credential!.id },
+      daytona: { credentialId: invalidCredential!.id, invalid: true },
     });
+    expect(listedProviders.e2b?.provider?.name).toBe("e2b");
+    expect(listedProviders.daytona?.provider).toBeUndefined();
     const [stored] = await database.sql`
       select secret, decrypted_secret
       from vault.decrypted_secrets
@@ -229,6 +250,9 @@ describe("worker outbox", () => {
     expect(String(stored!.secret)).not.toContain(apiKey);
     expect(stored!.decrypted_secret).toBe(payload);
 
+    await database.sql`
+      delete from metal.organization_provider_credentials where id = ${invalidCredential!.id}
+    `;
     await database.sql`
       update metal.organization_provider_credentials
       set disabled_at = now()

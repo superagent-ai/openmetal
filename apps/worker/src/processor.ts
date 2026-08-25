@@ -252,7 +252,7 @@ async function provisionSandbox(
 
   for (const [attemptIndex, providerName] of candidates.entries()) {
     const byokProvider = byokProviders[providerName];
-    const provider = byokProvider?.provider ?? providers[providerName];
+    const provider = byokProvider ? byokProvider.provider : providers[providerName];
     const providerCredentialId = byokProvider?.credentialId ?? null;
     const options = allOptions[providerName] ?? {};
     const [attempt] = await db

@@ -464,6 +464,33 @@ describe("metal api integration", () => {
     await expect(
       ownerClient.providerCredentials.remove(organization.id, "e2b"),
     ).rejects.toMatchObject({ status: 404 });
+
+    const daytonaSecret = `daytona-${crypto.randomUUID()}`;
+    const daytona = await ownerClient.providerCredentials.configure(organization.id, {
+      provider: "daytona",
+      api_key: daytonaSecret,
+      organization_id: "daytona-organization",
+      target: "us",
+    });
+    const rotatedDaytonaSecret = `daytona-${crypto.randomUUID()}`;
+    const rotatedDaytona = await ownerClient.providerCredentials.configure(organization.id, {
+      provider: "daytona",
+      api_key: rotatedDaytonaSecret,
+    });
+    expect(rotatedDaytona.id).toBe(daytona.id);
+    const [daytonaStored] = await database.sql`
+      select secrets.decrypted_secret
+      from metal.organization_provider_credentials credentials
+      inner join vault.decrypted_secrets secrets on secrets.id = credentials.secret_id
+      where credentials.id = ${daytona.id}
+    `;
+    expect(JSON.parse(String(daytonaStored!.decrypted_secret))).toEqual({
+      provider: "daytona",
+      api_key: rotatedDaytonaSecret,
+      organization_id: "daytona-organization",
+      target: "us",
+    });
+
     const auditEvents = await database.sql`
       select type, payload
       from metal.domain_events
@@ -483,6 +510,14 @@ describe("metal api integration", () => {
       {
         type: "organization.provider_credentials.removed",
         payload: { provider: "e2b" },
+      },
+      {
+        type: "organization.provider_credentials.configured",
+        payload: { provider: "daytona" },
+      },
+      {
+        type: "organization.provider_credentials.rotated",
+        payload: { provider: "daytona" },
       },
     ]);
   });

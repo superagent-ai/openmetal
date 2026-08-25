@@ -34,3 +34,9 @@ export function createAuthVerifier(env: ApiEnv): {
     },
   };
 }
+
+export function createAuthAdmin(env: ApiEnv): SupabaseClient {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}

@@ -42,6 +42,32 @@ export const organizationMembers = pgTable(
   ],
 );
 
+export const organizationInvitations = pgTable(
+  "organization_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: organizationRoleEnum("role").notNull(),
+    invitedBy: uuid("invited_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true, mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("organization_invitations_pending_email_key")
+      .on(table.organizationId, table.email)
+      .where(sql`${table.acceptedAt} is null and ${table.revokedAt} is null`),
+    index("organization_invitations_organization_id_idx").on(table.organizationId, table.createdAt),
+    index("organization_invitations_email_idx")
+      .on(table.email)
+      .where(sql`${table.acceptedAt} is null and ${table.revokedAt} is null`),
+  ],
+);
+
 export const projects = pgTable(
   "projects",
   {
@@ -412,6 +438,7 @@ export const idempotencyKeys = metalSchema.table(
 export const schema = {
   organizations,
   organizationMembers,
+  organizationInvitations,
   projects,
   projectApiKeys,
   organizationProviderCredentials,

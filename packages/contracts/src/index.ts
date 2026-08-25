@@ -3,6 +3,7 @@ export * from "./primitives.js";
 export * from "./errors.js";
 export * from "./ops.js";
 export * from "./organizations.js";
+export * from "./members.js";
 export * from "./projects.js";
 export * from "./events.js";
 export * from "./api-keys.js";

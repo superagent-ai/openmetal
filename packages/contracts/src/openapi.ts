@@ -4,6 +4,15 @@ import { CursorEventPageSchema, ListEventsQuerySchema } from "./events.js";
 import { OperationSchema } from "./operations.js";
 import { ApiMetadataResponseSchema, HealthResponseSchema, ReadinessResponseSchema } from "./ops.js";
 import {
+  CreateOrganizationInvitationRequestSchema,
+  OrganizationInvitationRevokeResponseSchema,
+  OrganizationInvitationSchema,
+  OrganizationMemberDeleteResponseSchema,
+  OrganizationMemberSchema,
+  OrganizationMembersResponseSchema,
+  UpdateOrganizationRoleRequestSchema,
+} from "./members.js";
+import {
   CreateOrganizationRequestSchema,
   OrganizationListResponseSchema,
   OrganizationSchema,
@@ -95,6 +104,13 @@ export function buildOpenApiDocument(): OpenApiObject {
         Organization: json(OrganizationSchema),
         OrganizationListResponse: json(OrganizationListResponseSchema),
         CreateOrganizationRequest: json(CreateOrganizationRequestSchema),
+        OrganizationMember: json(OrganizationMemberSchema),
+        OrganizationInvitation: json(OrganizationInvitationSchema),
+        OrganizationMembersResponse: json(OrganizationMembersResponseSchema),
+        CreateOrganizationInvitationRequest: json(CreateOrganizationInvitationRequestSchema),
+        UpdateOrganizationRoleRequest: json(UpdateOrganizationRoleRequestSchema),
+        OrganizationMemberDeleteResponse: json(OrganizationMemberDeleteResponseSchema),
+        OrganizationInvitationRevokeResponse: json(OrganizationInvitationRevokeResponseSchema),
         ProviderCredentialInput: json(ProviderCredentialInputSchema),
         ConfiguredProviderCredential: json(ConfiguredProviderCredentialSchema),
         ProviderCredentialListResponse: json(ProviderCredentialListResponseSchema),
@@ -124,6 +140,18 @@ export function buildOpenApiDocument(): OpenApiObject {
       parameters: {
         OrganizationIdPath: {
           name: "organization_id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+        InvitationIdPath: {
+          name: "invitation_id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+        MemberUserIdPath: {
+          name: "user_id",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
@@ -275,6 +303,117 @@ export function buildOpenApiDocument(): OpenApiObject {
             "401": errorResponse("Authentication required"),
             "403": errorResponse("Access denied"),
             "404": errorResponse("Organization not found"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/members": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        get: {
+          operationId: "listOrganizationMembers",
+          tags: ["members"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response(
+              "Members and pending invitations for the organization",
+              "OrganizationMembersResponse",
+            ),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/members/{user_id}": {
+        parameters: [parameterRef("OrganizationIdPath"), parameterRef("MemberUserIdPath")],
+        patch: {
+          operationId: "updateOrganizationMember",
+          tags: ["members"],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: jsonContent("UpdateOrganizationRoleRequest"),
+          },
+          responses: {
+            "200": response("Member role updated", "OrganizationMember"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Member not found"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+        delete: {
+          operationId: "removeOrganizationMember",
+          tags: ["members"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Member removed", "OrganizationMemberDeleteResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Member not found"),
+            "409": errorResponse("Cannot remove the last owner"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/invitations": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        post: {
+          operationId: "createOrganizationInvitation",
+          tags: ["members"],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: jsonContent("CreateOrganizationInvitationRequest"),
+          },
+          responses: {
+            "200": response("Existing pending invitation", "OrganizationInvitation"),
+            "201": response("Invitation created", "OrganizationInvitation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "409": errorResponse("Invitee is already a member"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/invitations/{invitation_id}": {
+        parameters: [parameterRef("OrganizationIdPath"), parameterRef("InvitationIdPath")],
+        patch: {
+          operationId: "updateOrganizationInvitation",
+          tags: ["members"],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: jsonContent("UpdateOrganizationRoleRequest"),
+          },
+          responses: {
+            "200": response("Invitation role updated", "OrganizationInvitation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Invitation not found"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+        delete: {
+          operationId: "revokeOrganizationInvitation",
+          tags: ["members"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Invitation revoked", "OrganizationInvitationRevokeResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Invitation not found"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/invitations/{invitation_id}/resend": {
+        parameters: [parameterRef("OrganizationIdPath"), parameterRef("InvitationIdPath")],
+        post: {
+          operationId: "resendOrganizationInvitation",
+          tags: ["members"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Invitation resent", "OrganizationInvitation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Invitation not found"),
           },
         },
       },

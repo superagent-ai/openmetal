@@ -1,5 +1,6 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { MembersView } from "@/components/members-view";
 import { requireOrganizationBySlug } from "@/lib/dashboard-organizations";
+import { requireMetalSession } from "@/lib/metal-server";
 
 export default async function OrganizationMembersPage({
   params,
@@ -8,26 +9,17 @@ export default async function OrganizationMembersPage({
 }) {
   const { organizationSlug } = await params;
   const organization = await requireOrganizationBySlug(organizationSlug);
+  const { metal } = await requireMetalSession();
+  const result = await metal.members.list(organization.id);
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Members</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Manage access to {organization.name}.</p>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Organization members</CardTitle>
-          <CardDescription>
-            Member invitations and role management will appear here.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Only the organization owner currently has access.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+    <MembersView
+      organizationId={organization.id}
+      organizationName={organization.name}
+      viewerUserId={result.viewer.user_id}
+      viewerRole={result.viewer.role}
+      initialMembers={result.members}
+      initialInvitations={result.invitations}
+    />
   );
 }

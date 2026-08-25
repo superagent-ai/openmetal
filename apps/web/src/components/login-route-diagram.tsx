@@ -96,7 +96,7 @@ function MetalMark() {
         width={30}
         height={30}
         aria-hidden="true"
-        className="text-violet-600 dark:text-violet-400"
+        className="text-foreground"
       />
     </>
   );

@@ -74,10 +74,11 @@ describe("metal api integration", () => {
       url: "/health",
       headers: {
         origin: "http://127.0.0.1:3100",
-        "access-control-request-method": "GET",
+        "access-control-request-method": "PUT",
       },
     });
     expect(allowed.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3100");
+    expect(allowed.headers["access-control-allow-methods"]).toContain("PUT");
 
     const denied = await runningApp.inject({
       method: "OPTIONS",
@@ -365,6 +366,125 @@ describe("metal api integration", () => {
       after: events.events[0]?.cursor,
     });
     expect(page.events.every((item) => item.event_id !== events.events[0]?.event_id)).toBe(true);
+  });
+
+  it("encrypts organization BYOK credentials and enforces administrator access", async () => {
+    const owner = await createConfirmedUser(env);
+    const member = await createConfirmedUser(env);
+    const outsider = await createConfirmedUser(env);
+    users.push(owner.user.id, member.user.id, outsider.user.id);
+    const ownerClient = clientFor(owner.accessToken);
+    const memberClient = clientFor(member.accessToken);
+    const outsiderClient = clientFor(outsider.accessToken);
+    const organization = await ownerClient.organizations.create({
+      name: "BYOK Org",
+      slug: `byok-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values (${organization.id}, ${member.user.id}, 'member')
+    `;
+
+    await expect(ownerClient.providerCredentials.list(organization.id)).resolves.toEqual({
+      provider_credentials: [],
+    });
+    await expect(memberClient.providerCredentials.list(organization.id)).resolves.toEqual({
+      provider_credentials: [],
+    });
+    await expect(
+      memberClient.providerCredentials.configure(organization.id, {
+        provider: "e2b",
+        api_key: "member-must-not-save",
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      memberClient.providerCredentials.remove(organization.id, "e2b"),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(outsiderClient.providerCredentials.list(organization.id)).rejects.toMatchObject({
+      status: 403,
+    });
+
+    const firstSecret = `e2b-${crypto.randomUUID()}`;
+    const configured = await ownerClient.providerCredentials.configure(organization.id, {
+      provider: "e2b",
+      api_key: firstSecret,
+    });
+    expect(configured).toMatchObject({
+      organization_id: organization.id,
+      provider: "e2b",
+    });
+    expect(JSON.stringify(configured)).not.toContain(firstSecret);
+
+    const stored = await database.sql`
+      select
+        credentials.id,
+        secrets.secret as encrypted_secret,
+        secrets.decrypted_secret
+      from metal.organization_provider_credentials credentials
+      inner join vault.decrypted_secrets secrets on secrets.id = credentials.secret_id
+      where credentials.organization_id = ${organization.id}
+        and credentials.provider = 'e2b'
+    `;
+    expect(stored).toHaveLength(1);
+    expect(String(stored[0]!.encrypted_secret)).not.toContain(firstSecret);
+    expect(JSON.parse(String(stored[0]!.decrypted_secret))).toEqual({
+      provider: "e2b",
+      api_key: firstSecret,
+    });
+
+    const rotatedSecret = `e2b-${crypto.randomUUID()}`;
+    const rotated = await ownerClient.providerCredentials.configure(organization.id, {
+      provider: "e2b",
+      api_key: rotatedSecret,
+    });
+    expect(rotated.id).toBe(configured.id);
+    const [rotatedStored] = await database.sql`
+      select secrets.decrypted_secret
+      from metal.organization_provider_credentials credentials
+      inner join vault.decrypted_secrets secrets on secrets.id = credentials.secret_id
+      where credentials.id = ${configured.id}
+    `;
+    expect(JSON.parse(String(rotatedStored!.decrypted_secret))).toEqual({
+      provider: "e2b",
+      api_key: rotatedSecret,
+    });
+    await expect(ownerClient.providerCredentials.remove(organization.id, "e2b")).resolves.toEqual({
+      provider: "e2b",
+      deleted: true,
+    });
+    await expect(ownerClient.providerCredentials.list(organization.id)).resolves.toEqual({
+      provider_credentials: [],
+    });
+    const [disabled] = await database.sql`
+      select disabled_at
+      from metal.organization_provider_credentials
+      where id = ${configured.id}
+    `;
+    expect(disabled?.disabled_at).toBeTruthy();
+    await expect(
+      ownerClient.providerCredentials.remove(organization.id, "e2b"),
+    ).rejects.toMatchObject({ status: 404 });
+    const auditEvents = await database.sql`
+      select type, payload
+      from metal.domain_events
+      where organization_id = ${organization.id}
+        and type like 'organization.provider_credentials.%'
+      order by cursor
+    `;
+    expect(auditEvents).toMatchObject([
+      {
+        type: "organization.provider_credentials.configured",
+        payload: { provider: "e2b" },
+      },
+      {
+        type: "organization.provider_credentials.rotated",
+        payload: { provider: "e2b" },
+      },
+      {
+        type: "organization.provider_credentials.removed",
+        payload: { provider: "e2b" },
+      },
+    ]);
   });
 
   it("recovers a committed project event after a cursor gap", async () => {

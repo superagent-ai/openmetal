@@ -7,6 +7,7 @@ import {
   HealthResponseSchema,
   ListEventsQuerySchema,
   OpaqueIdSchema,
+  ProviderCredentialInputSchema,
   ReadinessResponseSchema,
   UpdateProjectRequestSchema,
   buildOpenApiDocument,
@@ -98,11 +99,46 @@ describe("contract parsing", () => {
     expect(() => ListEventsQuerySchema.parse({ after: "abc" })).toThrow();
   });
 
+  it("validates provider specific BYOK credentials", () => {
+    expect(
+      ProviderCredentialInputSchema.parse({
+        provider: "modal",
+        token_id: "token-id",
+        token_secret: "token-secret",
+      }),
+    ).toEqual({
+      provider: "modal",
+      token_id: "token-id",
+      token_secret: "token-secret",
+    });
+    expect(() =>
+      ProviderCredentialInputSchema.parse({
+        provider: "northflank",
+        api_token: "token",
+      }),
+    ).toThrow();
+    expect(() =>
+      ProviderCredentialInputSchema.parse({
+        provider: "cloudflare",
+        api_url: "not-a-url",
+        api_key: "token",
+      }),
+    ).toThrow();
+  });
+
   it("documents project updates on PATCH /v1/projects/{project_id}", () => {
     const document = buildOpenApiDocument() as {
       paths: Record<string, Record<string, { operationId?: string }>>;
     };
     expect(document.paths["/v1/projects/{project_id}"]?.patch?.operationId).toBe("updateProject");
     expect(document.paths["/v1/organizations/{organization_id}"]?.patch).toBeUndefined();
+    expect(
+      document.paths["/v1/organizations/{organization_id}/provider-credentials/{provider}"]?.put
+        ?.operationId,
+    ).toBe("configureProviderCredential");
+    expect(
+      document.paths["/v1/organizations/{organization_id}/provider-credentials/{provider}"]?.delete
+        ?.operationId,
+    ).toBe("removeProviderCredential");
   });
 });

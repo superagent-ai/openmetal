@@ -8,6 +8,7 @@ import {
   Add01Icon,
   Analytics01Icon,
   CreditCardIcon,
+  Database01Icon,
   Delete02Icon,
   Home01Icon,
   Key01Icon,
@@ -138,13 +139,14 @@ export function AppSidebar({
     organizations[0];
   const currentSection = pathname.includes("/projects")
     ? "projects"
-    : (["api-keys", "billing", "members", "settings", "usage", "webhooks"] as const).find(
-        (section) => pathname.endsWith(`/${section}`),
-      );
+    : (
+        ["api-keys", "billing", "members", "providers", "settings", "usage", "webhooks"] as const
+      ).find((section) => pathname.endsWith(`/${section}`));
   const basePath = activeOrganization ? `/dashboard/${activeOrganization.slug}` : "/dashboard";
   const navItems = [
     { title: "Home", url: basePath, icon: Home01Icon },
     { title: "API keys", url: `${basePath}/api-keys`, icon: Key01Icon },
+    { title: "BYOK", url: `${basePath}/providers`, icon: Database01Icon },
     { title: "Webhooks", url: `${basePath}/webhooks`, icon: WebhookIcon },
     { title: "Billing", url: `${basePath}/billing`, icon: CreditCardIcon },
     { title: "Usage", url: `${basePath}/usage`, icon: Analytics01Icon },

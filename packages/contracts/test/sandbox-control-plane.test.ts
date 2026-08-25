@@ -100,6 +100,7 @@ describe("unified sandbox contracts", () => {
           state_reason: null,
           requested: request,
           provider: null,
+          billing_mode: "managed",
           resolved_resources: null,
           cost_microusd: null,
           cost_updated_at: null,

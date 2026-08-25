@@ -8,6 +8,12 @@ import {
   OrganizationListResponseSchema,
   OrganizationSchema,
 } from "./organizations.js";
+import {
+  ConfiguredProviderCredentialSchema,
+  ProviderCredentialDeleteResponseSchema,
+  ProviderCredentialInputSchema,
+  ProviderCredentialListResponseSchema,
+} from "./provider-credentials.js";
 import { API_SEMVER, API_VERSION, ProjectIdSchema } from "./primitives.js";
 import {
   CreateProjectRequestSchema,
@@ -89,6 +95,10 @@ export function buildOpenApiDocument(): OpenApiObject {
         Organization: json(OrganizationSchema),
         OrganizationListResponse: json(OrganizationListResponseSchema),
         CreateOrganizationRequest: json(CreateOrganizationRequestSchema),
+        ProviderCredentialInput: json(ProviderCredentialInputSchema),
+        ConfiguredProviderCredential: json(ConfiguredProviderCredentialSchema),
+        ProviderCredentialListResponse: json(ProviderCredentialListResponseSchema),
+        ProviderCredentialDeleteResponse: json(ProviderCredentialDeleteResponseSchema),
         Project: json(ProjectSchema),
         ProjectListResponse: json(ProjectListResponseSchema),
         CreateProjectRequest: json(CreateProjectRequestSchema),
@@ -117,6 +127,25 @@ export function buildOpenApiDocument(): OpenApiObject {
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
+        },
+        ProviderPath: {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: {
+            type: "string",
+            enum: [
+              "blaxel",
+              "cloudflare",
+              "codesandbox",
+              "daytona",
+              "e2b",
+              "modal",
+              "northflank",
+              "runloop",
+              "vercel",
+            ],
+          },
         },
         ProjectIdPath: {
           name: "project_id",
@@ -277,6 +306,52 @@ export function buildOpenApiDocument(): OpenApiObject {
             "403": errorResponse("Access denied"),
             "409": errorResponse("Project conflict"),
             "422": errorResponse("Invalid request"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/provider-credentials": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        get: {
+          operationId: "listProviderCredentials",
+          tags: ["provider credentials"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response(
+              "Configured provider credentials without secret values",
+              "ProviderCredentialListResponse",
+            ),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/provider-credentials/{provider}": {
+        parameters: [parameterRef("OrganizationIdPath"), parameterRef("ProviderPath")],
+        put: {
+          operationId: "configureProviderCredential",
+          tags: ["provider credentials"],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: jsonContent("ProviderCredentialInput"),
+          },
+          responses: {
+            "200": response("Provider credential replaced", "ConfiguredProviderCredential"),
+            "201": response("Provider credential configured", "ConfiguredProviderCredential"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "422": errorResponse("Invalid provider credential"),
+          },
+        },
+        delete: {
+          operationId: "removeProviderCredential",
+          tags: ["provider credentials"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Provider credential removed", "ProviderCredentialDeleteResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Provider credential not configured"),
           },
         },
       },

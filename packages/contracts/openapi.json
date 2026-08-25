@@ -233,6 +233,382 @@
         ],
         "additionalProperties": false
       },
+      "ProviderCredentialInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "const": "blaxel"
+              },
+              "api_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "workspace": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "account_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "provider",
+              "api_key",
+              "workspace"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "const": "cloudflare"
+              },
+              "api_url": {
+                "type": "string",
+                "maxLength": 2048,
+                "format": "uri"
+              },
+              "api_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "account_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "analytics_token": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              }
+            },
+            "required": [
+              "provider",
+              "api_url",
+              "api_key"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "const": "codesandbox"
+              },
+              "api_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "workspace_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "provider",
+              "api_key"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "const": "daytona"
+              },
+              "api_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "organization_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "provider",
+              "api_key"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "const": "e2b"
+              },
+              "api_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              }
+            },
+            "required": [
+              "provider",
+              "api_key"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "const": "modal"
+              },
+              "token_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "token_secret": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "environment": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "provider",
+              "token_id",
+              "token_secret"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "const": "northflank"
+              },
+              "api_token": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "project_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "team_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "provider",
+              "api_token",
+              "project_id"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "const": "runloop"
+              },
+              "api_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              }
+            },
+            "required": [
+              "provider",
+              "api_key"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "const": "vercel"
+              },
+              "token": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "project_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "team_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "provider",
+              "token",
+              "project_id"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ConfiguredProviderCredential": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "blaxel",
+              "cloudflare",
+              "codesandbox",
+              "daytona",
+              "e2b",
+              "modal",
+              "northflank",
+              "runloop",
+              "vercel"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "provider",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "ProviderCredentialListResponse": {
+        "type": "object",
+        "properties": {
+          "provider_credentials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "organization_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "blaxel",
+                    "cloudflare",
+                    "codesandbox",
+                    "daytona",
+                    "e2b",
+                    "modal",
+                    "northflank",
+                    "runloop",
+                    "vercel"
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "organization_id",
+                "provider",
+                "created_at",
+                "updated_at"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "provider_credentials"
+        ],
+        "additionalProperties": false
+      },
+      "ProviderCredentialDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "blaxel",
+              "cloudflare",
+              "codesandbox",
+              "daytona",
+              "e2b",
+              "modal",
+              "northflank",
+              "runloop",
+              "vercel"
+            ]
+          },
+          "deleted": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "provider",
+          "deleted"
+        ],
+        "additionalProperties": false
+      },
       "Project": {
         "type": "object",
         "properties": {
@@ -1312,6 +1688,13 @@
               }
             ]
           },
+          "billing_mode": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "byok"
+            ]
+          },
           "resolved_resources": {
             "anyOf": [
               {
@@ -1451,6 +1834,7 @@
           "state_reason",
           "requested",
           "provider",
+          "billing_mode",
           "resolved_resources",
           "cost_microusd",
           "cost_updated_at",
@@ -1960,6 +2344,13 @@
                   }
                 ]
               },
+              "billing_mode": {
+                "type": "string",
+                "enum": [
+                  "managed",
+                  "byok"
+                ]
+              },
               "resolved_resources": {
                 "anyOf": [
                   {
@@ -2099,6 +2490,7 @@
               "state_reason",
               "requested",
               "provider",
+              "billing_mode",
               "resolved_resources",
               "cost_microusd",
               "cost_updated_at",
@@ -2730,6 +3122,13 @@
                     }
                   ]
                 },
+                "billing_mode": {
+                  "type": "string",
+                  "enum": [
+                    "managed",
+                    "byok"
+                  ]
+                },
                 "resolved_resources": {
                   "anyOf": [
                     {
@@ -2869,6 +3268,7 @@
                 "state_reason",
                 "requested",
                 "provider",
+                "billing_mode",
                 "resolved_resources",
                 "cost_microusd",
                 "cost_updated_at",
@@ -3110,6 +3510,25 @@
         "schema": {
           "type": "string",
           "format": "uuid"
+        }
+      },
+      "ProviderPath": {
+        "name": "provider",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "blaxel",
+            "cloudflare",
+            "codesandbox",
+            "daytona",
+            "e2b",
+            "modal",
+            "northflank",
+            "runloop",
+            "vercel"
+          ]
         }
       },
       "ProjectIdPath": {
@@ -3557,6 +3976,192 @@
           },
           "422": {
             "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organization_id}/provider-credentials": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrganizationIdPath"
+        }
+      ],
+      "get": {
+        "operationId": "listProviderCredentials",
+        "tags": [
+          "provider credentials"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configured provider credentials without secret values",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredentialListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organization_id}/provider-credentials/{provider}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrganizationIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProviderPath"
+        }
+      ],
+      "put": {
+        "operationId": "configureProviderCredential",
+        "tags": [
+          "provider credentials"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderCredentialInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider credential replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfiguredProviderCredential"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Provider credential configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfiguredProviderCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid provider credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeProviderCredential",
+        "tags": [
+          "provider credentials"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider credential removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredentialDeleteResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Provider credential not configured",
             "content": {
               "application/json": {
                 "schema": {

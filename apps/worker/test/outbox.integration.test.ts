@@ -9,6 +9,10 @@ import {
 } from "@openmetal/testkit";
 import { processOnce } from "../src/processor.js";
 import { loadWorkerEnv } from "../src/env.js";
+import {
+  getByokProviderByCredentialId,
+  listOrganizationByokProviders,
+} from "../src/provider-credentials.js";
 
 const env = loadTestEnv();
 
@@ -183,6 +187,65 @@ describe("worker outbox", () => {
       select count(*)::int as count from metal.domain_events where event_id = ${eventId}
     `;
     expect(events[0]?.count).toBe(1);
+  });
+
+  it("loads encrypted BYOK credentials without exposing them through the database model", async () => {
+    const user = await createConfirmedUser(env);
+    users.push(user.user.id);
+    const orgId = crypto.randomUUID();
+    const secretName = `worker-byok-${crypto.randomUUID()}`;
+    const apiKey = `secret-${crypto.randomUUID()}`;
+    const payload = JSON.stringify({
+      provider: "e2b",
+      api_key: apiKey,
+    });
+    await database.sql`
+      insert into public.organizations (id, name, slug)
+      values (${orgId}, 'Worker BYOK Org', ${`wb-${orgId.slice(0, 8)}`})
+    `;
+    const [credential] = await database.sql`
+      with secret as (
+        select vault.create_secret(${payload}, ${secretName}, 'Worker BYOK test') as id
+      )
+      insert into metal.organization_provider_credentials (
+        organization_id, provider, secret_id, created_by
+      )
+      select ${orgId}, 'e2b', secret.id, ${user.user.id}
+      from secret
+      returning id, secret_id
+    `;
+    expect(credential?.id).toBeTruthy();
+
+    const provider = await getByokProviderByCredentialId(database.db, String(credential!.id));
+    expect(provider.name).toBe("e2b");
+    await expect(listOrganizationByokProviders(database.db, orgId)).resolves.toMatchObject({
+      e2b: { credentialId: credential!.id },
+    });
+    const [stored] = await database.sql`
+      select secret, decrypted_secret
+      from vault.decrypted_secrets
+      where id = ${credential!.secret_id}
+    `;
+    expect(String(stored!.secret)).not.toContain(apiKey);
+    expect(stored!.decrypted_secret).toBe(payload);
+
+    await database.sql`
+      update metal.organization_provider_credentials
+      set disabled_at = now()
+      where id = ${credential!.id}
+    `;
+    await expect(listOrganizationByokProviders(database.db, orgId)).resolves.toEqual({});
+    await expect(
+      getByokProviderByCredentialId(database.db, String(credential!.id)),
+    ).resolves.toMatchObject({ name: "e2b" });
+
+    await database.sql`
+      delete from metal.organization_provider_credentials where id = ${credential!.id}
+    `;
+    const orphaned = await database.sql`
+      select id from vault.secrets where id = ${credential!.secret_id}
+    `;
+    expect(orphaned).toHaveLength(0);
   });
 
   it("falls back in caller order after a safe provider failure", async () => {

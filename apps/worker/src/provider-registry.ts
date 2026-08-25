@@ -7,6 +7,7 @@ import { ModalSandboxProvider } from "@openmetal/provider-modal";
 import { NorthflankSandboxProvider } from "@openmetal/provider-northflank";
 import { RunloopSandboxProvider } from "@openmetal/provider-runloop";
 import { VercelSandboxProvider } from "@openmetal/provider-vercel";
+import type { ProviderCredentialInput } from "@openmetal/contracts";
 import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
 import type { WorkerEnv } from "./env.js";
 
@@ -112,4 +113,55 @@ export function buildSandboxProviders(
     });
   }
   return providers;
+}
+
+export function buildByokSandboxProvider(credential: ProviderCredentialInput): SandboxProvider {
+  switch (credential.provider) {
+    case "blaxel":
+      return new BlaxelSandboxProvider({
+        apiKey: credential.api_key,
+        workspace: credential.workspace,
+        accountId: credential.account_id,
+      });
+    case "cloudflare":
+      return new CloudflareSandboxProvider({
+        apiUrl: credential.api_url,
+        apiKey: credential.api_key,
+        accountId: credential.account_id,
+        analyticsToken: credential.analytics_token,
+      });
+    case "codesandbox":
+      return new CodeSandboxProvider({
+        apiKey: credential.api_key,
+        workspaceId: credential.workspace_id,
+      });
+    case "daytona":
+      return new DaytonaSandboxProvider({
+        apiKey: credential.api_key,
+        organizationId: credential.organization_id,
+        target: credential.target,
+      });
+    case "e2b":
+      return new E2BSandboxProvider({ apiKey: credential.api_key });
+    case "modal":
+      return new ModalSandboxProvider({
+        tokenId: credential.token_id,
+        tokenSecret: credential.token_secret,
+        environment: credential.environment,
+      });
+    case "northflank":
+      return new NorthflankSandboxProvider({
+        apiToken: credential.api_token,
+        projectId: credential.project_id,
+        teamId: credential.team_id,
+      });
+    case "runloop":
+      return new RunloopSandboxProvider({ apiKey: credential.api_key });
+    case "vercel":
+      return new VercelSandboxProvider({
+        token: credential.token,
+        projectId: credential.project_id,
+        teamId: credential.team_id,
+      });
+  }
 }

@@ -209,6 +209,7 @@ export const SandboxSchema = z.object({
   state_reason: z.string().nullable(),
   requested: CreateSandboxRequestSchema,
   provider: SandboxProviderSchema.nullable(),
+  billing_mode: z.enum(["managed", "byok"]),
   resolved_resources: ResolvedResourcesSchema.nullable(),
   cost_microusd: z.string().regex(/^\d+$/).nullable(),
   cost_updated_at: IsoDateTimeSchema.nullable(),

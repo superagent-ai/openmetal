@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { HexagonIcon } from "@hugeicons/core-free-icons";
+import { CircuitBoardIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { LoginForm } from "@/components/login-form";
 import { LoginRouteDiagram } from "@/components/login-route-diagram";
@@ -20,7 +20,7 @@ export default async function LoginPage({
         <div className="flex justify-center gap-2 md:justify-start">
           <Link href="/" className="flex items-center gap-2 font-medium">
             <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <HugeiconsIcon icon={HexagonIcon} strokeWidth={2} className="size-4" />
+              <HugeiconsIcon icon={CircuitBoardIcon} strokeWidth={2} className="size-4" />
             </div>
             Metal
           </Link>
@@ -37,7 +37,7 @@ export default async function LoginPage({
         </div>
         <div className="relative flex h-full flex-col justify-end p-10">
           <p className="max-w-md bg-gradient-to-r from-[#000000] to-[#666666] bg-clip-text text-3xl font-semibold text-balance text-transparent dark:from-white dark:to-[#9B9B9B]">
-            Give your agent a computer from one control plane.
+            Give your agent Metal from one control plane.
           </p>
           <p className="mt-4 max-w-md text-sm text-pretty text-muted-foreground">
             Run agents across every sandbox provider with one API, automatic routing, and durable

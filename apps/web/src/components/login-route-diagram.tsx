@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { CircuitBoardIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 
 const AGENTS = [
   { x: 361, y: 27, label: "Claude Code", mark: <AnthropicMark /> },
@@ -77,20 +79,26 @@ function PiAgentMark() {
 
 function MetalMark() {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      width="30"
-      height="30"
-      aria-hidden="true"
-      fill="none"
-      className="stroke-foreground"
-    >
-      <path
-        d="M12 3.25 19.5 7.5v9L12 20.75 4.5 16.5v-9L12 3.25Z"
-        strokeWidth="1.75"
-        strokeLinejoin="round"
+    <>
+      <g transform="translate(1.5 1.5)" opacity="0.9">
+        <HugeiconsIcon
+          icon={CircuitBoardIcon}
+          strokeWidth={3.5}
+          width={30}
+          height={30}
+          aria-hidden="true"
+          className="text-background"
+        />
+      </g>
+      <HugeiconsIcon
+        icon={CircuitBoardIcon}
+        strokeWidth={2}
+        width={30}
+        height={30}
+        aria-hidden="true"
+        className="text-violet-600 dark:text-violet-400"
       />
-    </svg>
+    </>
   );
 }
 

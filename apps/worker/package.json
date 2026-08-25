@@ -11,9 +11,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests --exclude 'test/**/*.integration.test.ts' --exclude 'test/**/*.live.test.ts'",
     "test:integration": "vitest run test --exclude 'test/**/*.live.test.ts'",
+    "test:byok-live": "vitest run test/byok.live.test.ts",
     "test:live": "vitest run test/providers.live.test.ts"
   },
   "dependencies": {
+    "@openmetal/contracts": "workspace:*",
     "@openmetal/db": "workspace:*",
     "@openmetal/events": "workspace:*",
     "@openmetal/logger": "workspace:*",

@@ -13,6 +13,8 @@ import {
   OpaqueIdSchema,
   OperationIdSchema,
   ProjectIdSchema,
+  ProviderCredentialInputSchema,
+  SandboxProviderSchema,
   SandboxIdSchema,
   UpdateProjectRequestSchema,
 } from "@openmetal/contracts";
@@ -49,6 +51,11 @@ import {
   updateProject,
 } from "./services.js";
 import { getOperationForPrincipal, listOperationEvents } from "./operation-service.js";
+import {
+  configureOrganizationProviderCredential,
+  listOrganizationProviderCredentials,
+  removeOrganizationProviderCredential,
+} from "./provider-credentials.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -115,6 +122,22 @@ function serializeApiKey(row: {
   };
 }
 
+function serializeProviderCredential(row: {
+  id: string;
+  organizationId: string;
+  provider: string;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: row.id,
+    organization_id: row.organizationId,
+    provider: SandboxProviderSchema.parse(row.provider),
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
+
 function serializeSandbox(row: {
   id: string;
   publicId?: string;
@@ -122,6 +145,7 @@ function serializeSandbox(row: {
   projectId: string;
   provider: string;
   primaryProvider?: string;
+  billingMode?: string;
   providerResourceId?: string | null;
   source?: Record<string, unknown>;
   resourceRequirements?: Record<string, unknown>;
@@ -166,6 +190,7 @@ function serializeSandbox(row: {
             | "northflank"
             | "runloop"
             | "vercel"),
+    billing_mode: row.billingMode === "byok" ? ("byok" as const) : ("managed" as const),
     cost_microusd: row.providerCostMicrousd?.toString() ?? null,
     cost_updated_at: row.providerCostUpdatedAt?.toISOString() ?? null,
     state,
@@ -270,7 +295,7 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
   await app.register(cors, {
     origin: env.CORS_ALLOWED_ORIGINS.split(",").map((value) => value.trim()),
     credentials: true,
-    methods: ["DELETE", "GET", "HEAD", "PATCH", "POST"],
+    methods: ["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"],
     allowedHeaders: ["authorization", "content-type", "idempotency-key", "x-request-id"],
   });
 
@@ -409,6 +434,63 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     );
     return serializeOrg(await getOrganization(db.db, principal.userId, organizationId));
   });
+
+  app.get(
+    `/${API_VERSION}/organizations/:organization_id/provider-credentials`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const organizationId = OpaqueIdSchema.parse(
+        (request.params as { organization_id: string }).organization_id,
+      );
+      const rows = await listOrganizationProviderCredentials(db.db, {
+        userId: principal.userId,
+        organizationId,
+      });
+      return { provider_credentials: rows.map(serializeProviderCredential) };
+    },
+  );
+
+  app.put(
+    `/${API_VERSION}/organizations/:organization_id/provider-credentials/:provider`,
+    async (request, reply) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; provider: string };
+      const organizationId = OpaqueIdSchema.parse(params.organization_id);
+      const provider = SandboxProviderSchema.parse(params.provider);
+      const parsed = ProviderCredentialInputSchema.safeParse(request.body);
+      if (!parsed.success || parsed.data.provider !== provider) {
+        throw new ApiError(422, "validation_error", "invalid provider credential payload", {
+          issues: parsed.success
+            ? [{ path: ["provider"], message: "provider must match the request path" }]
+            : parsed.error.issues,
+        });
+      }
+      const result = await configureOrganizationProviderCredential(db.db, {
+        userId: principal.userId,
+        organizationId,
+        credential: parsed.data,
+      });
+      return reply
+        .status(result.created ? 201 : 200)
+        .send(serializeProviderCredential(result.credential));
+    },
+  );
+
+  app.delete(
+    `/${API_VERSION}/organizations/:organization_id/provider-credentials/:provider`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; provider: string };
+      const organizationId = OpaqueIdSchema.parse(params.organization_id);
+      const provider = SandboxProviderSchema.parse(params.provider);
+      await removeOrganizationProviderCredential(db.db, {
+        userId: principal.userId,
+        organizationId,
+        provider,
+      });
+      return { provider, deleted: true as const };
+    },
+  );
 
   app.post(`/${API_VERSION}/organizations/:organization_id/projects`, async (request, reply) => {
     const principal = await requirePrincipal(request);

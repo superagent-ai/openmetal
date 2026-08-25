@@ -56,6 +56,7 @@ export function SiteHeader({
     billing: "Billing",
     members: "Members",
     projects: "Projects",
+    providers: "BYOK",
     settings: "Settings",
     usage: "Usage",
     webhooks: "Webhooks",

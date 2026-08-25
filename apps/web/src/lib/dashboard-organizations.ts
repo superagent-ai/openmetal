@@ -13,7 +13,7 @@ export type DashboardOrganization = {
 };
 
 export type DashboardSection =
-  "api-keys" | "billing" | "members" | "projects" | "settings" | "usage" | "webhooks";
+  "api-keys" | "billing" | "members" | "projects" | "providers" | "settings" | "usage" | "webhooks";
 
 export async function listDashboardOrganizations(): Promise<DashboardOrganization[]> {
   const { metal } = await requireMetalSession();

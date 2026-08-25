@@ -119,12 +119,13 @@ describe("rls isolation", () => {
         ('public', 'organization_members'),
         ('public', 'projects'),
         ('metal', 'domain_events'),
+        ('metal', 'organization_provider_credentials'),
         ('metal', 'outbox_jobs'),
         ('metal', 'idempotency_keys')
       )
       order by n.nspname, c.relname
     `;
-    expect(rlsRows).toHaveLength(6);
+    expect(rlsRows).toHaveLength(7);
     expect(rlsRows.every((row) => row.enabled === true)).toBe(true);
 
     const unsafeGrants = await database.sql`
@@ -137,7 +138,12 @@ describe("rls isolation", () => {
       ) or (
         grantee = 'authenticated'
         and table_schema = 'metal'
-        and table_name in ('domain_events', 'outbox_jobs', 'idempotency_keys')
+        and table_name in (
+          'domain_events',
+          'organization_provider_credentials',
+          'outbox_jobs',
+          'idempotency_keys'
+        )
       )
     `;
     expect(unsafeGrants).toEqual([]);
@@ -184,6 +190,7 @@ describe("rls isolation", () => {
       where p.prosecdef = true and n.nspname = 'metal'
     `;
     expect(definerHelpers.map((row) => row.proname).sort()).toEqual([
+      "delete_provider_credential_secret",
       "has_organization_role",
       "is_organization_member",
       "is_project_member",

@@ -1,13 +1,18 @@
 import { z } from "zod";
 import {
   CreateSandboxRequestSchema,
+  ConfiguredProviderCredentialSchema,
   OperationSchema,
   ProjectApiKeySchema,
+  ProviderCredentialDeleteResponseSchema,
+  ProviderCredentialInputSchema,
+  ProviderCredentialListResponseSchema,
   SandboxMutationSchema,
   SandboxListResponseSchema,
   SandboxSchema,
   type CreateSandboxRequest,
   type Operation,
+  type ProviderCredentialInput,
   type SandboxMutation,
 } from "@openmetal/contracts";
 import { MetalError } from "./error.js";
@@ -28,7 +33,7 @@ export type MetalClientOptions = {
 };
 
 type RequestOptions = {
-  method: "DELETE" | "GET" | "PATCH" | "POST";
+  method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
   path: string;
   body?: unknown;
   query?: Record<string, string | number | undefined>;
@@ -141,6 +146,28 @@ export class MetalClient {
           created_at: z.string(),
           updated_at: z.string(),
         }),
+      }),
+  };
+
+  readonly providerCredentials = {
+    list: (organizationId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/organizations/${organizationId}/provider-credentials`,
+        schema: ProviderCredentialListResponseSchema,
+      }),
+    configure: (organizationId: string, input: ProviderCredentialInput) =>
+      this.request({
+        method: "PUT",
+        path: `/v1/organizations/${organizationId}/provider-credentials/${input.provider}`,
+        body: ProviderCredentialInputSchema.parse(input),
+        schema: ConfiguredProviderCredentialSchema,
+      }),
+    remove: (organizationId: string, provider: ProviderCredentialInput["provider"]) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/organizations/${organizationId}/provider-credentials/${provider}`,
+        schema: ProviderCredentialDeleteResponseSchema,
       }),
   };
 

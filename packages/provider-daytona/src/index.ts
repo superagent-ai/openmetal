@@ -140,6 +140,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       method: "DELETE",
       signal,
       allowNotFound: true,
+      allowConflict: true,
     });
   }
 
@@ -157,6 +158,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       body?: string;
       signal?: AbortSignal;
       allowNotFound?: boolean;
+      allowConflict?: boolean;
       idempotencyKey?: string;
     },
   ): Promise<unknown> {
@@ -176,6 +178,9 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       signal,
     });
     if (options.allowNotFound && response.status === 404) {
+      return {};
+    }
+    if (options.allowConflict && response.status === 409) {
       return {};
     }
     if (!response.ok) {

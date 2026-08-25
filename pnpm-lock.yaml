@@ -178,6 +178,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@openmetal/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@openmetal/db':
         specifier: workspace:*
         version: link:../../packages/db

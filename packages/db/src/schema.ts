@@ -112,6 +112,35 @@ export const projectApiKeys = metalSchema.table(
   ],
 );
 
+export const organizationProviderCredentials = metalSchema.table(
+  "organization_provider_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    secretId: uuid("secret_id").notNull(),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("organization_provider_credentials_organization_id_provider_key").on(
+      table.organizationId,
+      table.provider,
+    ),
+    index("organization_provider_credentials_organization_idx").on(
+      table.organizationId,
+      table.provider,
+    ),
+    index("organization_provider_credentials_active_idx")
+      .on(table.organizationId, table.provider)
+      .where(sql`${table.disabledAt} is null`),
+  ],
+);
+
 export const sandboxes = metalSchema.table(
   "sandboxes",
   {
@@ -127,6 +156,10 @@ export const sandboxes = metalSchema.table(
       .references(() => projects.id),
     provider: text("provider").notNull().default("daytona"),
     primaryProvider: text("primary_provider").notNull().default("daytona"),
+    providerCredentialId: uuid("provider_credential_id").references(
+      () => organizationProviderCredentials.id,
+    ),
+    billingMode: text("billing_mode").notNull().default("managed"),
     providerResourceId: text("provider_resource_id"),
     providerOrganizationId: text("provider_organization_id"),
     providerMetadata: jsonb("provider_metadata")
@@ -179,6 +212,9 @@ export const sandboxes = metalSchema.table(
     uniqueIndex("sandboxes_provider_resource_key")
       .on(table.provider, table.providerResourceId)
       .where(sql`${table.providerResourceId} is not null`),
+    index("sandboxes_provider_credential_id_idx")
+      .on(table.providerCredentialId)
+      .where(sql`${table.providerCredentialId} is not null`),
   ],
 );
 
@@ -244,6 +280,9 @@ export const providerAttempts = metalSchema.table(
       .references(() => sandboxes.id),
     attemptIndex: integer("attempt_index").notNull(),
     provider: text("provider").notNull(),
+    providerCredentialId: uuid("provider_credential_id").references(
+      () => organizationProviderCredentials.id,
+    ),
     state: text("state").notNull().default("queued"),
     providerResourceId: text("provider_resource_id"),
     providerMetadata: jsonb("provider_metadata")
@@ -375,6 +414,7 @@ export const schema = {
   organizationMembers,
   projects,
   projectApiKeys,
+  organizationProviderCredentials,
   sandboxes,
   operations,
   operationEvents,

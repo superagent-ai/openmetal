@@ -81,6 +81,127 @@ export type Database = {
         }
         Relationships: []
       }
+      operation_events: {
+        Row: {
+          data: Json
+          id: string
+          occurred_at: string
+          operation_id: string
+          sequence: number
+          type: string
+        }
+        Insert: {
+          data?: Json
+          id?: string
+          occurred_at?: string
+          operation_id: string
+          sequence: number
+          type: string
+        }
+        Update: {
+          data?: Json
+          id?: string
+          occurred_at?: string
+          operation_id?: string
+          sequence?: number
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operation_events_operation_id_fkey"
+            columns: ["operation_id"]
+            isOneToOne: false
+            referencedRelation: "operations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      operations: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error: Json | null
+          id: string
+          organization_id: string
+          project_id: string
+          public_id: string
+          retryable: boolean
+          sandbox_id: string
+          state: string
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error?: Json | null
+          id?: string
+          organization_id: string
+          project_id: string
+          public_id?: string
+          retryable?: boolean
+          sandbox_id: string
+          state?: string
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error?: Json | null
+          id?: string
+          organization_id?: string
+          project_id?: string
+          public_id?: string
+          retryable?: boolean
+          sandbox_id?: string
+          state?: string
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operations_sandbox_id_fkey"
+            columns: ["sandbox_id"]
+            isOneToOne: false
+            referencedRelation: "sandboxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_provider_credentials: {
+        Row: {
+          created_at: string
+          created_by: string
+          disabled_at: string | null
+          id: string
+          organization_id: string
+          provider: string
+          secret_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          disabled_at?: string | null
+          id?: string
+          organization_id: string
+          provider: string
+          secret_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          disabled_at?: string | null
+          id?: string
+          organization_id?: string
+          provider?: string
+          secret_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       outbox_jobs: {
         Row: {
           attempt_count: number
@@ -129,6 +250,308 @@ export type Database = {
         }
         Relationships: []
       }
+      project_api_keys: {
+        Row: {
+          created_at: string
+          created_by: string
+          deleted_at: string | null
+          expires_at: string | null
+          id: string
+          last_used_at: string | null
+          name: string
+          prefix: string
+          project_id: string
+          revoked_at: string | null
+          secret_hash: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          deleted_at?: string | null
+          expires_at?: string | null
+          id?: string
+          last_used_at?: string | null
+          name: string
+          prefix: string
+          project_id: string
+          revoked_at?: string | null
+          secret_hash: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          deleted_at?: string | null
+          expires_at?: string | null
+          id?: string
+          last_used_at?: string | null
+          name?: string
+          prefix?: string
+          project_id?: string
+          revoked_at?: string | null
+          secret_hash?: string
+        }
+        Relationships: []
+      }
+      provider_attempts: {
+        Row: {
+          attempt_index: number
+          completed_at: string | null
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          id: string
+          operation_id: string
+          outcome: string | null
+          provider: string
+          provider_credential_id: string | null
+          provider_metadata: Json
+          provider_resource_id: string | null
+          resolved_resources: Json | null
+          sandbox_id: string
+          started_at: string | null
+          state: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_index: number
+          completed_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          operation_id: string
+          outcome?: string | null
+          provider: string
+          provider_credential_id?: string | null
+          provider_metadata?: Json
+          provider_resource_id?: string | null
+          resolved_resources?: Json | null
+          sandbox_id: string
+          started_at?: string | null
+          state?: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_index?: number
+          completed_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          operation_id?: string
+          outcome?: string | null
+          provider?: string
+          provider_credential_id?: string | null
+          provider_metadata?: Json
+          provider_resource_id?: string | null
+          resolved_resources?: Json | null
+          sandbox_id?: string
+          started_at?: string | null
+          state?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_attempts_operation_id_fkey"
+            columns: ["operation_id"]
+            isOneToOne: false
+            referencedRelation: "operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "provider_attempts_provider_credential_id_fkey"
+            columns: ["provider_credential_id"]
+            isOneToOne: false
+            referencedRelation: "organization_provider_credentials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "provider_attempts_sandbox_id_fkey"
+            columns: ["sandbox_id"]
+            isOneToOne: false
+            referencedRelation: "sandboxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      provider_cost_snapshots: {
+        Row: {
+          amount_microusd: number
+          captured_at: string
+          id: string
+          measured_through: string
+          organization_id: string
+          project_id: string
+          provider: string
+          provider_resource_id: string
+          raw_payload: Json
+          sandbox_id: string
+        }
+        Insert: {
+          amount_microusd: number
+          captured_at?: string
+          id?: string
+          measured_through: string
+          organization_id: string
+          project_id: string
+          provider: string
+          provider_resource_id: string
+          raw_payload: Json
+          sandbox_id: string
+        }
+        Update: {
+          amount_microusd?: number
+          captured_at?: string
+          id?: string
+          measured_through?: string
+          organization_id?: string
+          project_id?: string
+          provider?: string
+          provider_resource_id?: string
+          raw_payload?: Json
+          sandbox_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_cost_snapshots_sandbox_id_fkey"
+            columns: ["sandbox_id"]
+            isOneToOne: false
+            referencedRelation: "sandboxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sandboxes: {
+        Row: {
+          billing_mode: string
+          created_at: string
+          created_by: string
+          deleted_at: string | null
+          environment: Json
+          error_code: string | null
+          error_message: string | null
+          fallback: Json
+          features: Json
+          id: string
+          image: string | null
+          language: string
+          lifecycle: Json
+          metadata: Json
+          network: Json
+          organization_id: string
+          paused_at: string | null
+          primary_provider: string
+          project_id: string
+          provider: string
+          provider_cost_measured_through: string | null
+          provider_cost_microusd: number | null
+          provider_cost_updated_at: string | null
+          provider_credential_id: string | null
+          provider_metadata: Json
+          provider_options: Json
+          provider_organization_id: string | null
+          provider_resource_id: string | null
+          public_id: string
+          ready_at: string | null
+          regions: Json
+          resolved_resources: Json | null
+          resource_requirements: Json
+          secret_refs: Json
+          source: Json
+          status: Database["metal"]["Enums"]["sandbox_status"]
+          ttl_minutes: number
+          updated_at: string
+        }
+        Insert: {
+          billing_mode?: string
+          created_at?: string
+          created_by: string
+          deleted_at?: string | null
+          environment: Json
+          error_code?: string | null
+          error_message?: string | null
+          fallback: Json
+          features?: Json
+          id?: string
+          image?: string | null
+          language?: string
+          lifecycle: Json
+          metadata: Json
+          network?: Json
+          organization_id: string
+          paused_at?: string | null
+          primary_provider: string
+          project_id: string
+          provider?: string
+          provider_cost_measured_through?: string | null
+          provider_cost_microusd?: number | null
+          provider_cost_updated_at?: string | null
+          provider_credential_id?: string | null
+          provider_metadata?: Json
+          provider_options: Json
+          provider_organization_id?: string | null
+          provider_resource_id?: string | null
+          public_id?: string
+          ready_at?: string | null
+          regions?: Json
+          resolved_resources?: Json | null
+          resource_requirements: Json
+          secret_refs: Json
+          source: Json
+          status?: Database["metal"]["Enums"]["sandbox_status"]
+          ttl_minutes?: number
+          updated_at?: string
+        }
+        Update: {
+          billing_mode?: string
+          created_at?: string
+          created_by?: string
+          deleted_at?: string | null
+          environment?: Json
+          error_code?: string | null
+          error_message?: string | null
+          fallback?: Json
+          features?: Json
+          id?: string
+          image?: string | null
+          language?: string
+          lifecycle?: Json
+          metadata?: Json
+          network?: Json
+          organization_id?: string
+          paused_at?: string | null
+          primary_provider?: string
+          project_id?: string
+          provider?: string
+          provider_cost_measured_through?: string | null
+          provider_cost_microusd?: number | null
+          provider_cost_updated_at?: string | null
+          provider_credential_id?: string | null
+          provider_metadata?: Json
+          provider_options?: Json
+          provider_organization_id?: string | null
+          provider_resource_id?: string | null
+          public_id?: string
+          ready_at?: string | null
+          regions?: Json
+          resolved_resources?: Json | null
+          resource_requirements?: Json
+          secret_refs?: Json
+          source?: Json
+          status?: Database["metal"]["Enums"]["sandbox_status"]
+          ttl_minutes?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sandboxes_provider_credential_id_fkey"
+            columns: ["provider_credential_id"]
+            isOneToOne: false
+            referencedRelation: "organization_provider_credentials"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -150,9 +573,27 @@ export type Database = {
         Args: { p_prefix: string; p_topic: string }
         Returns: string
       }
+      project_topic_id: { Args: { p_topic: string }; Returns: string }
     }
     Enums: {
       outbox_job_status: "pending" | "leased" | "succeeded" | "failed"
+      sandbox_status:
+        | "requested"
+        | "provisioning"
+        | "ready"
+        | "pausing"
+        | "paused"
+        | "provision_unknown"
+        | "failed"
+        | "deleting"
+        | "deleted"
+        | "cleanup_pending"
+        | "cleanup_failed"
+        | "routing"
+        | "resuming"
+        | "runtime_unknown"
+        | "stopping"
+        | "stopped"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -220,6 +661,7 @@ export type Database = {
           id: string
           name: string
           organization_id: string
+          public_id: string
           slug: string
           updated_at: string
         }
@@ -229,6 +671,7 @@ export type Database = {
           id?: string
           name: string
           organization_id: string
+          public_id?: string
           slug: string
           updated_at?: string
         }
@@ -238,6 +681,7 @@ export type Database = {
           id?: string
           name?: string
           organization_id?: string
+          public_id?: string
           slug?: string
           updated_at?: string
         }
@@ -388,6 +832,24 @@ export const Constants = {
   metal: {
     Enums: {
       outbox_job_status: ["pending", "leased", "succeeded", "failed"],
+      sandbox_status: [
+        "requested",
+        "provisioning",
+        "ready",
+        "pausing",
+        "paused",
+        "provision_unknown",
+        "failed",
+        "deleting",
+        "deleted",
+        "cleanup_pending",
+        "cleanup_failed",
+        "routing",
+        "resuming",
+        "runtime_unknown",
+        "stopping",
+        "stopped",
+      ],
     },
   },
   public: {

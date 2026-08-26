@@ -9,6 +9,8 @@ export const OutboxJobTypeSchema = z.enum([
   "sandbox.resume",
   "sandbox.cost.sync",
   "sandbox.destroy",
+  "billing.auto_topup.evaluate",
+  "billing.spend_limit.enforce",
 ]);
 export type OutboxJobType = z.infer<typeof OutboxJobTypeSchema>;
 
@@ -48,6 +50,16 @@ export const SandboxCostSyncJobPayloadSchema = z.object({
   sandbox_id: z.uuid(),
   final: z.boolean().default(false),
 });
+export const BillingAutoTopupEvaluateJobPayloadSchema = z.object({
+  job_type: z.literal("billing.auto_topup.evaluate"),
+  organization_id: z.uuid(),
+  reason: z.string().min(1),
+});
+export const BillingSpendLimitEnforceJobPayloadSchema = z.object({
+  job_type: z.literal("billing.spend_limit.enforce"),
+  organization_id: z.uuid(),
+  reason: z.string().min(1),
+});
 export const OutboxJobPayloadSchema = z.discriminatedUnion("job_type", [
   RealtimeBroadcastJobPayloadSchema,
   SandboxProvisionJobPayloadSchema,
@@ -56,6 +68,8 @@ export const OutboxJobPayloadSchema = z.discriminatedUnion("job_type", [
   SandboxResumeJobPayloadSchema,
   SandboxCostSyncJobPayloadSchema,
   SandboxDestroyJobPayloadSchema,
+  BillingAutoTopupEvaluateJobPayloadSchema,
+  BillingSpendLimitEnforceJobPayloadSchema,
 ]);
 export type OutboxJobPayload = z.infer<typeof OutboxJobPayloadSchema>;
 

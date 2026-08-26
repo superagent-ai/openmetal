@@ -1,3 +1,10 @@
+import {
+  chargeUsageDelta,
+  createStripeGateway,
+  evaluateAutoTopup,
+  enforceSpendLimit,
+  type StripeGateway,
+} from "@openmetal/billing";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   claimOutboxJobs,
@@ -295,6 +302,19 @@ async function provisionSandbox(
           state: "failed",
           errorCode: "capability_unsupported",
           errorMessage: `${providerName} does not support ${source.kind} sources`,
+          outcome: "ineligible",
+          completedAt: new Date(),
+        })
+        .where(eq(providerAttempts.id, attempt!.id));
+      continue;
+    }
+    if (!providerCredentialId && !provider.capabilities.cost) {
+      await db
+        .update(providerAttempts)
+        .set({
+          state: "failed",
+          errorCode: "capability_unsupported",
+          errorMessage: `${providerName} does not expose durable cost for managed billing`,
           outcome: "ineligible",
           completedAt: new Date(),
         })
@@ -682,6 +702,17 @@ async function syncSandboxCost(
           rawPayload: cost.raw,
         })
         .onConflictDoNothing();
+      const snapshot = await tx
+        .select()
+        .from(providerCostSnapshots)
+        .where(
+          and(
+            eq(providerCostSnapshots.sandboxId, sandbox.id),
+            eq(providerCostSnapshots.amountMicrousd, cost.amountMicrousd),
+            eq(providerCostSnapshots.measuredThrough, cost.measuredThrough),
+          ),
+        )
+        .then((rows) => rows[0]);
       const [updated] = await tx
         .update(sandboxes)
         .set({
@@ -700,6 +731,18 @@ async function syncSandboxCost(
           cost_updated_at: measuredAt.toISOString(),
         });
       }
+      if (snapshot) {
+        await chargeUsageDelta(tx, {
+          organizationId: sandbox.organizationId,
+          projectId: sandbox.projectId,
+          sandboxId: sandbox.id,
+          snapshotId: snapshot.id,
+          currentCostMicrousd: cost.amountMicrousd,
+          measuredFrom: sandbox.providerCostMeasuredThrough,
+          measuredThrough: cost.measuredThrough,
+          actorId: sandbox.createdBy,
+        });
+      }
     }
     if (!final && sandbox.status !== "deleted") {
       const delayMs = sandbox.status === "paused" ? 5 * 60_000 : 60_000;
@@ -712,7 +755,11 @@ async function recordTerminalSandboxFailure(
   db: MetalDb,
   payload: Exclude<OutboxJobPayload, { job_type: "realtime.broadcast" }>,
 ) {
-  if (payload.job_type === "sandbox.cost.sync") {
+  if (
+    payload.job_type === "sandbox.cost.sync" ||
+    payload.job_type === "billing.auto_topup.evaluate" ||
+    payload.job_type === "billing.spend_limit.enforce"
+  ) {
     return;
   }
   const sandbox = await db
@@ -780,6 +827,7 @@ export async function processOnce(
   publisher: BroadcastPublisher,
   env: WorkerEnv,
   providers: SandboxProviders = {},
+  stripe: StripeGateway | null = null,
 ): Promise<number> {
   const logger = createLogger({
     service: "worker",
@@ -803,24 +851,30 @@ export async function processOnce(
       payload = OutboxJobPayloadSchema.parse(job.payload);
       if (payload.job_type === "realtime.broadcast") {
         await publisher.publish(payload.topic, payload.event.type, payload.event);
-      } else {
-        if (payload.job_type === "sandbox.provision") {
-          await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
-        } else if (payload.job_type === "sandbox.reconcile") {
-          await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
-        } else if (payload.job_type === "sandbox.pause") {
-          const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
-          await pauseSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
-        } else if (payload.job_type === "sandbox.resume") {
-          const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
-          await resumeSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
-        } else if (payload.job_type === "sandbox.cost.sync") {
-          const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
-          await syncSandboxCost(db, sandboxProvider, payload.sandbox_id, payload.final);
-        } else {
-          const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
-          await destroySandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
+      } else if (payload.job_type === "billing.auto_topup.evaluate") {
+        const organizationId = payload.organization_id;
+        if (stripe) {
+          await withTransaction(db, (tx) => evaluateAutoTopup(tx, stripe, organizationId));
         }
+      } else if (payload.job_type === "billing.spend_limit.enforce") {
+        const organizationId = payload.organization_id;
+        await withTransaction(db, (tx) => enforceSpendLimit(tx, organizationId));
+      } else if (payload.job_type === "sandbox.provision") {
+        await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
+      } else if (payload.job_type === "sandbox.reconcile") {
+        await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
+      } else if (payload.job_type === "sandbox.pause") {
+        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+        await pauseSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
+      } else if (payload.job_type === "sandbox.resume") {
+        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+        await resumeSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
+      } else if (payload.job_type === "sandbox.cost.sync") {
+        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+        await syncSandboxCost(db, sandboxProvider, payload.sandbox_id, payload.final);
+      } else {
+        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+        await destroySandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
       }
       await db
         .update(outboxJobs)
@@ -972,6 +1026,7 @@ export async function runWorkerLoop(
   signal: AbortSignal,
   providers: SandboxProviders = {},
 ): Promise<void> {
+  const stripe = env.STRIPE_SECRET_KEY ? createStripeGateway(env.STRIPE_SECRET_KEY) : null;
   let nextCostSweepAt = 0;
   while (!signal.aborted) {
     const now = Date.now();
@@ -980,7 +1035,7 @@ export async function runWorkerLoop(
       await scheduleMissingSandboxCosts(db, providers, new Date(sweepBucket));
       nextCostSweepAt = sweepBucket + env.WORKER_COST_SWEEP_MS;
     }
-    await processOnce(db, publisher, env, providers);
+    await processOnce(db, publisher, env, providers, stripe);
     await new Promise((resolve) => {
       const timer = setTimeout(resolve, env.WORKER_POLL_MS);
       signal.addEventListener("abort", () => {

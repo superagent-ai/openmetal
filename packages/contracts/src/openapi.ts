@@ -36,6 +36,14 @@ import {
   SandboxMutationSchema,
   SandboxSchema,
 } from "./sandboxes.js";
+import {
+  BillingCheckoutResponseSchema,
+  BillingQuoteSchema,
+  BillingSetupResponseSchema,
+  CreateBillingCheckoutRequestSchema,
+  OrganizationBillingSchema,
+  UpdateAutoTopupRequestSchema,
+} from "./billing.js";
 
 type OpenApiObject = Record<string, unknown>;
 
@@ -126,6 +134,12 @@ export function buildOpenApiDocument(): OpenApiObject {
         SandboxListResponse: json(SandboxListResponseSchema),
         Operation: json(OperationSchema),
         CursorEventPage: json(CursorEventPageSchema),
+        BillingQuote: json(BillingQuoteSchema),
+        CreateBillingCheckoutRequest: json(CreateBillingCheckoutRequestSchema),
+        BillingCheckoutResponse: json(BillingCheckoutResponseSchema),
+        UpdateAutoTopupRequest: json(UpdateAutoTopupRequestSchema),
+        OrganizationBilling: json(OrganizationBillingSchema),
+        BillingSetupResponse: json(BillingSetupResponseSchema),
         ProjectId: json(ProjectIdSchema),
         SandboxId: {
           type: "string",
@@ -417,6 +431,116 @@ export function buildOpenApiDocument(): OpenApiObject {
           },
         },
       },
+      "/v1/organizations/{organization_id}/billing": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        get: {
+          operationId: "getOrganizationBilling",
+          tags: ["billing"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Organization billing summary", "OrganizationBilling"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/billing/quote": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        get: {
+          operationId: "quoteCreditPurchase",
+          tags: ["billing"],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "amount_usd",
+              in: "query",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": response("Credit purchase quote", "BillingQuote"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/billing/checkout": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        post: {
+          operationId: "createBillingCheckout",
+          tags: ["billing"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("OptionalIdempotencyKeyHeader")],
+          requestBody: {
+            required: true,
+            content: jsonContent("CreateBillingCheckoutRequest"),
+          },
+          responses: {
+            "200": response("Checkout session created", "BillingCheckoutResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "422": errorResponse("Invalid request"),
+            "503": errorResponse("Billing is not configured"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/billing/auto-topup": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        put: {
+          operationId: "updateAutoTopup",
+          tags: ["billing"],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: jsonContent("UpdateAutoTopupRequest"),
+          },
+          responses: {
+            "200": response("Automatic top up policy updated", "OrganizationBilling"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "409": errorResponse("Payment method required"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/billing/payment-method": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        post: {
+          operationId: "createBillingPaymentMethodSetup",
+          tags: ["billing"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Payment method setup session", "BillingSetupResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "503": errorResponse("Billing is not configured"),
+          },
+        },
+      },
+      "/v1/webhooks/stripe": {
+        post: {
+          operationId: "stripeWebhook",
+          tags: ["billing"],
+          security: [],
+          responses: {
+            "200": {
+              description: "Webhook accepted",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { received: { type: "boolean" } },
+                    required: ["received"],
+                  },
+                },
+              },
+            },
+            "400": errorResponse("Invalid webhook"),
+          },
+        },
+      },
       "/v1/organizations/{organization_id}/projects": {
         parameters: [parameterRef("OrganizationIdPath")],
         get: {
@@ -562,6 +686,7 @@ export function buildOpenApiDocument(): OpenApiObject {
           responses: {
             "202": response("Sandbox provisioning operation accepted", "SandboxMutation"),
             "401": errorResponse("Authentication required"),
+            "402": errorResponse("Insufficient credits"),
             "403": errorResponse("Access denied"),
             "409": errorResponse("Idempotency conflict"),
             "422": errorResponse("Invalid request"),

@@ -10,6 +10,7 @@ import {
   OpaqueIdSchema,
   ProviderCredentialInputSchema,
   ReadinessResponseSchema,
+  UpdateAutoTopupRequestSchema,
   UpdateOrganizationRoleRequestSchema,
   UpdateProjectRequestSchema,
   buildOpenApiDocument,
@@ -176,5 +177,33 @@ describe("contract parsing", () => {
       role: "admin",
     });
     expect(() => UpdateOrganizationRoleRequestSchema.parse({ role: "owner" })).toThrow();
+  });
+
+  it("documents organization billing routes", () => {
+    const document = buildOpenApiDocument() as {
+      paths: Record<
+        string,
+        Record<string, { operationId?: string; responses?: Record<string, unknown> }>
+      >;
+    };
+    expect(document.paths["/v1/organizations/{organization_id}/billing"]?.get?.operationId).toBe(
+      "getOrganizationBilling",
+    );
+    expect(
+      document.paths["/v1/organizations/{organization_id}/billing/checkout"]?.post?.operationId,
+    ).toBe("createBillingCheckout");
+    expect(document.paths["/v1/webhooks/stripe"]?.post?.operationId).toBe("stripeWebhook");
+    expect(document.paths["/v1/sandboxes"]?.post?.responses?.["402"]).toBeTruthy();
+  });
+
+  it("accepts automatic top up settings", () => {
+    expect(
+      UpdateAutoTopupRequestSchema.parse({
+        enabled: true,
+        threshold_usd: "10.00",
+        refill_usd: "50.00",
+        monthly_cap_usd: "500.00",
+      }),
+    ).toMatchObject({ enabled: true, refill_usd: "50.00" });
   });
 });

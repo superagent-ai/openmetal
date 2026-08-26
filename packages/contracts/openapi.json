@@ -3775,6 +3775,358 @@
         ],
         "additionalProperties": false
       },
+      "BillingQuote": {
+        "type": "object",
+        "properties": {
+          "amount_usd": {
+            "type": "string",
+            "pattern": "^\\d+(?:\\.\\d{1,2})?$"
+          },
+          "credit_microusd": {
+            "type": "string"
+          },
+          "fee_microusd": {
+            "type": "string"
+          },
+          "total_microusd": {
+            "type": "string"
+          },
+          "credit_usd": {
+            "type": "string"
+          },
+          "fee_usd": {
+            "type": "string"
+          },
+          "total_usd": {
+            "type": "string"
+          },
+          "fee_rate": {
+            "type": "string",
+            "const": "0.055"
+          },
+          "min_fee_usd": {
+            "type": "string",
+            "const": "0.80"
+          }
+        },
+        "required": [
+          "amount_usd",
+          "credit_microusd",
+          "fee_microusd",
+          "total_microusd",
+          "credit_usd",
+          "fee_usd",
+          "total_usd",
+          "fee_rate",
+          "min_fee_usd"
+        ],
+        "additionalProperties": false
+      },
+      "CreateBillingCheckoutRequest": {
+        "type": "object",
+        "properties": {
+          "amount_usd": {
+            "type": "string",
+            "pattern": "^\\d+(?:\\.\\d{1,2})?$"
+          }
+        },
+        "required": [
+          "amount_usd"
+        ],
+        "additionalProperties": false
+      },
+      "BillingCheckoutResponse": {
+        "type": "object",
+        "properties": {
+          "checkout_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "purchase_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credit_microusd": {
+            "type": "string"
+          },
+          "fee_microusd": {
+            "type": "string"
+          },
+          "total_microusd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "checkout_url",
+          "purchase_id",
+          "credit_microusd",
+          "fee_microusd",
+          "total_microusd"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateAutoTopupRequest": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "threshold_usd": {
+            "type": "string",
+            "pattern": "^\\d+(?:\\.\\d{1,2})?$"
+          },
+          "refill_usd": {
+            "type": "string",
+            "pattern": "^\\d+(?:\\.\\d{1,2})?$"
+          },
+          "monthly_cap_usd": {
+            "type": "string",
+            "pattern": "^\\d+(?:\\.\\d{1,2})?$"
+          }
+        },
+        "required": [
+          "enabled",
+          "threshold_usd",
+          "refill_usd",
+          "monthly_cap_usd"
+        ],
+        "additionalProperties": false
+      },
+      "OrganizationBilling": {
+        "type": "object",
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "balance_microusd": {
+            "type": "string"
+          },
+          "balance_usd": {
+            "type": "string"
+          },
+          "can_manage": {
+            "type": "boolean"
+          },
+          "payment_method": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "brand": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "last4": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "brand",
+                  "last4"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "auto_topup": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "disabled",
+                  "active",
+                  "paused"
+                ]
+              },
+              "threshold_usd": {
+                "type": "string"
+              },
+              "refill_usd": {
+                "type": "string"
+              },
+              "monthly_cap_usd": {
+                "type": "string"
+              },
+              "month_credited_usd": {
+                "type": "string"
+              },
+              "paused_reason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "enabled",
+              "status",
+              "threshold_usd",
+              "refill_usd",
+              "monthly_cap_usd",
+              "month_credited_usd",
+              "paused_reason"
+            ],
+            "additionalProperties": false
+          },
+          "purchases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "checkout",
+                    "auto_topup",
+                    "admin_grant"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "paid",
+                    "failed",
+                    "canceled",
+                    "requires_action"
+                  ]
+                },
+                "credit_usd": {
+                  "type": "string"
+                },
+                "fee_usd": {
+                  "type": "string"
+                },
+                "total_usd": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "paid_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "source",
+                "status",
+                "credit_usd",
+                "fee_usd",
+                "total_usd",
+                "created_at",
+                "paid_at"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "ledger": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "deposit",
+                    "usage_charge",
+                    "usage_correction",
+                    "adjustment"
+                  ]
+                },
+                "amount_microusd": {
+                  "type": "string"
+                },
+                "amount_usd": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "amount_microusd",
+                "amount_usd",
+                "description",
+                "created_at"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "organization_id",
+          "balance_microusd",
+          "balance_usd",
+          "can_manage",
+          "payment_method",
+          "auto_topup",
+          "purchases",
+          "ledger"
+        ],
+        "additionalProperties": false
+      },
+      "BillingSetupResponse": {
+        "type": "object",
+        "properties": {
+          "checkout_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "checkout_url"
+        ],
+        "additionalProperties": false
+      },
       "ProjectId": {
         "type": "string",
         "pattern": "^prj_[A-Za-z0-9]+$"
@@ -4643,6 +4995,390 @@
         }
       }
     },
+    "/v1/organizations/{organization_id}/billing": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrganizationIdPath"
+        }
+      ],
+      "get": {
+        "operationId": "getOrganizationBilling",
+        "tags": [
+          "billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization billing summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationBilling"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organization_id}/billing/quote": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrganizationIdPath"
+        }
+      ],
+      "get": {
+        "operationId": "quoteCreditPurchase",
+        "tags": [
+          "billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "amount_usd",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credit purchase quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingQuote"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organization_id}/billing/checkout": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrganizationIdPath"
+        }
+      ],
+      "post": {
+        "operationId": "createBillingCheckout",
+        "tags": [
+          "billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OptionalIdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBillingCheckoutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkout session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingCheckoutResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Billing is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organization_id}/billing/auto-topup": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrganizationIdPath"
+        }
+      ],
+      "put": {
+        "operationId": "updateAutoTopup",
+        "tags": [
+          "billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAutoTopupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Automatic top up policy updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationBilling"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Payment method required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organization_id}/billing/payment-method": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrganizationIdPath"
+        }
+      ],
+      "post": {
+        "operationId": "createBillingPaymentMethodSetup",
+        "tags": [
+          "billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment method setup session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingSetupResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Billing is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/stripe": {
+      "post": {
+        "operationId": "stripeWebhook",
+        "tags": [
+          "billing"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Webhook accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "received"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/organizations/{organization_id}/projects": {
       "parameters": [
         {
@@ -5268,6 +6004,16 @@
           },
           "401": {
             "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Insufficient credits",
             "content": {
               "application/json": {
                 "schema": {

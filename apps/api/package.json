@@ -16,6 +16,7 @@
     "@fastify/cors": "11.3.0",
     "@fastify/helmet": "13.1.1",
     "@openmetal/contracts": "workspace:*",
+    "@openmetal/billing": "workspace:*",
     "@openmetal/db": "workspace:*",
     "@openmetal/events": "workspace:*",
     "@openmetal/logger": "workspace:*",

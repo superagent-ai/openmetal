@@ -219,6 +219,9 @@ export const sandboxes = metalSchema.table(
       withTimezone: true,
       mode: "date",
     }),
+    customerChargedMicrousd: bigint("customer_charged_microusd", { mode: "bigint" })
+      .notNull()
+      .default(0n),
     status: sandboxStatusEnum("status").notNull().default("requested"),
     image: text("image"),
     language: text("language").notNull().default("typescript"),
@@ -435,6 +438,242 @@ export const idempotencyKeys = metalSchema.table(
   ],
 );
 
+export const pricingKindEnum = metalSchema.enum("pricing_kind", ["purchase_fee", "usage"]);
+export const creditPurchaseSourceEnum = metalSchema.enum("credit_purchase_source", [
+  "checkout",
+  "auto_topup",
+  "admin_grant",
+]);
+export const creditPurchaseStatusEnum = metalSchema.enum("credit_purchase_status", [
+  "pending",
+  "paid",
+  "failed",
+  "canceled",
+  "requires_action",
+]);
+export const autoTopupStatusEnum = metalSchema.enum("auto_topup_status", [
+  "disabled",
+  "active",
+  "paused",
+]);
+export const autoTopupAttemptStatusEnum = metalSchema.enum("auto_topup_attempt_status", [
+  "pending",
+  "succeeded",
+  "failed",
+  "requires_action",
+]);
+export const ledgerTransactionKindEnum = metalSchema.enum("ledger_transaction_kind", [
+  "deposit",
+  "usage_charge",
+  "usage_correction",
+  "adjustment",
+]);
+export const ledgerAccountEnum = metalSchema.enum("ledger_account", [
+  "customer_credits",
+  "platform_clearing",
+]);
+
+export const pricingVersions = metalSchema.table("pricing_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: text("code").notNull().unique(),
+  kind: pricingKindEnum("kind").notNull(),
+  feePerMille: integer("fee_per_mille").notNull().default(0),
+  minFeeMicrousd: bigint("min_fee_microusd", { mode: "bigint" }).notNull().default(0n),
+  effectiveFrom: timestamp("effective_from", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+});
+
+export const billingAccounts = metalSchema.table(
+  "billing_accounts",
+  {
+    organizationId: uuid("organization_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripePaymentMethodId: text("stripe_payment_method_id"),
+    paymentMethodBrand: text("payment_method_brand"),
+    paymentMethodLast4: text("payment_method_last4"),
+    balanceMicrousd: bigint("balance_microusd", { mode: "bigint" }).notNull().default(0n),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("billing_accounts_stripe_customer_id_key")
+      .on(table.stripeCustomerId)
+      .where(sql`${table.stripeCustomerId} is not null`),
+  ],
+);
+
+export const autoTopupPolicies = metalSchema.table("auto_topup_policies", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  enabled: boolean("enabled").notNull().default(false),
+  status: autoTopupStatusEnum("status").notNull().default("disabled"),
+  thresholdMicrousd: bigint("threshold_microusd", { mode: "bigint" })
+    .notNull()
+    .default(10_000_000n),
+  refillMicrousd: bigint("refill_microusd", { mode: "bigint" }).notNull().default(50_000_000n),
+  monthlyCapMicrousd: bigint("monthly_cap_microusd", { mode: "bigint" })
+    .notNull()
+    .default(500_000_000n),
+  pausedReason: text("paused_reason"),
+  updatedBy: uuid("updated_by"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+});
+
+export const creditPurchases = metalSchema.table(
+  "credit_purchases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    source: creditPurchaseSourceEnum("source").notNull(),
+    status: creditPurchaseStatusEnum("status").notNull().default("pending"),
+    creditMicrousd: bigint("credit_microusd", { mode: "bigint" }).notNull(),
+    feeMicrousd: bigint("fee_microusd", { mode: "bigint" }).notNull(),
+    totalMicrousd: bigint("total_microusd", { mode: "bigint" }).notNull(),
+    pricingVersionId: uuid("pricing_version_id")
+      .notNull()
+      .references(() => pricingVersions.id),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id"),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    stripeCustomerId: text("stripe_customer_id"),
+    actorId: uuid("actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    paidAt: timestamp("paid_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("credit_purchases_stripe_checkout_session_id_key")
+      .on(table.stripeCheckoutSessionId)
+      .where(sql`${table.stripeCheckoutSessionId} is not null`),
+    uniqueIndex("credit_purchases_stripe_payment_intent_id_key")
+      .on(table.stripePaymentIntentId)
+      .where(sql`${table.stripePaymentIntentId} is not null`),
+    index("credit_purchases_organization_created_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+export const autoTopupAttempts = metalSchema.table(
+  "auto_topup_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    purchaseId: uuid("purchase_id")
+      .notNull()
+      .references(() => creditPurchases.id, { onDelete: "cascade" }),
+    status: autoTopupAttemptStatusEnum("status").notNull().default("pending"),
+    windowStart: timestamp("window_start", { withTimezone: true, mode: "date" }).notNull(),
+    creditMicrousd: bigint("credit_microusd", { mode: "bigint" }).notNull(),
+    feeMicrousd: bigint("fee_microusd", { mode: "bigint" }).notNull(),
+    totalMicrousd: bigint("total_microusd", { mode: "bigint" }).notNull(),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("auto_topup_attempts_purchase_id_key").on(table.purchaseId),
+    index("auto_topup_attempts_org_window_idx").on(
+      table.organizationId,
+      table.windowStart,
+      table.status,
+    ),
+    uniqueIndex("auto_topup_attempts_pending_org_key")
+      .on(table.organizationId)
+      .where(sql`${table.status} = 'pending'`),
+  ],
+);
+
+export const stripeEvents = metalSchema.table("stripe_events", {
+  eventId: text("event_id").primaryKey(),
+  type: text("type").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+  processedAt: timestamp("processed_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
+export const ledgerTransactions = metalSchema.table(
+  "ledger_transactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: ledgerTransactionKindEnum("kind").notNull(),
+    referenceType: text("reference_type").notNull(),
+    referenceId: uuid("reference_id").notNull(),
+    description: text("description").notNull(),
+    actorId: uuid("actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("ledger_transactions_organization_created_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+export const ledgerEntries = metalSchema.table(
+  "ledger_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    transactionId: uuid("transaction_id")
+      .notNull()
+      .references(() => ledgerTransactions.id, { onDelete: "cascade" }),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    account: ledgerAccountEnum("account").notNull(),
+    amountMicrousd: bigint("amount_microusd", { mode: "bigint" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("ledger_entries_transaction_idx").on(table.transactionId),
+    index("ledger_entries_organization_created_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+export const usageCharges = metalSchema.table(
+  "usage_charges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    sandboxId: uuid("sandbox_id")
+      .notNull()
+      .references(() => sandboxes.id, { onDelete: "cascade" }),
+    snapshotId: uuid("snapshot_id")
+      .notNull()
+      .references(() => providerCostSnapshots.id),
+    pricingVersionId: uuid("pricing_version_id")
+      .notNull()
+      .references(() => pricingVersions.id),
+    providerCostDeltaMicrousd: bigint("provider_cost_delta_microusd", { mode: "bigint" }).notNull(),
+    customerChargeMicrousd: bigint("customer_charge_microusd", { mode: "bigint" }).notNull(),
+    measuredFrom: timestamp("measured_from", { withTimezone: true, mode: "date" }),
+    measuredThrough: timestamp("measured_through", { withTimezone: true, mode: "date" }).notNull(),
+    ledgerTransactionId: uuid("ledger_transaction_id")
+      .notNull()
+      .references(() => ledgerTransactions.id),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("usage_charges_snapshot_id_key").on(table.snapshotId),
+    index("usage_charges_sandbox_created_idx").on(table.sandboxId, table.createdAt),
+  ],
+);
+
 export const schema = {
   organizations,
   organizationMembers,
@@ -446,7 +685,17 @@ export const schema = {
   operations,
   operationEvents,
   providerAttempts,
+  providerCostSnapshots,
   domainEvents,
   outboxJobs,
   idempotencyKeys,
+  pricingVersions,
+  billingAccounts,
+  autoTopupPolicies,
+  creditPurchases,
+  autoTopupAttempts,
+  stripeEvents,
+  ledgerTransactions,
+  ledgerEntries,
+  usageCharges,
 };

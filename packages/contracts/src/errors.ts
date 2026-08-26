@@ -9,6 +9,7 @@ export const ErrorCodeSchema = z.enum([
   "conflict",
   "idempotency_mismatch",
   "idempotency_conflict",
+  "insufficient_credits",
   "capability_unsupported",
   "no_eligible_provider",
   "provider_auth_error",

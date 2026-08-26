@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import {
   domainEvents,
   organizationMembers,
+  organizationProviderCredentials,
   organizations,
   outboxJobs,
   projects,
@@ -18,6 +19,7 @@ import {
   toPublicEvent,
 } from "@openmetal/events";
 import type { CreateSandboxRequest } from "@openmetal/contracts";
+import { ensureBillingAccount, requirePositiveManagedBalance } from "@openmetal/billing";
 import { ApiError } from "./errors.js";
 import { createOperation } from "./operation-service.js";
 
@@ -151,6 +153,7 @@ export async function createOrganization(
     userId: input.userId,
     role: "owner",
   });
+  await ensureBillingAccount(tx, organization.id);
   await insertEventAndOutbox(tx, {
     type: "organization.created",
     organizationId: organization.id,
@@ -304,6 +307,34 @@ export async function createSandbox(
 ) {
   const request = input.request;
   const requestedProvider = request.provider ?? "auto";
+  const fallbackProviders = request.fallback?.providers ?? [];
+  let managed = true;
+  if (requestedProvider !== "auto" && fallbackProviders.length === 0) {
+    const credential = await tx
+      .select({ id: organizationProviderCredentials.id })
+      .from(organizationProviderCredentials)
+      .where(
+        and(
+          eq(organizationProviderCredentials.organizationId, input.organizationId),
+          eq(organizationProviderCredentials.provider, requestedProvider),
+          isNull(organizationProviderCredentials.disabledAt),
+        ),
+      )
+      .then((rows) => rows[0]);
+    managed = !credential;
+  }
+  try {
+    await requirePositiveManagedBalance(tx, input.organizationId, managed);
+  } catch (error) {
+    if (error instanceof Error && error.name === "InsufficientCreditsError") {
+      throw new ApiError(
+        402,
+        "insufficient_credits",
+        "organization credit balance must be greater than zero for managed sandboxes",
+      );
+    }
+    throw error;
+  }
   const primaryProvider =
     request.source.kind === "provider_template" ? request.source.provider : requestedProvider;
   const storedProvider = primaryProvider === "auto" ? "daytona" : primaryProvider;

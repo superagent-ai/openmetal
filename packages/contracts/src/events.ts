@@ -22,6 +22,10 @@ export const EventTypeSchema = z.enum([
   "sandbox.cost_updated",
   "sandbox.failed",
   "sandbox.deleted",
+  "billing.credits_purchased",
+  "billing.usage_charged",
+  "billing.auto_topup_failed",
+  "billing.spend_limit_reached",
 ]);
 export type EventType = z.infer<typeof EventTypeSchema>;
 

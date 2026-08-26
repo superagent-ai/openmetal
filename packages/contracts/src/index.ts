@@ -10,4 +10,5 @@ export * from "./api-keys.js";
 export * from "./provider-credentials.js";
 export * from "./sandboxes.js";
 export * from "./operations.js";
+export * from "./billing.js";
 export { buildOpenApiDocument } from "./openapi.js";

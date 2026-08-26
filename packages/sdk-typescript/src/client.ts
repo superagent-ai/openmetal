@@ -1,7 +1,11 @@
 import { z } from "zod";
 import {
+  BillingCheckoutResponseSchema,
+  BillingQuoteSchema,
+  BillingSetupResponseSchema,
   CreateSandboxRequestSchema,
   ConfiguredProviderCredentialSchema,
+  OrganizationBillingSchema,
   OrganizationInvitationRevokeResponseSchema,
   OrganizationInvitationSchema,
   OrganizationMemberDeleteResponseSchema,
@@ -152,6 +156,55 @@ export class MetalClient {
           created_at: z.string(),
           updated_at: z.string(),
         }),
+      }),
+  };
+
+  readonly billing = {
+    get: (organizationId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/organizations/${organizationId}/billing`,
+        schema: OrganizationBillingSchema,
+      }),
+    quote: (organizationId: string, amountUsd: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/organizations/${organizationId}/billing/quote`,
+        query: { amount_usd: amountUsd },
+        schema: BillingQuoteSchema,
+      }),
+    checkout: (
+      organizationId: string,
+      input: { amount_usd: string },
+      options?: { idempotencyKey?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/organizations/${organizationId}/billing/checkout`,
+        body: input,
+        idempotencyKey: options?.idempotencyKey,
+        schema: BillingCheckoutResponseSchema,
+      }),
+    updateAutoTopup: (
+      organizationId: string,
+      input: {
+        enabled: boolean;
+        threshold_usd: string;
+        refill_usd: string;
+        monthly_cap_usd: string;
+      },
+    ) =>
+      this.request({
+        method: "PUT",
+        path: `/v1/organizations/${organizationId}/billing/auto-topup`,
+        body: input,
+        schema: OrganizationBillingSchema,
+      }),
+    setupPaymentMethod: (organizationId: string) =>
+      this.request({
+        method: "POST",
+        path: `/v1/organizations/${organizationId}/billing/payment-method`,
+        schema: BillingSetupResponseSchema,
       }),
   };
 

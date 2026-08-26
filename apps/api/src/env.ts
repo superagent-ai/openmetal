@@ -13,6 +13,8 @@ export const ApiEnvSchema = z.object({
   API_HOST: z.string().default("127.0.0.1"),
   API_PORT: z.coerce.number().int().min(0).max(65535).default(4000),
   API_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(100).default(10_000),
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
 });
 export type ApiEnv = z.infer<typeof ApiEnvSchema>;
 
@@ -31,5 +33,7 @@ export function loadApiEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
     API_HOST: source.API_HOST,
     API_PORT: source.API_PORT,
     API_REQUEST_TIMEOUT_MS: source.API_REQUEST_TIMEOUT_MS,
+    STRIPE_SECRET_KEY: source.STRIPE_SECRET_KEY,
+    STRIPE_WEBHOOK_SECRET: source.STRIPE_WEBHOOK_SECRET,
   });
 }

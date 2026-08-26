@@ -27,12 +27,17 @@ export class FakeSandboxProvider implements SandboxProvider {
   } as const;
   readonly resources = new Map<string, ProviderSandbox & { paused: boolean }>();
   private failures: FakeProviderBehavior["failures"];
+  costMicrousd: bigint | null = null;
 
   constructor(
     readonly name: SandboxProviderName = "e2b",
     private readonly behavior: FakeProviderBehavior = {},
   ) {
     this.failures = [...(behavior.failures ?? [])];
+  }
+
+  setCost(amountMicrousd: bigint) {
+    this.costMicrousd = amountMicrousd;
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
@@ -75,7 +80,8 @@ export class FakeSandboxProvider implements SandboxProvider {
 
   async getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost> {
     return {
-      amountMicrousd: BigInt(Math.max(0, input.to.getTime() - input.from.getTime())),
+      amountMicrousd:
+        this.costMicrousd ?? BigInt(Math.max(0, input.to.getTime() - input.from.getTime())),
       providerOrganizationId: input.providerOrganizationId ?? "fake-account",
       measuredThrough: input.to,
       raw: { fake: true },

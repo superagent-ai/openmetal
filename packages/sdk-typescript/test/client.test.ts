@@ -186,4 +186,34 @@ describe("MetalClient unit", () => {
     });
     expect(capturedMethod).toBe("DELETE");
   });
+
+  it("quotes credit purchases through the billing API", async () => {
+    let captured: { url: string; method?: string } | undefined;
+    const client = new MetalClient({
+      baseUrl: "http://localhost:4000",
+      accessToken: async () => "t",
+      fetch: async (url, init) => {
+        captured = { url: String(url), method: init?.method };
+        return jsonResponse(200, {
+          amount_usd: "100.00",
+          credit_microusd: "100000000",
+          fee_microusd: "5500000",
+          total_microusd: "105500000",
+          credit_usd: "100.00",
+          fee_usd: "5.50",
+          total_usd: "105.50",
+          fee_rate: "0.055",
+          min_fee_usd: "0.80",
+        });
+      },
+    });
+    await expect(
+      client.billing.quote("11111111-1111-4111-8111-111111111111", "100.00"),
+    ).resolves.toMatchObject({ total_usd: "105.50" });
+    expect(captured?.method).toBe("GET");
+    expect(captured?.url).toContain(
+      "/v1/organizations/11111111-1111-4111-8111-111111111111/billing/quote",
+    );
+    expect(captured?.url).toContain("amount_usd=100.00");
+  });
 });

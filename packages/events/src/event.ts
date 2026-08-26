@@ -10,9 +10,14 @@ export const EventTypeValues = [
   "sandbox.requested",
   "sandbox.ready",
   "sandbox.paused",
+  "sandbox.resumed",
   "sandbox.cost_updated",
   "sandbox.failed",
   "sandbox.deleted",
+  "billing.credits_purchased",
+  "billing.usage_charged",
+  "billing.auto_topup_failed",
+  "billing.spend_limit_reached",
 ] as const;
 export const EventTypeValueSchema = z.enum(EventTypeValues);
 export type EventTypeValue = z.infer<typeof EventTypeValueSchema>;

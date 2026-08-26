@@ -20,6 +20,7 @@ import {
   UpdateProjectRequestSchema,
   UpdateOrganizationRoleRequestSchema,
 } from "@openmetal/contracts";
+import { createStripeGateway, type StripeGateway } from "@openmetal/billing";
 import { createDatabase, type MetalDatabase } from "@openmetal/db";
 import { createLogger } from "@openmetal/logger";
 import { CursorError } from "@openmetal/events";
@@ -68,10 +69,19 @@ import {
   listOrganizationProviderCredentials,
   removeOrganizationProviderCredential,
 } from "./provider-credentials.js";
+import {
+  quoteOrganizationPurchase,
+  readOrganizationBilling,
+  receiveStripeWebhook,
+  saveAutoTopupPolicy,
+  startOrganizationCheckout,
+  startPaymentMethodSetup,
+} from "./billing.js";
 
 declare module "fastify" {
   interface FastifyRequest {
     principal?: Principal;
+    rawBody?: Buffer;
   }
 }
 
@@ -286,7 +296,11 @@ function serializeMutation(input: {
   };
 }
 
-export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatabase) {
+export async function buildApp(
+  env: ApiEnv = loadApiEnv(),
+  database?: MetalDatabase,
+  options?: { stripe?: StripeGateway | null },
+) {
   const logger = createLogger({
     service: "api",
     environment: env.METAL_ENVIRONMENT,
@@ -295,6 +309,12 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
   const db = database ?? createDatabase({ DATABASE_URL: env.DATABASE_URL });
   const verifier = createAuthVerifier(env);
   const authAdmin = createAuthAdmin(env);
+  const stripe =
+    options && "stripe" in options
+      ? (options.stripe ?? null)
+      : env.STRIPE_SECRET_KEY
+        ? createStripeGateway(env.STRIPE_SECRET_KEY)
+        : null;
   const app = Fastify({
     logger: false,
     genReqId: (req) => {
@@ -302,6 +322,19 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
       return typeof header === "string" && header.length > 0 ? header : crypto.randomUUID();
     },
     requestTimeout: env.API_REQUEST_TIMEOUT_MS,
+  });
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
+    request.rawBody = Buffer.isBuffer(body) ? body : Buffer.from(body);
+    if (body.length === 0) {
+      done(null, null);
+      return;
+    }
+    try {
+      done(null, JSON.parse(body.toString("utf8")));
+    } catch (error) {
+      done(error as Error, undefined);
+    }
   });
 
   await app.register(helmet, { contentSecurityPolicy: false });
@@ -448,6 +481,87 @@ export async function buildApp(env: ApiEnv = loadApiEnv(), database?: MetalDatab
     );
     await acceptPendingInvitations(db.db, principal.userId);
     return serializeOrg(await getOrganization(db.db, principal.userId, organizationId));
+  });
+
+  app.get(`/${API_VERSION}/organizations/:organization_id/billing`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    return readOrganizationBilling(db.db, { userId: principal.userId, organizationId });
+  });
+
+  app.get(`/${API_VERSION}/organizations/:organization_id/billing/quote`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    await requirePrincipal(request);
+    await getOrganization(db.db, principal.userId, organizationId);
+    const amountUsd = (request.query as { amount_usd?: string }).amount_usd;
+    return quoteOrganizationPurchase(amountUsd ?? "");
+  });
+
+  app.post(`/${API_VERSION}/organizations/:organization_id/billing/checkout`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    const key = headerValue(request.headers["idempotency-key"]);
+    const result = await executeIdempotent(
+      db.db,
+      {
+        principalId: principal.userId,
+        operation: `billing.checkout:${organizationId}`,
+        key,
+        body: request.body,
+      },
+      async (tx) => {
+        const body = await startOrganizationCheckout(tx, stripe, {
+          userId: principal.userId,
+          organizationId,
+          body: request.body,
+          siteUrl: env.METAL_SITE_URL,
+        });
+        return { status: 200, body };
+      },
+    );
+    return result.body;
+  });
+
+  app.put(`/${API_VERSION}/organizations/:organization_id/billing/auto-topup`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    return saveAutoTopupPolicy(db.db, {
+      userId: principal.userId,
+      organizationId,
+      body: request.body,
+    });
+  });
+
+  app.post(
+    `/${API_VERSION}/organizations/:organization_id/billing/payment-method`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const organizationId = OpaqueIdSchema.parse(
+        (request.params as { organization_id: string }).organization_id,
+      );
+      return startPaymentMethodSetup(db.db, stripe, {
+        userId: principal.userId,
+        organizationId,
+        siteUrl: env.METAL_SITE_URL,
+      });
+    },
+  );
+
+  app.post(`/${API_VERSION}/webhooks/stripe`, async (request) => {
+    return receiveStripeWebhook(db.db, stripe, {
+      payload: request.rawBody ?? Buffer.from(JSON.stringify(request.body ?? {})),
+      signature: headerValue(request.headers["stripe-signature"]),
+      secret: env.STRIPE_WEBHOOK_SECRET,
+    });
   });
 
   app.get(`/${API_VERSION}/organizations/:organization_id/members`, async (request) => {

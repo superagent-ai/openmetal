@@ -36,9 +36,10 @@ describe("worker outbox", () => {
     workerEnv: ReturnType<typeof loadWorkerEnv>,
     predicate: (row: { status: string; attempt_count: number | string }) => boolean,
     providers: NonNullable<Parameters<typeof processOnce>[3]> = {},
+    stripe: Parameters<typeof processOnce>[4] = null,
   ) {
     for (let attempt = 0; attempt < 30; attempt += 1) {
-      await processOnce(database.db, publisher, workerEnv, providers);
+      await processOnce(database.db, publisher, workerEnv, providers, stripe);
       const [row] = await database.sql`
         select status, attempt_count from metal.outbox_jobs where id = ${jobId}
       `;
@@ -534,5 +535,449 @@ describe("worker outbox", () => {
       lease_owner: "successor-worker",
       completed_at: null,
     });
+  });
+
+  it("charges managed usage from durable cost snapshots without double counting", async () => {
+    const user = await createConfirmedUser(env);
+    users.push(user.user.id);
+    const orgId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const sandboxId = crypto.randomUUID();
+    await database.sql`
+      insert into public.organizations (id, name, slug)
+      values (${orgId}, 'Billing Worker Org', ${`bw-${orgId.slice(0, 8)}`})
+    `;
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values (${orgId}, ${user.user.id}, 'owner')
+    `;
+    await database.sql`
+      insert into public.projects (id, public_id, organization_id, name, slug)
+      values (
+        ${projectId},
+        ${`prj_${projectId.replaceAll("-", "")}`},
+        ${orgId},
+        'Billing Worker Project',
+        ${`p-${projectId.slice(0, 8)}`}
+      )
+    `;
+    const { grantCredits } = await import("@openmetal/billing");
+    const { withTransaction } = await import("@openmetal/db");
+    await withTransaction(database.db, (tx) =>
+      grantCredits(tx, {
+        organizationId: orgId,
+        creditMicrousd: 1_000_000n,
+        actorId: user.user.id,
+      }),
+    );
+    await database.sql`
+      insert into metal.sandboxes (
+        id, public_id, organization_id, project_id, provider, primary_provider,
+        status, source, resource_requirements, lifecycle, fallback,
+        provider_options, environment, secret_refs, metadata, created_by,
+        provider_resource_id, billing_mode, ready_at
+      )
+      values (
+        ${sandboxId},
+        ${`sbx_${sandboxId.replaceAll("-", "")}`},
+        ${orgId},
+        ${projectId},
+        'e2b',
+        'e2b',
+        'ready',
+        ${JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" })}::jsonb,
+        ${JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" })}::jsonb,
+        ${JSON.stringify({ runtime_timeout_seconds: 300 })}::jsonb,
+        ${JSON.stringify({ providers: [] })}::jsonb,
+        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+        ${user.user.id},
+        ${`fake-sbx_${sandboxId.replaceAll("-", "")}`},
+        'managed',
+        now()
+      )
+    `;
+    const [job] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'sandbox.cost.sync',
+        ${`sandbox:cost:${sandboxId}:test`},
+        ${JSON.stringify({ job_type: "sandbox.cost.sync", sandbox_id: sandboxId, final: true })}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    const provider = new FakeSandboxProvider("e2b");
+    provider.setCost(250_000n);
+    const workerEnv = loadWorkerEnv({
+      ...process.env,
+      DATABASE_URL: env.DATABASE_URL,
+      SUPABASE_URL: env.SUPABASE_URL,
+      SUPABASE_SECRET_KEY: env.SUPABASE_SECRET_KEY,
+      WORKER_ID: "billing-worker",
+      WORKER_LEASE_MS: "5000",
+      WORKER_POLL_MS: "50",
+      WORKER_BATCH_SIZE: "50",
+      WORKER_MAX_ATTEMPTS: "8",
+      WORKER_BASE_BACKOFF_MS: "10",
+      LOG_LEVEL: "silent",
+      METAL_ENVIRONMENT: "test",
+    });
+    await processUntilJob(
+      String(job!.id),
+      { publish: async () => {} },
+      workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: provider },
+    );
+    const [account] = await database.sql`
+      select balance_microusd from metal.billing_accounts where organization_id = ${orgId}
+    `;
+    expect(Number(account?.balance_microusd)).toBe(750_000);
+    await processOnce(database.db, { publish: async () => {} }, workerEnv, { e2b: provider });
+    const [unchanged] = await database.sql`
+      select balance_microusd from metal.billing_accounts where organization_id = ${orgId}
+    `;
+    expect(Number(unchanged?.balance_microusd)).toBe(750_000);
+  });
+
+  it("corrects decreased usage, skips BYOK, tops up, and stops managed sandboxes at zero", async () => {
+    const user = await createConfirmedUser(env);
+    users.push(user.user.id);
+    const orgId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const managedId = crypto.randomUUID();
+    const byokId = crypto.randomUUID();
+    await database.sql`
+      insert into public.organizations (id, name, slug)
+      values (${orgId}, 'Spend Limit Org', ${`sl-${orgId.slice(0, 8)}`})
+    `;
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values (${orgId}, ${user.user.id}, 'owner')
+    `;
+    await database.sql`
+      insert into public.projects (id, public_id, organization_id, name, slug)
+      values (
+        ${projectId},
+        ${`prj_${projectId.replaceAll("-", "")}`},
+        ${orgId},
+        'Spend Limit Project',
+        ${`p-${projectId.slice(0, 8)}`}
+      )
+    `;
+    const { FakeStripeGateway, grantCredits, handleStripeWebhook } =
+      await import("@openmetal/billing");
+    const { withTransaction } = await import("@openmetal/db");
+    await withTransaction(database.db, (tx) =>
+      grantCredits(tx, {
+        organizationId: orgId,
+        creditMicrousd: 400_000n,
+        actorId: user.user.id,
+      }),
+    );
+    await database.sql`
+      insert into metal.sandboxes (
+        id, public_id, organization_id, project_id, provider, primary_provider,
+        status, source, resource_requirements, lifecycle, fallback,
+        provider_options, environment, secret_refs, metadata, created_by,
+        provider_resource_id, billing_mode, ready_at
+      )
+      values (
+        ${managedId},
+        ${`sbx_${managedId.replaceAll("-", "")}`},
+        ${orgId},
+        ${projectId},
+        'e2b',
+        'e2b',
+        'ready',
+        ${JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" })}::jsonb,
+        ${JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" })}::jsonb,
+        ${JSON.stringify({ runtime_timeout_seconds: 300 })}::jsonb,
+        ${JSON.stringify({ providers: [] })}::jsonb,
+        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+        ${user.user.id},
+        ${`fake-sbx_${managedId.replaceAll("-", "")}`},
+        'managed',
+        now()
+      )
+    `;
+    await database.sql`
+      insert into metal.sandboxes (
+        id, public_id, organization_id, project_id, provider, primary_provider,
+        status, source, resource_requirements, lifecycle, fallback,
+        provider_options, environment, secret_refs, metadata, created_by,
+        provider_resource_id, billing_mode, ready_at
+      )
+      values (
+        ${byokId},
+        ${`sbx_${byokId.replaceAll("-", "")}`},
+        ${orgId},
+        ${projectId},
+        'e2b',
+        'e2b',
+        'ready',
+        ${JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" })}::jsonb,
+        ${JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" })}::jsonb,
+        ${JSON.stringify({ runtime_timeout_seconds: 300 })}::jsonb,
+        ${JSON.stringify({ providers: [] })}::jsonb,
+        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+        ${user.user.id},
+        ${`fake-sbx_${byokId.replaceAll("-", "")}`},
+        'byok',
+        now()
+      )
+    `;
+    const [managedJob] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'sandbox.cost.sync',
+        ${`sandbox:cost:${managedId}:down`},
+        ${JSON.stringify({ job_type: "sandbox.cost.sync", sandbox_id: managedId, final: false })}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    const [byokJob] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'sandbox.cost.sync',
+        ${`sandbox:cost:${byokId}:byok`},
+        ${JSON.stringify({ job_type: "sandbox.cost.sync", sandbox_id: byokId, final: true })}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    const provider = new FakeSandboxProvider("e2b");
+    provider.setCost(300_000n);
+    const workerEnv = loadWorkerEnv({
+      ...process.env,
+      DATABASE_URL: env.DATABASE_URL,
+      SUPABASE_URL: env.SUPABASE_URL,
+      SUPABASE_SECRET_KEY: env.SUPABASE_SECRET_KEY,
+      WORKER_ID: "billing-spend-worker",
+      WORKER_LEASE_MS: "5000",
+      WORKER_POLL_MS: "50",
+      WORKER_BATCH_SIZE: "50",
+      WORKER_MAX_ATTEMPTS: "8",
+      WORKER_BASE_BACKOFF_MS: "10",
+      LOG_LEVEL: "silent",
+      METAL_ENVIRONMENT: "test",
+    });
+    await processUntilJob(
+      String(managedJob!.id),
+      { publish: async () => {} },
+      workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: provider },
+    );
+    await processUntilJob(
+      String(byokJob!.id),
+      { publish: async () => {} },
+      workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: provider },
+    );
+    const [afterCharge] = await database.sql`
+      select balance_microusd from metal.billing_accounts where organization_id = ${orgId}
+    `;
+    expect(Number(afterCharge?.balance_microusd)).toBe(100_000);
+    provider.setCost(150_000n);
+    const [correctionJob] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'sandbox.cost.sync',
+        ${`sandbox:cost:${managedId}:correct`},
+        ${JSON.stringify({ job_type: "sandbox.cost.sync", sandbox_id: managedId, final: false })}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    await processUntilJob(
+      String(correctionJob!.id),
+      { publish: async () => {} },
+      workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: provider },
+    );
+    const [afterCorrection] = await database.sql`
+      select balance_microusd from metal.billing_accounts where organization_id = ${orgId}
+    `;
+    expect(Number(afterCorrection?.balance_microusd)).toBe(250_000);
+
+    const stripeGateway = new FakeStripeGateway();
+    await database.sql`
+      update metal.billing_accounts
+      set stripe_customer_id = ${`cus_${orgId.replaceAll("-", "").slice(0, 16)}`},
+          stripe_payment_method_id = 'pm_test_visa',
+          payment_method_brand = 'visa',
+          payment_method_last4 = '4242'
+      where organization_id = ${orgId}
+    `;
+    await database.sql`
+      insert into metal.auto_topup_policies (
+        organization_id, enabled, status, threshold_microusd, refill_microusd, monthly_cap_microusd, updated_by
+      )
+      values (${orgId}, true, 'active', 300000, 5000000, 50000000, ${user.user.id})
+      on conflict (organization_id) do update set
+        enabled = true,
+        status = 'active',
+        threshold_microusd = 300000,
+        refill_microusd = 5000000,
+        monthly_cap_microusd = 50000000,
+        paused_reason = null,
+        updated_by = ${user.user.id}
+    `;
+    const [topupJob] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'billing.auto_topup.evaluate',
+        ${`billing:auto-topup:${orgId}:test`},
+        ${JSON.stringify({
+          job_type: "billing.auto_topup.evaluate",
+          organization_id: orgId,
+          reason: "test",
+        })}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    await processUntilJob(
+      String(topupJob!.id),
+      { publish: async () => {} },
+      workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: provider },
+      stripeGateway,
+    );
+    const intent = stripeGateway.paymentIntents.at(-1);
+    expect(intent?.status).toBe("succeeded");
+    await handleStripeWebhook(database.db, stripeGateway, {
+      payload: JSON.stringify({
+        id: `evt_${crypto.randomUUID()}`,
+        type: "payment_intent.succeeded",
+        data: { object: intent },
+      }),
+      signature: "test_signature",
+      secret: "whsec_test",
+    });
+    const [afterTopup] = await database.sql`
+      select balance_microusd from metal.billing_accounts where organization_id = ${orgId}
+    `;
+    expect(Number(afterTopup?.balance_microusd)).toBe(5_250_000);
+
+    await database.sql`
+      update metal.auto_topup_policies
+      set monthly_cap_microusd = 5000000,
+          threshold_microusd = 10000000,
+          status = 'active',
+          paused_reason = null
+      where organization_id = ${orgId}
+    `;
+    const [capJob] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'billing.auto_topup.evaluate',
+        ${`billing:auto-topup:${orgId}:cap`},
+        ${JSON.stringify({
+          job_type: "billing.auto_topup.evaluate",
+          organization_id: orgId,
+          reason: "cap",
+        })}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    await processUntilJob(
+      String(capJob!.id),
+      { publish: async () => {} },
+      workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: provider },
+      stripeGateway,
+    );
+    const [capped] = await database.sql`
+      select status, paused_reason from metal.auto_topup_policies where organization_id = ${orgId}
+    `;
+    expect(capped).toMatchObject({ status: "paused", paused_reason: "monthly_cap" });
+    await database.sql`
+      update metal.auto_topup_policies
+      set enabled = true,
+          status = 'active',
+          paused_reason = null,
+          monthly_cap_microusd = 50000000,
+          threshold_microusd = 300000
+      where organization_id = ${orgId}
+    `;
+
+    stripeGateway.behavior.paymentIntentStatus = "requires_action";
+    provider.setCost(5_400_000n);
+    const [zeroJob] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'sandbox.cost.sync',
+        ${`sandbox:cost:${managedId}:zero`},
+        ${JSON.stringify({ job_type: "sandbox.cost.sync", sandbox_id: managedId, final: false })}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    await processUntilJob(
+      String(zeroJob!.id),
+      { publish: async () => {} },
+      workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: provider },
+      stripeGateway,
+    );
+    const [failedTopup] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'billing.auto_topup.evaluate',
+        ${`billing:auto-topup:${orgId}:zero`},
+        ${JSON.stringify({
+          job_type: "billing.auto_topup.evaluate",
+          organization_id: orgId,
+          reason: "zero",
+        })}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    await processUntilJob(
+      String(failedTopup!.id),
+      { publish: async () => {} },
+      workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: provider },
+      stripeGateway,
+    );
+    const [policy] = await database.sql`
+      select status, paused_reason from metal.auto_topup_policies where organization_id = ${orgId}
+    `;
+    expect(policy).toMatchObject({ status: "paused", paused_reason: "requires_action" });
+    const [spendJob] = await database.sql`
+      select id::text as id from metal.outbox_jobs
+      where job_type = 'billing.spend_limit.enforce'
+        and payload->>'organization_id' = ${orgId}
+      order by created_at desc
+      limit 1
+    `;
+    expect(spendJob?.id).toBeTruthy();
+    await processUntilJob(
+      String(spendJob!.id),
+      { publish: async () => {} },
+      workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: provider },
+      stripeGateway,
+    );
+    const [managed] = await database.sql`
+      select status from metal.sandboxes where id = ${managedId}
+    `;
+    const [byok] = await database.sql`
+      select status from metal.sandboxes where id = ${byokId}
+    `;
+    expect(managed?.status).toBe("stopping");
+    expect(byok?.status).toBe("ready");
   });
 });

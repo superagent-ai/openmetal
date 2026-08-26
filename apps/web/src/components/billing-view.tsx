@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
@@ -46,8 +47,6 @@ import { createMetalClient } from "@/lib/metal";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { OrganizationBilling } from "@openmetal/sdk";
-
-const PRESETS = ["10.00", "25.00", "50.00", "100.00", "250.00"];
 
 const dateFormatter = new Intl.DateTimeFormat("en", {
   dateStyle: "medium",
@@ -119,9 +118,17 @@ function SwitchControl({
 
 function cardLabel(billing: OrganizationBilling): string {
   const method = billing.payment_method;
-  if (!method?.last4) return "No saved card";
+  if (!method) return "No saved payment method";
   const brand = method.brand ? method.brand.toUpperCase() : "CARD";
+  if (!method.last4) return brand;
   return `${brand} · ${method.last4}`;
+}
+
+function PaymentMethodIcon({ billing }: { billing: OrganizationBilling }) {
+  if (billing.payment_method?.brand?.toLowerCase() === "link") {
+    return <Image src="/stripe-link-mark.svg" alt="" width={20} height={20} className="size-5" />;
+  }
+  return <HugeiconsIcon icon={CreditCardIcon} strokeWidth={2} className="size-4" />;
 }
 
 function autoTopupCopy(billing: OrganizationBilling): ReactNode {
@@ -464,56 +471,49 @@ export function BillingView({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="flex items-center gap-3 rounded-lg border p-3">
-              <div className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                <HugeiconsIcon icon={CreditCardIcon} strokeWidth={2} className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{cardLabel(billing)}</p>
-                <p className="text-xs text-muted-foreground">
-                  {billing.payment_method
-                    ? "Saved for automatic top-ups"
-                    : "Optional. Stripe will collect a card."}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                aria-label={billing.payment_method ? "Update payment method" : "Add payment method"}
-                disabled={!canManage || busy === "card"}
-                onClick={() => void onAddCard()}
-              >
-                <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-              </Button>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {PRESETS.map((preset) => (
+            <div className="overflow-hidden rounded-lg border border-foreground/20 bg-muted transition-[color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+              <div className="flex items-center gap-3 p-3">
+                <div className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <PaymentMethodIcon billing={billing} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{cardLabel(billing)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {billing.payment_method
+                      ? "Saved for automatic top-ups"
+                      : "Optional. Stripe will collect payment details."}
+                  </p>
+                </div>
                 <Button
-                  key={preset}
                   type="button"
-                  size="sm"
-                  variant={
-                    amount === preset || amount === formatUsd(preset) ? "default" : "outline"
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={
+                    billing.payment_method ? "Update payment method" : "Add payment method"
                   }
-                  onClick={() => setAmount(formatUsd(preset))}
+                  disabled={!canManage || busy === "card"}
+                  onClick={() => void onAddCard()}
                 >
-                  ${formatUsd(preset)}
+                  <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
                 </Button>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <Label htmlFor="credit-amount">Amount</Label>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm text-muted-foreground">$</span>
+              </div>
+              <div className="flex border-t border-foreground/20">
+                <Label
+                  htmlFor="credit-amount"
+                  className="flex items-center border-r border-foreground/20 px-4 text-muted-foreground"
+                >
+                  Amount
+                </Label>
                 <Input
                   id="credit-amount"
                   inputMode="decimal"
                   value={amount}
-                  onChange={(event) => setAmount(event.target.value)}
-                  className="w-24 text-right tabular-nums"
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (/^\d*(?:\.\d{0,2})?$/.test(next)) setAmount(next);
+                  }}
+                  className="h-10 rounded-none border-0 bg-transparent px-4 text-right text-base tabular-nums shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+                  pattern="\d*(?:\.\d{0,2})?"
                   required
                 />
               </div>
@@ -545,7 +545,6 @@ export function BillingView({
             >
               {busy === "checkout" ? "Redirecting" : "Purchase"}
             </Button>
-            <p className="text-center text-xs text-muted-foreground">Org: {organizationName}</p>
           </form>
         </DialogContent>
       </Dialog>
@@ -573,7 +572,7 @@ export function BillingView({
 
             <div className="flex items-center gap-3 rounded-lg border p-3">
               <div className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                <HugeiconsIcon icon={CreditCardIcon} strokeWidth={2} className="size-4" />
+                <PaymentMethodIcon billing={billing} />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{cardLabel(billing)}</p>

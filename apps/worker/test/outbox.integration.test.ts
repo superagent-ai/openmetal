@@ -851,6 +851,10 @@ describe("worker outbox", () => {
     );
     const intent = stripeGateway.paymentIntents.at(-1);
     expect(intent?.status).toBe("succeeded");
+    const [afterTopup] = await database.sql`
+      select balance_microusd from metal.billing_accounts where organization_id = ${orgId}
+    `;
+    expect(Number(afterTopup?.balance_microusd)).toBe(5_250_000);
     await handleStripeWebhook(database.db, stripeGateway, {
       payload: JSON.stringify({
         id: `evt_${crypto.randomUUID()}`,
@@ -860,10 +864,10 @@ describe("worker outbox", () => {
       signature: "test_signature",
       secret: "whsec_test",
     });
-    const [afterTopup] = await database.sql`
+    const [afterWebhook] = await database.sql`
       select balance_microusd from metal.billing_accounts where organization_id = ${orgId}
     `;
-    expect(Number(afterTopup?.balance_microusd)).toBe(5_250_000);
+    expect(Number(afterWebhook?.balance_microusd)).toBe(5_250_000);
 
     await database.sql`
       update metal.auto_topup_policies
@@ -979,5 +983,43 @@ describe("worker outbox", () => {
     `;
     expect(managed?.status).toBe("stopping");
     expect(byok?.status).toBe("ready");
+  });
+
+  it("fails automatic top up jobs when Stripe is not configured", async () => {
+    const orgId = crypto.randomUUID();
+    const [job] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+      values (
+        'billing.auto_topup.evaluate',
+        ${`billing:auto-topup:${orgId}:unconfigured`},
+        ${JSON.stringify({
+          job_type: "billing.auto_topup.evaluate",
+          organization_id: orgId,
+          reason: "unconfigured",
+        })}::jsonb,
+        'pending'
+      )
+      returning id
+    `;
+    const workerEnv = loadWorkerEnv({
+      ...process.env,
+      DATABASE_URL: env.DATABASE_URL,
+      SUPABASE_URL: env.SUPABASE_URL,
+      SUPABASE_SECRET_KEY: env.SUPABASE_SECRET_KEY,
+      WORKER_ID: "billing-unconfigured-stripe-worker",
+      WORKER_LEASE_MS: "5000",
+      WORKER_POLL_MS: "50",
+      WORKER_BATCH_SIZE: "10",
+      WORKER_MAX_ATTEMPTS: "8",
+      WORKER_BASE_BACKOFF_MS: "10",
+      LOG_LEVEL: "silent",
+      METAL_ENVIRONMENT: "test",
+    });
+    await processOnce(database.db, { publish: async () => {} }, workerEnv, {}, null);
+    const [row] = await database.sql`
+      select status, last_error from metal.outbox_jobs where id = ${job!.id}
+    `;
+    expect(row?.status).toBe("pending");
+    expect(String(row?.last_error)).toMatch(/stripe is not configured/i);
   });
 });

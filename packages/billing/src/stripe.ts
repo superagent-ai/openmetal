@@ -100,53 +100,59 @@ export function createStripeGateway(secretKey: string): StripeGateway {
 
   return {
     async createCustomer(input) {
-      const customer = await stripe.customers.create({
-        name: input.name,
-        metadata: { organization_id: input.organizationId },
-      });
+      const customer = await stripe.customers.create(
+        {
+          name: input.name,
+          metadata: { organization_id: input.organizationId },
+        },
+        { idempotencyKey: `metal_customer:${input.organizationId}` },
+      );
       return { id: customer.id };
     },
     async createCheckoutSession(input) {
-      const session = await stripe.checkout.sessions.create({
-        mode: "payment",
-        customer: input.customerId,
-        success_url: input.successUrl,
-        cancel_url: input.cancelUrl,
-        client_reference_id: input.purchaseId,
-        metadata: {
-          organization_id: input.organizationId,
-          purchase_id: input.purchaseId,
-          credit_microusd: input.creditMicrousd.toString(),
-          fee_microusd: input.feeMicrousd.toString(),
-          total_microusd: input.totalMicrousd.toString(),
-        },
-        payment_intent_data: {
-          setup_future_usage: "off_session",
+      const session = await stripe.checkout.sessions.create(
+        {
+          mode: "payment",
+          customer: input.customerId,
+          success_url: input.successUrl,
+          cancel_url: input.cancelUrl,
+          client_reference_id: input.purchaseId,
           metadata: {
             organization_id: input.organizationId,
             purchase_id: input.purchaseId,
+            credit_microusd: input.creditMicrousd.toString(),
+            fee_microusd: input.feeMicrousd.toString(),
+            total_microusd: input.totalMicrousd.toString(),
           },
-        },
-        line_items: [
-          {
-            quantity: 1,
-            price_data: {
-              currency: "usd",
-              unit_amount: Number(input.creditMicrousd / 10_000n),
-              product_data: { name: "Metal credits" },
+          payment_intent_data: {
+            setup_future_usage: "off_session",
+            metadata: {
+              organization_id: input.organizationId,
+              purchase_id: input.purchaseId,
             },
           },
-          {
-            quantity: 1,
-            price_data: {
-              currency: "usd",
-              unit_amount: Number(input.feeMicrousd / 10_000n),
-              product_data: { name: "Platform fee" },
+          line_items: [
+            {
+              quantity: 1,
+              price_data: {
+                currency: "usd",
+                unit_amount: Number(input.creditMicrousd / 10_000n),
+                product_data: { name: "Metal credits" },
+              },
             },
-          },
-        ],
-        integration_identifier: `metal_credits_${randomLetterSuffix(8)}`,
-      } as Parameters<Stripe["checkout"]["sessions"]["create"]>[0]);
+            {
+              quantity: 1,
+              price_data: {
+                currency: "usd",
+                unit_amount: Number(input.feeMicrousd / 10_000n),
+                product_data: { name: "Platform fee" },
+              },
+            },
+          ],
+          integration_identifier: `metal_credits_${randomLetterSuffix(8)}`,
+        } as Parameters<Stripe["checkout"]["sessions"]["create"]>[0],
+        { idempotencyKey: `metal_checkout:${input.purchaseId}` },
+      );
       if (!session.url) {
         throw new Error("stripe checkout session is missing a url");
       }

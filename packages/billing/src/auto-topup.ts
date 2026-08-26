@@ -1,7 +1,13 @@
 import { and, eq, gte, sql } from "drizzle-orm";
-import { autoTopupAttempts, autoTopupPolicies, creditPurchases, type MetalDb } from "@openmetal/db";
+import {
+  autoTopupAttempts,
+  autoTopupPolicies,
+  creditPurchases,
+  withTransaction,
+  type MetalDb,
+} from "@openmetal/db";
 import { ensureBillingAccount } from "./accounts.js";
-import { getPricingVersionId, markPaymentFailed } from "./purchases.js";
+import { fulfillPaymentIntent, getPricingVersionId, markPaymentFailed } from "./purchases.js";
 import { SYSTEM_ACTOR_ID } from "./ledger.js";
 import {
   MICROUSD_PER_CENT,
@@ -66,27 +72,34 @@ export async function updateAutoTopupPolicy(
   return { policy, account };
 }
 
-export async function evaluateAutoTopup(
-  tx: MetalDb,
-  stripe: StripeGateway,
-  organizationId: string,
-): Promise<{ started: boolean; reason?: string }> {
+type PreparedAutoTopup =
+  | { kind: "skip"; reason: string }
+  | {
+      kind: "charge";
+      organizationId: string;
+      customerId: string;
+      paymentMethodId: string;
+      purchaseId: string;
+      attemptId: string;
+      creditMicrousd: bigint;
+      feeMicrousd: bigint;
+      totalMicrousd: bigint;
+    };
+
+async function prepareAutoTopup(tx: MetalDb, organizationId: string): Promise<PreparedAutoTopup> {
   const account = await ensureBillingAccount(tx, organizationId);
   const [policy] = await tx
     .select()
     .from(autoTopupPolicies)
     .where(eq(autoTopupPolicies.organizationId, organizationId));
   if (!policy?.enabled || policy.status !== "active") {
-    return { started: false, reason: "inactive" };
-  }
-  if (toMicrousd(account.balanceMicrousd) > toMicrousd(policy.thresholdMicrousd)) {
-    return { started: false, reason: "above_threshold" };
+    return { kind: "skip", reason: "inactive" };
   }
   if (!account.stripeCustomerId || !account.stripePaymentMethodId) {
-    return { started: false, reason: "missing_payment_method" };
+    return { kind: "skip", reason: "missing_payment_method" };
   }
   const [pending] = await tx
-    .select({ id: autoTopupAttempts.id })
+    .select()
     .from(autoTopupAttempts)
     .where(
       and(
@@ -95,7 +108,20 @@ export async function evaluateAutoTopup(
       ),
     );
   if (pending) {
-    return { started: false, reason: "pending_attempt" };
+    return {
+      kind: "charge",
+      organizationId,
+      customerId: account.stripeCustomerId,
+      paymentMethodId: account.stripePaymentMethodId,
+      purchaseId: pending.purchaseId,
+      attemptId: pending.id,
+      creditMicrousd: toMicrousd(pending.creditMicrousd),
+      feeMicrousd: toMicrousd(pending.feeMicrousd),
+      totalMicrousd: toMicrousd(pending.totalMicrousd),
+    };
+  }
+  if (toMicrousd(account.balanceMicrousd) > toMicrousd(policy.thresholdMicrousd)) {
+    return { kind: "skip", reason: "above_threshold" };
   }
   const windowStart = utcMonthStart();
   const [{ total } = { total: 0n }] = await tx
@@ -117,7 +143,7 @@ export async function evaluateAutoTopup(
       .update(autoTopupPolicies)
       .set({ status: "paused", pausedReason: "monthly_cap", updatedAt: new Date() })
       .where(eq(autoTopupPolicies.organizationId, organizationId));
-    return { started: false, reason: "monthly_cap" };
+    return { kind: "skip", reason: "monthly_cap" };
   }
   const quote = quoteCreditPurchase(toMicrousd(policy.refillMicrousd));
   const pricingVersionId = await getPricingVersionId(tx, PURCHASE_FEE_CODE);
@@ -153,33 +179,62 @@ export async function evaluateAutoTopup(
   if (!attempt) {
     throw new Error("failed to create automatic top up attempt");
   }
-  const intent = await stripe.createOffSessionPaymentIntent({
+  return {
+    kind: "charge",
+    organizationId,
     customerId: account.stripeCustomerId,
     paymentMethodId: account.stripePaymentMethodId,
-    organizationId,
     purchaseId: purchase.id,
     attemptId: attempt.id,
     creditMicrousd: quote.credit_microusd,
     feeMicrousd: quote.fee_microusd,
-    totalCents: Number(quote.total_microusd / MICROUSD_PER_CENT),
-  });
-  await tx
-    .update(creditPurchases)
-    .set({ stripePaymentIntentId: intent.id })
-    .where(eq(creditPurchases.id, purchase.id));
-  await tx
-    .update(autoTopupAttempts)
-    .set({ stripePaymentIntentId: intent.id })
-    .where(eq(autoTopupAttempts.id, attempt.id));
-  if (intent.status === "requires_action" || intent.status === "requires_payment_method") {
-    await markPaymentFailed(tx, {
-      purchaseId: purchase.id,
-      attemptId: attempt.id,
-      paymentIntentId: intent.id,
-      requiresAction: intent.status === "requires_action",
-      errorCode: intent.status,
-    });
-    return { started: false, reason: intent.status };
+    totalMicrousd: quote.total_microusd,
+  };
+}
+
+export async function evaluateAutoTopup(
+  db: MetalDb,
+  stripe: StripeGateway,
+  organizationId: string,
+): Promise<{ started: boolean; reason?: string }> {
+  const prepared = await withTransaction(db, (tx) => prepareAutoTopup(tx, organizationId));
+  if (prepared.kind === "skip") {
+    return { started: false, reason: prepared.reason };
   }
-  return { started: true };
+
+  const intent = await stripe.createOffSessionPaymentIntent({
+    customerId: prepared.customerId,
+    paymentMethodId: prepared.paymentMethodId,
+    organizationId: prepared.organizationId,
+    purchaseId: prepared.purchaseId,
+    attemptId: prepared.attemptId,
+    creditMicrousd: prepared.creditMicrousd,
+    feeMicrousd: prepared.feeMicrousd,
+    totalCents: Number(prepared.totalMicrousd / MICROUSD_PER_CENT),
+  });
+
+  return withTransaction(db, async (tx) => {
+    await tx
+      .update(creditPurchases)
+      .set({ stripePaymentIntentId: intent.id })
+      .where(eq(creditPurchases.id, prepared.purchaseId));
+    await tx
+      .update(autoTopupAttempts)
+      .set({ stripePaymentIntentId: intent.id })
+      .where(eq(autoTopupAttempts.id, prepared.attemptId));
+    if (intent.status === "requires_action" || intent.status === "requires_payment_method") {
+      await markPaymentFailed(tx, {
+        purchaseId: prepared.purchaseId,
+        attemptId: prepared.attemptId,
+        paymentIntentId: intent.id,
+        requiresAction: intent.status === "requires_action",
+        errorCode: intent.status,
+      });
+      return { started: false, reason: intent.status };
+    }
+    if (intent.status === "succeeded") {
+      await fulfillPaymentIntent(tx, stripe, intent);
+    }
+    return { started: true };
+  });
 }

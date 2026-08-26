@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import {
   autoTopupAttempts,
   autoTopupPolicies,
@@ -9,6 +9,7 @@ import {
   outboxJobs,
   pricingVersions,
   stripeEvents,
+  withTransaction,
   type MetalDb,
 } from "@openmetal/db";
 import { ensureBillingAccount, getOrganizationName, getOrganizationSlug } from "./accounts.js";
@@ -79,6 +80,46 @@ export async function grantCredits(
   return { purchase, balanceMicrousd: posted.balanceMicrousd };
 }
 
+async function ensureStripeCustomer(
+  db: MetalDb,
+  stripe: StripeGateway,
+  organizationId: string,
+): Promise<{ customerId: string; organizationName: string; organizationSlug: string }> {
+  const snapshot = await withTransaction(db, async (tx) => {
+    const account = await ensureBillingAccount(tx, organizationId);
+    return {
+      customerId: account.stripeCustomerId,
+      organizationName: await getOrganizationName(tx, organizationId),
+      organizationSlug: await getOrganizationSlug(tx, organizationId),
+    };
+  });
+  if (snapshot.customerId) {
+    return { ...snapshot, customerId: snapshot.customerId };
+  }
+
+  const customer = await stripe.createCustomer({
+    organizationId,
+    name: snapshot.organizationName,
+  });
+  const customerId = await withTransaction(db, async (tx) => {
+    const account = await ensureBillingAccount(tx, organizationId);
+    if (account.stripeCustomerId) {
+      return account.stripeCustomerId;
+    }
+    await tx
+      .update(billingAccounts)
+      .set({ stripeCustomerId: customer.id, updatedAt: new Date() })
+      .where(
+        and(
+          eq(billingAccounts.organizationId, organizationId),
+          isNull(billingAccounts.stripeCustomerId),
+        ),
+      );
+    return customer.id;
+  });
+  return { ...snapshot, customerId };
+}
+
 export async function saveCustomerPaymentMethod(
   tx: MetalDb,
   stripe: StripeGateway,
@@ -101,7 +142,7 @@ export async function saveCustomerPaymentMethod(
 }
 
 export async function createCheckout(
-  tx: MetalDb,
+  db: MetalDb,
   stripe: StripeGateway,
   input: {
     organizationId: string;
@@ -111,39 +152,33 @@ export async function createCheckout(
   },
 ) {
   const quote = quoteCreditPurchase(parseUsdToMicrousd(input.amountUsd));
-  const account = await ensureBillingAccount(tx, input.organizationId);
-  const organizationName = await getOrganizationName(tx, input.organizationId);
-  const organizationSlug = await getOrganizationSlug(tx, input.organizationId);
-  let customerId = account.stripeCustomerId;
-  if (!customerId) {
-    const customer = await stripe.createCustomer({
-      organizationId: input.organizationId,
-      name: organizationName,
-    });
-    customerId = customer.id;
-    await tx
-      .update(billingAccounts)
-      .set({ stripeCustomerId: customerId, updatedAt: new Date() })
-      .where(eq(billingAccounts.organizationId, input.organizationId));
-  }
-  const pricingVersionId = await getPricingVersionId(tx, PURCHASE_FEE_CODE);
-  const [purchase] = await tx
-    .insert(creditPurchases)
-    .values({
-      organizationId: input.organizationId,
-      source: "checkout",
-      status: "pending",
-      creditMicrousd: quote.credit_microusd,
-      feeMicrousd: quote.fee_microusd,
-      totalMicrousd: quote.total_microusd,
-      pricingVersionId,
-      stripeCustomerId: customerId,
-      actorId: input.actorId,
-    })
-    .returning();
-  if (!purchase) {
-    throw new Error("failed to create credit purchase");
-  }
+  const { customerId, organizationSlug } = await ensureStripeCustomer(
+    db,
+    stripe,
+    input.organizationId,
+  );
+  const purchase = await withTransaction(db, async (tx) => {
+    await ensureBillingAccount(tx, input.organizationId);
+    const pricingVersionId = await getPricingVersionId(tx, PURCHASE_FEE_CODE);
+    const [row] = await tx
+      .insert(creditPurchases)
+      .values({
+        organizationId: input.organizationId,
+        source: "checkout",
+        status: "pending",
+        creditMicrousd: quote.credit_microusd,
+        feeMicrousd: quote.fee_microusd,
+        totalMicrousd: quote.total_microusd,
+        pricingVersionId,
+        stripeCustomerId: customerId,
+        actorId: input.actorId,
+      })
+      .returning();
+    if (!row) {
+      throw new Error("failed to create credit purchase");
+    }
+    return row;
+  });
   const origin = input.siteUrl.replace(/\/$/, "");
   const session = await stripe.createCheckoutSession({
     customerId,
@@ -156,10 +191,12 @@ export async function createCheckout(
     successUrl: `${origin}/dashboard/${organizationSlug}/billing?checkout=success`,
     cancelUrl: `${origin}/dashboard/${organizationSlug}/billing?checkout=cancel`,
   });
-  await tx
-    .update(creditPurchases)
-    .set({ stripeCheckoutSessionId: session.id })
-    .where(eq(creditPurchases.id, purchase.id));
+  await withTransaction(db, async (tx) => {
+    await tx
+      .update(creditPurchases)
+      .set({ stripeCheckoutSessionId: session.id })
+      .where(eq(creditPurchases.id, purchase.id));
+  });
   return {
     checkout_url: session.url,
     purchase_id: purchase.id,
@@ -170,25 +207,15 @@ export async function createCheckout(
 }
 
 export async function createPaymentMethodSetup(
-  tx: MetalDb,
+  db: MetalDb,
   stripe: StripeGateway,
   input: { organizationId: string; siteUrl: string },
 ) {
-  const account = await ensureBillingAccount(tx, input.organizationId);
-  const organizationName = await getOrganizationName(tx, input.organizationId);
-  const organizationSlug = await getOrganizationSlug(tx, input.organizationId);
-  let customerId = account.stripeCustomerId;
-  if (!customerId) {
-    const customer = await stripe.createCustomer({
-      organizationId: input.organizationId,
-      name: organizationName,
-    });
-    customerId = customer.id;
-    await tx
-      .update(billingAccounts)
-      .set({ stripeCustomerId: customerId, updatedAt: new Date() })
-      .where(eq(billingAccounts.organizationId, input.organizationId));
-  }
+  const { customerId, organizationSlug } = await ensureStripeCustomer(
+    db,
+    stripe,
+    input.organizationId,
+  );
   const origin = input.siteUrl.replace(/\/$/, "");
   return stripe.createSetupCheckoutSession({
     customerId,

@@ -516,8 +516,8 @@ export async function buildApp(
         key,
         body: request.body,
       },
-      async (tx) => {
-        const body = await startOrganizationCheckout(tx, stripe, {
+      async (database) => {
+        const body = await startOrganizationCheckout(database, stripe, {
           userId: principal.userId,
           organizationId,
           body: request.body,
@@ -525,6 +525,7 @@ export async function buildApp(
         });
         return { status: 200, body };
       },
+      { holdTransaction: false },
     );
     return result.body;
   });

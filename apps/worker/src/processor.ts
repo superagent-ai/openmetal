@@ -852,10 +852,10 @@ export async function processOnce(
       if (payload.job_type === "realtime.broadcast") {
         await publisher.publish(payload.topic, payload.event.type, payload.event);
       } else if (payload.job_type === "billing.auto_topup.evaluate") {
-        const organizationId = payload.organization_id;
-        if (stripe) {
-          await withTransaction(db, (tx) => evaluateAutoTopup(tx, stripe, organizationId));
+        if (!stripe) {
+          throw new Error("stripe is not configured for automatic top ups");
         }
+        await evaluateAutoTopup(db, stripe, payload.organization_id);
       } else if (payload.job_type === "billing.spend_limit.enforce") {
         const organizationId = payload.organization_id;
         await withTransaction(db, (tx) => enforceSpendLimit(tx, organizationId));

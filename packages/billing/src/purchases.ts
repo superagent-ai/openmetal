@@ -342,7 +342,7 @@ export async function fulfillCheckoutPayment(
     session.customerId ?? purchase.stripeCustomerId ?? "",
     session.paymentMethodId,
   );
-  return { credited: true, organizationId: purchase.organizationId };
+  return { credited: true, organizationId: purchase.organizationId, purchaseId: purchase.id };
 }
 
 export async function fulfillPaymentIntent(
@@ -409,7 +409,7 @@ export async function fulfillPaymentIntent(
         ),
       );
   }
-  return { credited: true, organizationId: purchase.organizationId };
+  return { credited: true, organizationId: purchase.organizationId, purchaseId: purchase.id };
 }
 
 export async function markPaymentFailed(
@@ -556,4 +556,62 @@ export async function getBillingSummary(tx: MetalDb, organizationId: string) {
     entries,
     autoTopupMonthCreditMicrousd: toMicrousd(total),
   };
+}
+
+export async function persistPurchaseDocuments(
+  db: MetalDb,
+  stripe: StripeGateway,
+  purchaseId: string,
+) {
+  const purchase = await withTransaction(db, async (tx) =>
+    tx
+      .select()
+      .from(creditPurchases)
+      .where(eq(creditPurchases.id, purchaseId))
+      .then((rows) => rows[0]),
+  );
+  if (!purchase || purchase.status !== "paid") return false;
+  if (purchase.stripeReceiptUrl) return false;
+  if (!purchase.stripePaymentIntentId && !purchase.stripeCheckoutSessionId) return false;
+  try {
+    const documents = await stripe.retrievePurchaseDocuments({
+      paymentIntentId: purchase.stripePaymentIntentId,
+      checkoutSessionId: purchase.stripeCheckoutSessionId,
+    });
+    if (!documents.receiptUrl && !documents.invoiceUrl) return false;
+    await withTransaction(db, async (tx) => {
+      await tx
+        .update(creditPurchases)
+        .set({
+          stripeReceiptUrl: documents.receiptUrl ?? purchase.stripeReceiptUrl,
+          stripeInvoiceUrl: documents.invoiceUrl ?? purchase.stripeInvoiceUrl,
+        })
+        .where(eq(creditPurchases.id, purchase.id));
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function persistMissingPurchaseDocuments(
+  db: MetalDb,
+  stripe: StripeGateway,
+  purchases: Array<{
+    id: string;
+    status: string;
+    stripeReceiptUrl: string | null;
+    stripeInvoiceUrl: string | null;
+    stripePaymentIntentId: string | null;
+    stripeCheckoutSessionId: string | null;
+  }>,
+) {
+  let updated = false;
+  for (const purchase of purchases) {
+    if (purchase.status !== "paid") continue;
+    if (purchase.stripeReceiptUrl) continue;
+    if (!purchase.stripePaymentIntentId && !purchase.stripeCheckoutSessionId) continue;
+    updated = (await persistPurchaseDocuments(db, stripe, purchase.id)) || updated;
+  }
+  return updated;
 }

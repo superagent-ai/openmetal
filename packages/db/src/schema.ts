@@ -543,6 +543,8 @@ export const creditPurchases = metalSchema.table(
     stripeCheckoutSessionId: text("stripe_checkout_session_id"),
     stripePaymentIntentId: text("stripe_payment_intent_id"),
     stripeCustomerId: text("stripe_customer_id"),
+    stripeReceiptUrl: text("stripe_receipt_url"),
+    stripeInvoiceUrl: text("stripe_invoice_url"),
     actorId: uuid("actor_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     paidAt: timestamp("paid_at", { withTimezone: true, mode: "date" }),

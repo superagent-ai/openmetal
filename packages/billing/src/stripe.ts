@@ -71,6 +71,11 @@ export type StripeWebhookEvent = {
   data: { object: Record<string, unknown> };
 };
 
+export type StripePurchaseDocuments = {
+  receiptUrl: string | null;
+  invoiceUrl: string | null;
+};
+
 export type StripeGateway = {
   createCustomer(input: StripeCustomerInput): Promise<{ id: string }>;
   createCheckoutSession(input: StripeCheckoutInput): Promise<{ id: string; url: string }>;
@@ -79,6 +84,10 @@ export type StripeGateway = {
     input: StripePaymentIntentInput,
   ): Promise<StripePaymentIntentSnapshot>;
   retrievePaymentMethod(paymentMethodId: string): Promise<StripePaymentMethodSnapshot>;
+  retrievePurchaseDocuments(input: {
+    paymentIntentId?: string | null;
+    checkoutSessionId?: string | null;
+  }): Promise<StripePurchaseDocuments>;
   constructWebhookEvent(
     payload: string | Buffer,
     signature: string,
@@ -131,6 +140,7 @@ export function createStripeGateway(secretKey: string): StripeGateway {
               purchase_id: input.purchaseId,
             },
           },
+          invoice_creation: { enabled: true },
           line_items: [
             {
               quantity: 1,
@@ -212,6 +222,36 @@ export function createStripeGateway(secretKey: string): StripeGateway {
         brand: method.card?.brand ?? method.type ?? null,
         last4: method.card?.last4 ?? null,
       };
+    },
+    async retrievePurchaseDocuments(input) {
+      let receiptUrl: string | null = null;
+      let invoiceUrl: string | null = null;
+      if (input.checkoutSessionId) {
+        const session = await stripe.checkout.sessions.retrieve(input.checkoutSessionId, {
+          expand: ["invoice", "payment_intent.latest_charge"],
+        });
+        const invoice = session.invoice;
+        if (invoice && typeof invoice !== "string") {
+          invoiceUrl = invoice.hosted_invoice_url ?? invoice.invoice_pdf ?? null;
+        }
+        const paymentIntent = session.payment_intent;
+        if (paymentIntent && typeof paymentIntent !== "string") {
+          const charge = paymentIntent.latest_charge;
+          if (charge && typeof charge !== "string") {
+            receiptUrl = charge.receipt_url ?? null;
+          }
+        }
+      }
+      if ((!receiptUrl || !invoiceUrl) && input.paymentIntentId) {
+        const intent = await stripe.paymentIntents.retrieve(input.paymentIntentId, {
+          expand: ["latest_charge"],
+        });
+        const charge = intent.latest_charge;
+        if (!receiptUrl && charge && typeof charge !== "string") {
+          receiptUrl = charge.receipt_url ?? null;
+        }
+      }
+      return { receiptUrl, invoiceUrl };
     },
     constructWebhookEvent(payload, signature, secret) {
       const event = stripe.webhooks.constructEvent(payload, signature, secret);

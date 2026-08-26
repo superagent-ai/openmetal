@@ -488,7 +488,7 @@ export async function buildApp(
     const organizationId = OpaqueIdSchema.parse(
       (request.params as { organization_id: string }).organization_id,
     );
-    return readOrganizationBilling(db.db, { userId: principal.userId, organizationId });
+    return readOrganizationBilling(db.db, stripe, { userId: principal.userId, organizationId });
   });
 
   app.get(`/${API_VERSION}/organizations/:organization_id/billing/quote`, async (request) => {

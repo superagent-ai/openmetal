@@ -6,6 +6,7 @@ import {
   handleStripeWebhook,
   MoneyError,
   parseUsdToMicrousd,
+  persistMissingPurchaseDocuments,
   quoteCreditPurchase,
   updateAutoTopupPolicy,
   type StripeGateway,
@@ -56,6 +57,8 @@ export function serializeBillingSummary(
       credit_usd: formatMicrousdUsd(purchase.creditMicrousd),
       fee_usd: formatMicrousdUsd(purchase.feeMicrousd),
       total_usd: formatMicrousdUsd(purchase.totalMicrousd),
+      receipt_url: purchase.stripeReceiptUrl,
+      invoice_url: purchase.stripeInvoiceUrl,
       created_at: purchase.createdAt.toISOString(),
       paid_at: purchase.paidAt?.toISOString() ?? null,
     })),
@@ -72,10 +75,17 @@ export function serializeBillingSummary(
 
 export async function readOrganizationBilling(
   db: MetalDb,
+  stripe: StripeGateway | null,
   input: { userId: string; organizationId: string },
 ) {
   const membership = await requireMembership(db, input.userId, input.organizationId);
-  const summary = await getBillingSummary(db, input.organizationId);
+  let summary = await getBillingSummary(db, input.organizationId);
+  if (stripe) {
+    const updated = await persistMissingPurchaseDocuments(db, stripe, summary.purchases);
+    if (updated) {
+      summary = await getBillingSummary(db, input.organizationId);
+    }
+  }
   return serializeBillingSummary(
     summary,
     membership.role === "owner" || membership.role === "admin",

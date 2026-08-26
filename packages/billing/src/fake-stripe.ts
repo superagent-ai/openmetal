@@ -78,6 +78,17 @@ export class FakeStripeGateway implements StripeGateway {
     );
   }
 
+  async retrievePurchaseDocuments(input: {
+    paymentIntentId?: string | null;
+    checkoutSessionId?: string | null;
+  }) {
+    const id = input.paymentIntentId ?? input.checkoutSessionId ?? "unknown";
+    return {
+      receiptUrl: `https://pay.stripe.test/receipts/${id}`,
+      invoiceUrl: `https://invoice.stripe.test/${id}`,
+    };
+  }
+
   constructWebhookEvent(
     payload: string | Buffer,
     signature: string,

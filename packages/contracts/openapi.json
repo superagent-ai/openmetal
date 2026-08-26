@@ -4029,6 +4029,28 @@
                 "total_usd": {
                   "type": "string"
                 },
+                "receipt_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "invoice_url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time"
@@ -4052,6 +4074,8 @@
                 "credit_usd",
                 "fee_usd",
                 "total_usd",
+                "receipt_url",
+                "invoice_url",
                 "created_at",
                 "paid_at"
               ],

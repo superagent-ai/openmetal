@@ -80,6 +80,8 @@ export const BillingPurchaseSchema = z.object({
   credit_usd: z.string(),
   fee_usd: z.string(),
   total_usd: z.string(),
+  receipt_url: z.url().nullable(),
+  invoice_url: z.url().nullable(),
   created_at: IsoDateTimeSchema,
   paid_at: IsoDateTimeSchema.nullable(),
 });

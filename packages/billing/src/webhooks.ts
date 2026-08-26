@@ -3,6 +3,7 @@ import {
   fulfillCheckoutPayment,
   fulfillPaymentIntent,
   markPaymentFailed,
+  persistPurchaseDocuments,
   recordStripeEvent,
   saveCustomerPaymentMethod,
 } from "./purchases.js";
@@ -14,10 +15,10 @@ export async function handleStripeWebhook(
   input: { payload: string | Buffer; signature: string; secret: string },
 ) {
   const event = stripe.constructWebhookEvent(input.payload, input.signature, input.secret);
-  return withTransaction(db, async (tx) => {
+  const result = await withTransaction(db, async (tx) => {
     const inserted = await recordStripeEvent(tx, event.id, event.type, event.data.object);
     if (!inserted) {
-      return { duplicate: true, type: event.type };
+      return { duplicate: true, type: event.type, purchaseId: undefined as string | undefined };
     }
     if (
       event.type === "checkout.session.completed" ||
@@ -34,17 +35,32 @@ export async function handleStripeWebhook(
             session.paymentMethodId,
           );
         }
-        return { duplicate: false, type: event.type, setup: true };
+        return { duplicate: false, type: event.type, purchaseId: undefined };
       }
-      await fulfillCheckoutPayment(tx, stripe, session);
-    } else if (event.type === "checkout.session.async_payment_failed") {
+      const fulfilled = await fulfillCheckoutPayment(tx, stripe, session);
+      return {
+        duplicate: false,
+        type: event.type,
+        purchaseId: "purchaseId" in fulfilled ? fulfilled.purchaseId : undefined,
+      };
+    }
+    if (event.type === "checkout.session.async_payment_failed") {
       const session = parseCheckoutSession(event.data.object);
       await markPaymentFailed(tx, {
         purchaseId: session.metadata.purchase_id,
         paymentIntentId: session.paymentIntentId ?? undefined,
       });
     } else if (event.type === "payment_intent.succeeded") {
-      await fulfillPaymentIntent(tx, stripe, parsePaymentIntent(event.data.object));
+      const fulfilled = await fulfillPaymentIntent(
+        tx,
+        stripe,
+        parsePaymentIntent(event.data.object),
+      );
+      return {
+        duplicate: false,
+        type: event.type,
+        purchaseId: "purchaseId" in fulfilled ? fulfilled.purchaseId : undefined,
+      };
     } else if (
       event.type === "payment_intent.payment_failed" ||
       event.type === "payment_intent.canceled"
@@ -57,6 +73,10 @@ export async function handleStripeWebhook(
         requiresAction: intent.status === "requires_action",
       });
     }
-    return { duplicate: false, type: event.type };
+    return { duplicate: false, type: event.type, purchaseId: undefined };
   });
+  if (!result.duplicate && result.purchaseId) {
+    await persistPurchaseDocuments(db, stripe, result.purchaseId);
+  }
+  return result;
 }

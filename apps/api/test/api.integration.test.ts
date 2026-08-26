@@ -1183,6 +1183,16 @@ describe("metal api integration", () => {
     const billed = await ownerClient.billing.get(organization.id);
     expect(billed.balance_usd).toBe("100.00");
     expect(billed.payment_method).toMatchObject({ last4: "4242" });
+    expect(billed.purchases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "paid",
+          credit_usd: "100.00",
+          receipt_url: expect.stringContaining("https://pay.stripe.test/receipts/"),
+          invoice_url: expect.stringContaining("https://invoice.stripe.test/"),
+        }),
+      ]),
+    );
 
     const enabled = await ownerClient.billing.updateAutoTopup(organization.id, {
       enabled: true,

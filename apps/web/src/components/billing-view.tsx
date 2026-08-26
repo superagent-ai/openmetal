@@ -5,7 +5,9 @@ import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   Add01Icon,
   CreditCardIcon,
+  File01Icon,
   InformationCircleIcon,
+  Invoice01Icon,
   Refresh01Icon,
   Settings04Icon,
 } from "@hugeicons/core-free-icons";
@@ -176,6 +178,10 @@ export function BillingView({
   const [autoOpen, setAutoOpen] = useState(false);
   const quote = useMemo(() => feeFor(amount), [amount]);
   const canManage = billing.can_manage;
+  const transactions = useMemo(
+    () => billing.purchases.filter((purchase) => purchase.status === "paid"),
+    [billing.purchases],
+  );
 
   async function client() {
     const supabase = createClient();
@@ -268,7 +274,12 @@ export function BillingView({
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-balance">Billing</h1>
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-balance">
+            Organization Credits
+          </h1>
+          <p className="text-sm text-muted-foreground">Org Account: {organizationName}</p>
+        </div>
         <Button
           type="button"
           variant="outline"
@@ -378,32 +389,59 @@ export function BillingView({
       </div>
 
       <div className="space-y-3">
-        <h2 className="text-base font-medium">Recent activity</h2>
+        <h2 className="text-base font-medium">Recent transactions</h2>
         <div className="overflow-hidden rounded-xl border">
           <Table>
             <TableHeader className="bg-muted">
               <TableRow>
                 <TableHead className="pl-4">Date</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead className="pr-4 text-right">Amount</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead className="pr-4 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {billing.ledger.length === 0 ? (
+              {transactions.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
                   <TableCell colSpan={3} className="h-32 text-center text-muted-foreground">
                     No transactions yet.
                   </TableCell>
                 </TableRow>
               ) : (
-                billing.ledger.map((entry) => (
-                  <TableRow key={entry.id}>
+                transactions.map((purchase) => (
+                  <TableRow key={purchase.id}>
                     <TableCell className="pl-4 text-muted-foreground">
-                      {formatDate(entry.created_at)}
+                      {formatDate(purchase.paid_at ?? purchase.created_at)}
                     </TableCell>
-                    <TableCell>{entry.description}</TableCell>
-                    <TableCell className="pr-4 text-right font-mono tabular-nums">
-                      ${entry.amount_usd}
+                    <TableCell>${purchase.credit_usd}</TableCell>
+                    <TableCell className="pr-4">
+                      <div className="flex items-center justify-end gap-3">
+                        {purchase.receipt_url ? (
+                          <a
+                            href={purchase.receipt_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+                          >
+                            Receipt
+                            <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-3.5" />
+                          </a>
+                        ) : null}
+                        {purchase.invoice_url ? (
+                          <a
+                            href={purchase.invoice_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+                          >
+                            Get invoice
+                            <HugeiconsIcon
+                              icon={Invoice01Icon}
+                              strokeWidth={2}
+                              className="size-3.5"
+                            />
+                          </a>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -412,7 +450,7 @@ export function BillingView({
           </Table>
         </div>
         <p className="text-sm text-muted-foreground">
-          {billing.ledger.length} {billing.ledger.length === 1 ? "transaction" : "transactions"}
+          {transactions.length} {transactions.length === 1 ? "transaction" : "transactions"}
         </p>
       </div>
 

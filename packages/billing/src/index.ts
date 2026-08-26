@@ -26,6 +26,8 @@ export {
   getBillingSummary,
   grantCredits,
   markPaymentFailed,
+  persistMissingPurchaseDocuments,
+  persistPurchaseDocuments,
   recordStripeEvent,
   saveCustomerPaymentMethod,
 } from "./purchases.js";

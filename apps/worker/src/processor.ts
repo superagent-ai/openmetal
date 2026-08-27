@@ -1150,6 +1150,7 @@ async function executeProcess(
   const offsets = { stdout: 0, stderr: 0 };
   let lastProviderSequence = -1;
   let executionId: string | undefined;
+  let receivedExitEvent = false;
   try {
     await guard.assertOwned();
     const execution = await provider.exec({
@@ -1262,6 +1263,7 @@ async function executeProcess(
         continue;
       }
       if (event.type !== "exit") continue;
+      receivedExitEvent = true;
       outputTruncated ||= event.outputTruncated;
       if (event.cancelled) {
         await finishProcess(db, processId, guard, {
@@ -1303,6 +1305,13 @@ async function executeProcess(
           eventData: { exit_code: event.exitCode },
         });
       }
+    }
+    if (!receivedExitEvent) {
+      throw new ProviderError(
+        "provider process stream ended without an exit event",
+        "unknown_outcome",
+        false,
+      );
     }
   } catch (error) {
     if (controller.signal.aborted || new Date() >= deadline) {

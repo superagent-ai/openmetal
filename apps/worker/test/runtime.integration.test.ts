@@ -80,9 +80,9 @@ describe("runtime worker", () => {
     await database.shutdown();
   });
 
-  async function runUntil(jobId: string) {
+  async function runUntil(jobId: string, activeProvider: FakeSandboxProvider = provider) {
     for (let attempt = 0; attempt < 10; attempt += 1) {
-      await processOnce(database.db, publisher, workerEnv, { e2b: provider });
+      await processOnce(database.db, publisher, workerEnv, { e2b: activeProvider });
       const [job] = await database.sql`
         select status from metal.outbox_jobs where id = ${jobId}
       `;
@@ -145,6 +145,69 @@ describe("runtime worker", () => {
       select count(*)::int as count from metal.process_events where process_id = ${processId}
     `;
     expect(afterDuplicate?.count).toBe(events.length);
+  });
+
+  it("fails a process when the provider stream ends without an exit event", async () => {
+    const providerWithoutExit = new Proxy(provider, {
+      get(target, property) {
+        if (property === "exec") {
+          return async (...args: Parameters<FakeSandboxProvider["exec"]>) => {
+            const execution = await target.exec(...args);
+            return {
+              ...execution,
+              events: (async function* () {
+                for await (const event of execution.events) {
+                  if (event.type !== "exit") yield event;
+                }
+              })(),
+            };
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const processId = crypto.randomUUID();
+    const [job] = await database.sql`
+      with inserted_process as (
+        insert into metal.sandbox_processes (
+          id, organization_id, project_id, sandbox_id, command, max_output_bytes
+        )
+        values (
+          ${processId}, ${organizationId}, ${projectId}, ${sandboxId},
+          '["missing-exit"]'::jsonb, 1024
+        )
+      ), inserted_event as (
+        insert into metal.process_events (process_id, sequence, type)
+        values (${processId}, 1, 'queued')
+      )
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload)
+      values (
+        'process.execute',
+        ${`runtime-process-missing-exit-${processId}`},
+        ${JSON.stringify({ job_type: "process.execute", process_id: processId })}::jsonb
+      )
+      returning id
+    `;
+
+    expect(await runUntil(String(job!.id), providerWithoutExit)).toBe("succeeded");
+    const [process] = await database.sql`
+      select state, error from metal.sandbox_processes where id = ${processId}
+    `;
+    expect(process).toMatchObject({
+      state: "failed",
+      error: {
+        code: "process_failed",
+        message: "provider process stream ended without an exit event",
+        retryable: false,
+      },
+    });
+    const events = await database.sql`
+      select type from metal.process_events
+      where process_id = ${processId}
+      order by sequence
+    `;
+    expect(events.at(-1)?.type).toBe("failed");
   });
 
   it("roundtrips binary files and records unsupported capabilities safely", async () => {

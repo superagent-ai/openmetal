@@ -2,9 +2,18 @@
   "extends": "@openmetal/typescript-config/nextjs.json",
   "compilerOptions": {
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "fumadocs-mdx:collections/*": ["./.source/*"]
     }
   },
-  "include": ["src", "next-env.d.ts", ".next/types/**/*.ts"],
+  "include": [
+    "src",
+    "content",
+    "scripts",
+    "source.config.ts",
+    "next-env.d.ts",
+    ".next/types/**/*.ts",
+    ".source/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

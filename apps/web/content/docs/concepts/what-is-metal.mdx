@@ -1,0 +1,42 @@
+---
+title: What Metal does
+description: Understand the control plane and the portable compute model.
+---
+
+Metal is a hosted control plane that brokers secure compute from existing providers.
+
+You describe requirements through one API. Metal chooses eligible capacity, provisions it, records lifecycle operations, meters usage, and presents one billing relationship.
+
+## Product model
+
+- One organization owns projects, balances, members, and provider credentials.
+- Each project has scoped API keys and sandboxes.
+- Every provider resource maps back to one Metal organization and project.
+- The public API, TypeScript SDK, and CLI hide provider lifecycle differences.
+- Managed capacity uses Metal credits. BYOK capacity uses your provider account.
+
+## Portable surface
+
+Metal provides sandbox lifecycle, asynchronous argv based processes, binary filesystem operations, and time limited HTTP endpoints.
+
+It does not provide a new sandbox runtime. It also does not expose interactive terminals, streaming stdin, SSH, WebSocket, or a general connection API.
+
+## Control plane flow
+
+```text
+Application or agent
+        |
+        v
+Metal API -> durable operation -> provider adapter
+        |                            |
+        v                            v
+PostgreSQL <- metering and state <- provider
+```
+
+The operation is the source of truth for mutation completion. The sandbox is the source of truth for current resource state.
+
+<Cards>
+  <Card title="Create a sandbox" href="/guides/create-sandbox" />
+  <Card title="Understand routing" href="/concepts/routing" />
+  <Card title="Understand operations" href="/concepts/operations" />
+</Cards>

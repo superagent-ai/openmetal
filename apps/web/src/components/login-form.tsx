@@ -76,7 +76,7 @@ export function LoginForm({
     <div className={cn("flex flex-col gap-6", className)}>
       <FieldGroup>
         <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-2xl font-semibold text-balance">Sign in to Metal</h1>
+          <h1 className="text-2xl font-semibold text-balance">Sign in to OpenMetal</h1>
           <p className="text-sm text-pretty text-muted-foreground">
             Continue with Google or GitHub, or email a magic link.
           </p>

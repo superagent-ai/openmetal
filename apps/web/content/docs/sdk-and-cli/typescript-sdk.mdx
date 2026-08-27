@@ -1,0 +1,53 @@
+---
+title: TypeScript SDK
+description: Build agent applications with the typed @openmetal/sdk client.
+---
+
+Use the SDK when your agent application needs to manage compute directly rather than shelling out to the CLI.
+
+Install the SDK on Node.js 22 or later:
+
+```bash
+npm install @openmetal/sdk
+```
+
+The package validates API responses at runtime, applies request timeouts, retries safe GET requests, and creates idempotency keys for supported mutations.
+
+## Project client
+
+```ts
+import { MetalClient } from "@openmetal/sdk";
+
+const metal = new MetalClient({
+  baseUrl: process.env.OPENMETAL_API_URL!,
+  projectId: process.env.OPENMETAL_PROJECT_ID!,
+  accessToken: () => process.env.OPENMETAL_API_KEY,
+  timeoutMs: 10_000,
+  retry: {
+    attempts: 2,
+    backoffMs: 100,
+  },
+});
+```
+
+## Main namespaces
+
+- `sandboxes` manages lifecycle.
+- `operations` waits for lifecycle mutations and reads events.
+- `processes` creates commands, reads status, streams events, and requests cancellation.
+- `filesystem` reads, writes, lists, deletes, uploads, and downloads.
+- `runtimeOperations` waits for filesystem work.
+- `endpoints` creates, lists, and revokes HTTP leases.
+- Organization namespaces manage members, projects, keys, providers, billing, and events with a user session.
+
+## Errors and retries
+
+`MetalApiError` exposes status, code, details, and a request ID. `MetalTimeoutError` and `MetalNetworkError` can carry an idempotency key when a mutation result is uncertain.
+
+The client retries safe GET requests only. Application code must decide whether mutation replay is safe and reuse the original idempotency key.
+
+<Cards>
+  <Card title="TypeScript quickstart" href="/get-started/typescript" />
+  <Card title="Run a process" href="/guides/run-process" />
+  <Card title="Common errors" href="/errors/common-errors" />
+</Cards>

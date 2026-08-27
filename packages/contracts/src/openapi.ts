@@ -118,6 +118,22 @@ export function buildOpenApiDocument(): OpenApiObject {
       description: `Superagent Metal control plane ${API_VERSION}.`,
     },
     servers: [{ url: "/", description: "Configured Metal API origin" }],
+    tags: [
+      { name: "ops", description: "Service health, readiness, and API metadata." },
+      { name: "organizations", description: "Organization lifecycle and access." },
+      { name: "members", description: "Organization members and invitations." },
+      { name: "billing", description: "Credits, checkout, and automatic top ups." },
+      { name: "projects", description: "Organization projects." },
+      {
+        name: "provider credentials",
+        description: "Encrypted organization BYOK provider credentials.",
+      },
+      { name: "api keys", description: "Project scoped API keys." },
+      { name: "sandboxes", description: "Portable sandbox lifecycle." },
+      { name: "runtime", description: "Processes, files, and leased HTTP endpoints." },
+      { name: "operations", description: "Asynchronous lifecycle operation status and events." },
+      { name: "events", description: "Durable project event history." },
+    ],
     components: {
       securitySchemes: {
         bearerAuth: {

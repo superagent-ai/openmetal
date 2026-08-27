@@ -1,0 +1,175 @@
+---
+title: Home
+description: Give your agent access to OpenMetal with one skill, one CLI, and one API.
+---
+
+<section className="not-prose flex flex-col items-center py-16 text-center">
+  <h1 className="max-w-2xl bg-linear-to-r from-black to-[#666666] bg-clip-text text-5xl font-semibold tracking-tight text-balance text-transparent dark:from-white dark:to-[#9B9B9B]">
+    One interface for all agent compute.
+  </h1>
+  <p className="mt-6 max-w-2xl text-lg text-pretty text-muted-foreground">
+    One API for agent compute across providers, from sandboxes and CPUs to GPUs and persistent
+    machines.
+  </p>
+</section>
+
+<Cards className="home-icon-cards grid-cols-1 md:grid-cols-3">
+  <Card
+    icon={<AgentQuickstartIcon />}
+    title="Quickstart"
+    href="/get-started/agents"
+    description="Install the skill and give your agent access to OpenMetal."
+  />
+  <Card
+    icon={<GuidesIcon />}
+    title="Guides"
+    href="/guides/create-sandbox"
+    description="Build complete sandbox, process, filesystem, and endpoint workflows."
+  />
+  <Card
+    icon={<ApiReferenceIcon />}
+    title="API reference"
+    href="/api-reference"
+    description="Explore request schemas and try direct HTTP calls."
+  />
+</Cards>
+
+## Route across providers
+
+Integrate once, then move workloads between providers without rewriting your agent.
+
+<div className="not-prose grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+    <img src="/providers/blaxel.png" alt="Blaxel" className="size-5 object-contain" />
+    <div>
+      <p className="font-medium">Blaxel</p>
+      <p className="text-sm text-muted-foreground">Files and leased HTTP endpoints.</p>
+    </div>
+  </div>
+  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+    <img src="/providers/cloudflare.ico" alt="Cloudflare" className="size-5 object-contain" />
+    <div>
+      <p className="font-medium">Cloudflare</p>
+      <p className="text-sm text-muted-foreground">Edge compute with process streaming.</p>
+    </div>
+  </div>
+  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+    <img
+      src="/providers/codesandbox.svg"
+      alt="CodeSandbox"
+      className="size-5 object-contain dark:invert"
+    />
+    <div>
+      <p className="font-medium">CodeSandbox</p>
+      <p className="text-sm text-muted-foreground">Pauseable development sandboxes.</p>
+    </div>
+  </div>
+  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+    <img src="/providers/daytona.svg" alt="Daytona" className="size-5 object-contain" />
+    <div>
+      <p className="font-medium">Daytona</p>
+      <p className="text-sm text-muted-foreground">OCI and environment sandboxes.</p>
+    </div>
+  </div>
+  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+    <img src="/providers/e2b.png" alt="E2B" className="size-5 object-contain dark:invert" />
+    <div>
+      <p className="font-medium">E2B</p>
+      <p className="text-sm text-muted-foreground">Streaming processes and files.</p>
+    </div>
+  </div>
+  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+    <img src="/providers/modal.svg" alt="Modal" className="size-5 object-contain" />
+    <div>
+      <p className="font-medium">Modal</p>
+      <p className="text-sm text-muted-foreground">BYOK compute and streaming processes.</p>
+    </div>
+  </div>
+  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+    <img src="/providers/northflank.svg" alt="Northflank" className="size-5 object-contain" />
+    <div>
+      <p className="font-medium">Northflank</p>
+      <p className="text-sm text-muted-foreground">Pauseable managed sandboxes.</p>
+    </div>
+  </div>
+  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+    <img src="/providers/runloop.png" alt="Runloop" className="size-5 object-contain" />
+    <div>
+      <p className="font-medium">Runloop</p>
+      <p className="text-sm text-muted-foreground">Template based agent environments.</p>
+    </div>
+  </div>
+  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+    <img src="/providers/vercel.ico" alt="Vercel" className="size-5 object-contain dark:invert" />
+    <div>
+      <p className="font-medium">Vercel</p>
+      <p className="text-sm text-muted-foreground">Streaming sandbox processes.</p>
+    </div>
+  </div>
+</div>
+
+## Sandboxes now. Every machine next.
+
+<Cards className="grid-cols-1 md:grid-cols-3">
+  <Card
+    title="CPU sandboxes"
+    description="Available now. Request portable environments or OCI images with explicit CPU, memory, disk, region, and lifecycle requirements."
+  />
+  <Card
+    title="GPUs and accelerators"
+    description="Expanding next. Route training, inference, and computer use workloads through the same capability model."
+  />
+  <Card
+    title="Browser and persistent machines"
+    description="On the roadmap. Keep long lived state and browser computers behind one agent interface."
+  />
+</Cards>
+
+## Keep provider logic out of your agent
+
+Describe CPU, memory, region, and lifecycle once. OpenMetal selects eligible capacity, falls back safely, and returns the same process, filesystem, and endpoint APIs.
+
+<Cards className="home-icon-cards grid-cols-1 md:grid-cols-3">
+  <Card
+    icon={<UnifiedApiIcon />}
+    title="One unified API"
+    description="Create, pause, resume, and destroy compute without provider specific lifecycle code."
+  />
+  <Card
+    icon={<RuntimeIcon />}
+    title="Portable runtime"
+    description="Run processes, transfer files, and expose HTTP services through stable interfaces."
+  />
+  <Card
+    icon={<FallbackIcon />}
+    title="Automatic fallback"
+    description="Move to another eligible provider only when failure semantics make fallback safe."
+  />
+  <Card
+    icon={<ByokIcon />}
+    title="Managed or BYOK"
+    description="Use OpenMetal capacity or bring provider credentials while keeping one control surface."
+  />
+  <Card
+    icon={<BalanceIcon />}
+    title="One balance"
+    description="Fund managed workloads once and track durable provider usage in one organization ledger."
+  />
+  <Card
+    icon={<ControlIcon />}
+    title="Total control"
+    description="Pin a provider, order fallback candidates, set resource limits, and retain every operation ID."
+  />
+</Cards>
+
+## Works with the agents you already use
+
+OpenMetal ships as an Agent Skill and CLI for the tools your team already uses.
+
+<Cards className="home-icon-cards grid-cols-2 md:grid-cols-5">
+  <Card icon={<ClaudeCodeMark />} title="Claude Code" />
+  <Card icon={<CursorMark />} title="Cursor" />
+  <Card icon={<CodexMark />} title="Codex" />
+  <Card icon={<CopilotMark />} title="Copilot" />
+  <Card icon={<PiAgentMark />} title="Pi" />
+</Cards>

@@ -1,0 +1,89 @@
+---
+title: Build an agent with TypeScript
+description: Embed OpenMetal sandbox workflows with the published TypeScript SDK.
+---
+
+## Before you begin
+
+You need Node.js 22 or later, a Metal project, and a project API key. Keep the project ID and key in environment variables.
+
+```bash
+npm install @openmetal/sdk
+
+export OPENMETAL_API_URL="http://localhost:4000"
+export OPENMETAL_PROJECT_ID="prj_your_project"
+export OPENMETAL_API_KEY="metal_sk_your_key"
+```
+
+<Callout type="warn" title="Keep keys out of source control">
+  A project API key grants access to sandboxes in its project. Never expose it in browser code,
+  logs, or a sandbox request.
+</Callout>
+
+## Create the client
+
+```ts
+import { MetalClient } from "@openmetal/sdk";
+
+const metal = new MetalClient({
+  baseUrl: process.env.OPENMETAL_API_URL!,
+  projectId: process.env.OPENMETAL_PROJECT_ID!,
+  accessToken: () => process.env.OPENMETAL_API_KEY,
+  timeoutMs: 10_000,
+});
+```
+
+## Create a sandbox
+
+Submit the request, keep both accepted IDs, then wait for the operation.
+
+```ts
+const mutation = await metal.sandboxes.createAsync({
+  provider: "auto",
+  source: {
+    kind: "environment",
+    environment: "metal/node",
+    version: "latest",
+  },
+  resources: {
+    vcpu: 2,
+    memory_mb: 4096,
+    architecture: "any",
+  },
+  lifecycle: {
+    runtime_timeout_seconds: 1800,
+    on_runtime_timeout: "destroy",
+  },
+});
+
+const operation = await metal.operations.wait(mutation.operation, {
+  timeoutMs: 180_000,
+});
+
+if (operation.state !== "succeeded") {
+  throw new Error(operation.error?.message ?? `Create ${operation.state}`);
+}
+
+const sandbox = await metal.sandboxes.get(mutation.sandbox.id);
+console.log(sandbox.id, sandbox.state);
+```
+
+The sandbox is usable when its state is `ready`.
+
+## Clean up
+
+Remove temporary capacity when your work finishes.
+
+```ts
+await metal.sandboxes.delete(sandbox.id, {
+  timeoutMs: 180_000,
+});
+```
+
+## Next steps
+
+<Cards>
+  <Card title="Run a process" href="/guides/run-process" />
+  <Card title="Upload a file" href="/guides/filesystem" />
+  <Card title="Understand operations" href="/concepts/operations" />
+</Cards>

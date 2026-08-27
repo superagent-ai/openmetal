@@ -1,0 +1,43 @@
+---
+title: Routing and capabilities
+description: Understand candidate order, fallback safety, and current provider limits.
+---
+
+## Candidate order
+
+Automatic selection tries explicit fallback providers first, then other configured managed or BYOK providers in registry order.
+
+An explicit provider is primary. Listed fallback providers follow in order. Candidates must be unique.
+
+Metal does not currently calculate cheapest, fastest, reliable, or balanced rankings.
+
+## Source support
+
+Portable environments work across all current providers. OCI images work with Blaxel, Daytona, Modal, Northflank, and Vercel. Provider templates work with CodeSandbox, E2B, and Runloop.
+
+Recognized portable environments are `metal/base`, `metal/node`, and `metal/python`.
+
+## Runtime support
+
+Current public process streaming works with Cloudflare, E2B, Modal, and Vercel. Process cancellation is not confirmed for those adapters.
+
+Filesystem read and write support is broader. List, delete, append, and parent creation vary by provider.
+
+Portable leased HTTP endpoints are currently available only through Blaxel.
+
+Reliable pause and resume are available through CodeSandbox, E2B, Northflank, and Runloop. Daytona pause reporting is inconsistent.
+
+## Stored versus enforced requirements
+
+Metal accepts and stores isolation, PTY, pause, public port, and network requirements. Current routing does not pass these requirements to provider adapters.
+
+<Callout type="error" title="No fail closed egress guarantee">
+  Do not claim that allow or deny domain lists restrict outbound traffic today. Metal cannot
+  currently guarantee that enforcement.
+</Callout>
+
+## Fallback safety
+
+Capacity, provider unavailable, and known absent timeout failures can move to the next candidate. Unknown provider outcomes enter `reconciling` first so Metal does not create duplicate live capacity.
+
+See [route across providers](/guides/routing-and-providers) for a complete request.

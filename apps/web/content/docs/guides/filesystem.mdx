@@ -1,0 +1,58 @@
+---
+title: Work with files
+description: Upload, download, list, and remove sandbox files without changing bytes.
+---
+
+Filesystem operations require a `ready` sandbox. Portable paths are absolute and cannot contain `.` or `..` traversal segments.
+
+<Tabs items={["TypeScript", "CLI"]}>
+  <Tab value="TypeScript">
+
+```ts
+const bytes = new TextEncoder().encode("hello from Metal\n");
+
+await metal.filesystem.upload(sandbox.id, "/workspace/input.txt", bytes, { createParents: true });
+
+const downloaded = await metal.filesystem.download(sandbox.id, "/workspace/input.txt", {
+  chunkSizeBytes: 1024 * 1024,
+});
+```
+
+  </Tab>
+  <Tab value="CLI">
+
+```bash
+openmetal file upload <sandbox-id> ./input.txt /workspace/input.txt \
+  --mode overwrite --create-parents --timeout 180
+
+openmetal file download <sandbox-id> /workspace/input.txt ./output.txt \
+  --offset 0 --chunk-size 1048576 --timeout 180
+
+openmetal file list <sandbox-id> /workspace --recursive --max-entries 1000
+openmetal file delete <sandbox-id> /workspace/input.txt --yes
+```
+
+  </Tab>
+</Tabs>
+
+## Low level operations
+
+`filesystem.read`, `write`, `list`, and `delete` return queued runtime operations. Wait for completion with `runtimeOperations.wait`.
+
+```ts
+const queued = await metal.filesystem.write(sandbox.id, {
+  path: "/workspace/data.bin",
+  data: new Uint8Array([0, 255, 128]),
+  mode: "overwrite",
+  create_parents: true,
+});
+
+const completed = await metal.runtimeOperations.wait(queued);
+```
+
+Writes are limited to 10 MiB per operation. Reads use chunks up to 10 MiB and lists return at most 10,000 entries. Provider limits can be narrower.
+
+<Callout type="warn" title="Retry append carefully">
+  Reuse the original idempotency key after an uncertain append. Retrying with a new key can
+  duplicate bytes.
+</Callout>

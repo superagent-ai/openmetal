@@ -1,0 +1,15 @@
+{
+  "title": "Sandboxes",
+  "description": "Portable sandbox lifecycle.",
+  "pages": [
+    "listProjectSandboxes",
+    "pauseProjectSandbox",
+    "destroyProjectSandbox",
+    "listSandboxes",
+    "createSandbox",
+    "getSandbox",
+    "destroySandbox",
+    "pauseSandbox",
+    "resumeSandbox"
+  ]
+}

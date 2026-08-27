@@ -1,0 +1,49 @@
+---
+title: Overview
+description: Explore the Metal REST API generated from its OpenAPI 3.1 contract.
+---
+
+The Metal API uses JSON over HTTPS and is versioned under `/v1`.
+
+The interactive endpoint pages come directly from the same OpenAPI contract used by the API and TypeScript SDK.
+
+## Base URL
+
+Use the API origin configured for your environment:
+
+```text
+http://localhost:4000
+```
+
+Production and staging origins are supplied with your Metal environment.
+
+## Authentication
+
+Sandbox and runtime endpoints use a project API key:
+
+```http
+Authorization: Bearer metal_sk_your_key
+X-Metal-Project-ID: prj_your_project
+```
+
+Organization administration uses a Supabase user access token:
+
+```http
+Authorization: Bearer <supabase-access-token>
+```
+
+## Idempotency
+
+Mutation endpoints that accept `Idempotency-Key` return the original result when the same key and identical request are replayed.
+
+Keep the same key after an uncertain network result. Reusing it with different input returns `idempotency_mismatch`.
+
+## Errors
+
+Errors include a stable machine readable code and human readable message. Asynchronous capability failures can appear on the terminal operation after the initial request was accepted.
+
+<Cards>
+  <Card title="Create a sandbox" href="/api-reference/endpoints/sandboxes/createSandbox" />
+  <Card title="Authentication" href="/get-started/authentication" />
+  <Card title="Common errors" href="/errors/common-errors" />
+</Cards>

@@ -1,0 +1,37 @@
+---
+title: Agent skill
+description: Give compatible coding agents exact OpenMetal workflows and safety rules.
+---
+
+Install the OpenMetal skill with the Skills CLI:
+
+```bash
+npx skills add homanp/metal --skill openmetal
+```
+
+The skill works with Cursor, Claude Code, Codex, OpenCode, and other clients that support the Agent Skills specification.
+
+## What the skill teaches
+
+- Choose the CLI or TypeScript SDK for the task.
+- Configure project access without exposing credentials.
+- Create and clean up sandboxes safely.
+- Wait for asynchronous lifecycle and runtime operations.
+- Run argv based processes and resume ordered output.
+- Transfer binary files without corrupting bytes.
+- Create and revoke leased HTTP endpoints.
+- Respect current provider capability and enforcement limits.
+- Interpret retryable, uncertain, and terminal failures.
+
+## Why use it
+
+The public surface is deliberately precise. For example, the SDK uses `processes`, `filesystem`, `runtimeOperations`, and `endpoints`. It does not expose invented helpers such as `sandbox.exec()`, `sandbox.files`, or `sandbox.ports`.
+
+The skill gives an agent those boundaries before it writes integration code.
+
+<Callout type="info" title="Docs for agents">
+  OpenMetal also publishes `/llms.txt`, `/llms-full.txt`, and a Markdown representation of every
+  documentation page.
+</Callout>
+
+Start with [the agent quickstart](/get-started/agents), then use the [CLI reference](/sdk-and-cli/cli) or [TypeScript SDK](/sdk-and-cli/typescript-sdk).

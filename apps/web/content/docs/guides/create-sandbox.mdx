@@ -1,0 +1,88 @@
+---
+title: Create a sandbox
+description: Provision portable compute and wait until it is ready.
+---
+
+Create requests are asynchronous. Metal returns a sandbox ID and an operation ID before provider provisioning finishes.
+
+<Tabs items={["TypeScript", "CLI", "curl"]}>
+  <Tab value="TypeScript">
+
+```ts
+const mutation = await metal.sandboxes.createAsync({
+  provider: "auto",
+  source: {
+    kind: "environment",
+    environment: "metal/node",
+    version: "latest",
+  },
+  resources: {
+    vcpu: 2,
+    memory_mb: 4096,
+    architecture: "any",
+  },
+  lifecycle: {
+    runtime_timeout_seconds: 1800,
+    on_runtime_timeout: "destroy",
+  },
+});
+
+const operation = await metal.operations.wait(mutation.operation);
+```
+
+  </Tab>
+  <Tab value="CLI">
+
+```bash
+openmetal sandbox create \
+  --environment metal/node \
+  --environment-version latest \
+  --vcpu 2 \
+  --memory-mb 4096 \
+  --runtime-timeout 1800
+```
+
+  </Tab>
+  <Tab value="curl">
+
+```bash
+curl "$OPENMETAL_API_URL/v1/sandboxes" \
+  --request POST \
+  --header "Authorization: Bearer $OPENMETAL_API_KEY" \
+  --header "X-Metal-Project-ID: $OPENMETAL_PROJECT_ID" \
+  --header "Idempotency-Key: $(uuidgen)" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "provider": "auto",
+    "source": {
+      "kind": "environment",
+      "environment": "metal/node",
+      "version": "latest"
+    },
+    "resources": {
+      "vcpu": 2,
+      "memory_mb": 4096,
+      "architecture": "any"
+    },
+    "lifecycle": {
+      "runtime_timeout_seconds": 1800,
+      "on_runtime_timeout": "destroy"
+    }
+  }'
+```
+
+  </Tab>
+</Tabs>
+
+## Interpret the result
+
+Only `succeeded`, `failed`, and `cancelled` are terminal operation states. A successful create should leave the sandbox in `ready`.
+
+Keep one stable idempotency key when retrying an uncertain submission. A new key requests a new mutation.
+
+<Callout type="warn" title="Do not replace reconciling capacity">
+  A `reconciling` operation means the provider result is uncertain. Stop after a bounded wait and
+  retain both IDs for support.
+</Callout>
+
+See [the operations model](/concepts/operations) and [common errors](/errors/common-errors).

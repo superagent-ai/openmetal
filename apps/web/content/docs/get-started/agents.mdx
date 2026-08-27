@@ -1,0 +1,72 @@
+---
+title: Give your agent access to OpenMetal
+description: Install the OpenMetal skill and CLI so your coding agent can provision portable sandboxes.
+---
+
+OpenMetal gives coding agents one safe interface for compute across sandbox providers. The skill teaches the exact workflow. The CLI performs it.
+
+## Install the agent skill
+
+Add OpenMetal to any client that supports the Agent Skills specification:
+
+```bash
+npx skills add homanp/metal --skill openmetal
+```
+
+The skill works with Cursor, Claude Code, Codex, OpenCode, and other compatible agents.
+
+## Install the CLI
+
+```bash
+npm install --global @openmetal/cli
+openmetal --help
+```
+
+Run initial setup yourself in a trusted terminal:
+
+```bash
+openmetal setup
+openmetal doctor
+```
+
+<Callout type="warn" title="Keep the one time key private">
+  Setup creates and prints a project API key once. Do not ask an agent to run this step when its
+  terminal output is recorded.
+</Callout>
+
+## Ask your agent
+
+Once setup succeeds, give your agent a task such as:
+
+```text
+Use OpenMetal to create a temporary Node.js sandbox with 2 vCPUs and 4 GiB
+of memory. Upload this project, run the tests, report the result, and destroy
+the sandbox when finished.
+```
+
+The skill instructs the agent to:
+
+1. Check credentials without printing their values.
+2. Create short lived capacity with an explicit runtime timeout.
+3. Persist sandbox and operation IDs.
+4. Wait for asynchronous work instead of assuming HTTP 202 means success.
+5. Clean up temporary resources.
+
+## Use it in automation
+
+```bash
+openmetal --json --no-input sandbox create \
+  --environment metal/node \
+  --environment-version latest \
+  --vcpu 2 \
+  --memory-mb 4096 \
+  --runtime-timeout 1800 \
+  --async
+```
+
+<Cards>
+  <Card title="Agent skill reference" href="/sdk-and-cli/agent-skill" />
+  <Card title="CLI quickstart" href="/get-started/cli" />
+  <Card title="Run a process" href="/guides/run-process" />
+  <Card title="Handle failures" href="/errors/common-errors" />
+</Cards>

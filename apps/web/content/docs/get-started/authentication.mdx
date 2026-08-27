@@ -1,0 +1,53 @@
+---
+title: Authenticate requests
+description: Choose the correct credential for control plane and sandbox routes.
+---
+
+Metal has two credential classes. They are not interchangeable.
+
+## Project API keys
+
+Use a project key for sandbox lifecycle, operations, processes, files, and leased HTTP endpoints.
+
+```http
+Authorization: Bearer metal_sk_your_key
+X-Metal-Project-ID: prj_your_project
+```
+
+The operation read and event routes require the exact project key that created the sandbox, but they do not require `X-Metal-Project-ID`.
+
+Project keys are returned once when created. Store them in a secret manager or the CLI credential store.
+
+## User access tokens
+
+Use a Supabase user access token to administer organizations, members, projects, API keys, provider credentials, billing, webhooks, and durable project events.
+
+```http
+Authorization: Bearer <supabase-access-token>
+```
+
+The SDK token callback may be asynchronous, so an application can refresh a user session before each request.
+
+```ts
+const controlPlane = new MetalClient({
+  baseUrl: process.env.OPENMETAL_API_URL!,
+  accessToken: async () => {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token;
+  },
+});
+```
+
+<Callout type="error" title="Fail closed">
+  Do not use a user access token for project key routes or a project key for user administration
+  routes. Metal rejects credentials with the wrong scope.
+</Callout>
+
+## Security checklist
+
+- Keep credentials out of repositories and browser bundles.
+- Never place a token inside sandbox metadata, environment configuration, or process arguments.
+- Rotate project keys and give each workload its own key.
+- Treat one time key output as sensitive terminal output.
+
+See [the API reference](/api-reference) for route specific security requirements.

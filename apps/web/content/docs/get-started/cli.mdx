@@ -1,0 +1,69 @@
+---
+title: Start with the CLI
+description: Give agents and automation a stable command interface to OpenMetal.
+---
+
+The OpenMetal CLI is the primary execution interface for coding agents, terminal workflows, and CI.
+
+## Install
+
+The CLI requires Node.js 22 or later when installed from npm.
+
+```bash
+npm install --global @openmetal/cli
+```
+
+## Configure access
+
+Run the guided setup in a trusted terminal. It opens browser authentication, selects or creates a project, and creates a project API key.
+
+```bash
+openmetal setup
+openmetal doctor
+```
+
+<Callout type="warn" title="The key is shown once">
+  Setup prints a newly created project API key once. Do not run this step in recorded terminals or
+  CI logs.
+</Callout>
+
+## Create a sandbox
+
+```bash
+openmetal sandbox create \
+  --environment metal/node \
+  --environment-version latest \
+  --vcpu 2 \
+  --memory-mb 4096 \
+  --runtime-timeout 1800
+```
+
+Interactive commands wait for completion. In automation, request the accepted response and wait explicitly:
+
+```bash
+openmetal --json --no-input sandbox create \
+  --environment metal/node \
+  --environment-version latest \
+  --vcpu 2 \
+  --memory-mb 4096 \
+  --runtime-timeout 1800 \
+  --async
+
+openmetal operation wait <operation-id> --timeout 180
+```
+
+## Inspect and clean up
+
+```bash
+openmetal sandbox list
+openmetal sandbox get <sandbox-id>
+openmetal sandbox delete <sandbox-id> --yes
+```
+
+## Next steps
+
+<Cards>
+  <Card title="CLI reference" href="/sdk-and-cli/cli" />
+  <Card title="Run a process" href="/guides/run-process" />
+  <Card title="Handle operation failures" href="/errors/common-errors" />
+</Cards>

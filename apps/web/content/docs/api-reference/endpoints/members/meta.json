@@ -1,0 +1,13 @@
+{
+  "title": "Members",
+  "description": "Organization members and invitations.",
+  "pages": [
+    "listOrganizationMembers",
+    "updateOrganizationMember",
+    "removeOrganizationMember",
+    "createOrganizationInvitation",
+    "updateOrganizationInvitation",
+    "revokeOrganizationInvitation",
+    "resendOrganizationInvitation"
+  ]
+}

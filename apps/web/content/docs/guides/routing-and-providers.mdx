@@ -1,0 +1,62 @@
+---
+title: Route across providers
+description: Select automatic routing, explicit providers, fallback, and BYOK.
+---
+
+## Automatic routing
+
+Set `provider` to `auto` or omit it. Explicit fallback providers are tried in your order, followed by other configured providers in registry order.
+
+```json
+{
+  "provider": "auto",
+  "source": {
+    "kind": "environment",
+    "environment": "metal/node",
+    "version": "latest"
+  },
+  "resources": {
+    "vcpu": 2,
+    "memory_mb": 4096,
+    "architecture": "any"
+  },
+  "lifecycle": {
+    "runtime_timeout_seconds": 1800,
+    "on_runtime_timeout": "destroy"
+  },
+  "fallback": {
+    "providers": ["e2b", "codesandbox", "runloop"],
+    "max_attempts": 3
+  }
+}
+```
+
+Current routing uses caller order and registry order. It does not rank candidates by price, speed, reliability, or a balanced score.
+
+## Choose a provider explicitly
+
+Use an explicit provider for capability testing, compliance, or a provider template. Supported providers are Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Modal, Northflank, Runloop, and Vercel.
+
+Provider templates work with CodeSandbox, E2B, and Runloop. They cannot use fallback.
+
+## Safe fallback
+
+Metal falls back after capacity, unavailable, and known absent timeout failures. Unknown outcomes enter reconciliation before any further provider attempt.
+
+Authentication, invalid request, unsupported capability, and customer errors do not fan out.
+
+## Bring your own key
+
+BYOK credentials belong to an organization, are encrypted in Supabase Vault, and are never returned by the API. The provider bills BYOK capacity directly, so it does not consume Metal credits.
+
+```bash
+openmetal provider-credential set --file provider.json
+openmetal provider-credential list
+```
+
+<Callout type="warn" title="Capabilities differ">
+  An accepted runtime operation is not proof of provider support. Inspect its terminal state and
+  error. See the concepts page before depending on process streaming, files, pause, or endpoints.
+</Callout>
+
+See [routing concepts](/concepts/routing) for current capability details.

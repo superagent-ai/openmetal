@@ -1,3 +1,5 @@
 import nextConfig from "@openmetal/eslint-config/next";
 
-export default nextConfig;
+const config = [...nextConfig, { ignores: [".source/**"] }];
+
+export default config;

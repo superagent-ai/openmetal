@@ -1,0 +1,18 @@
+{
+  "title": "Runtime",
+  "description": "Processes, files, and leased HTTP endpoints.",
+  "pages": [
+    "createSandboxProcess",
+    "getSandboxProcess",
+    "streamSandboxProcessEvents",
+    "cancelSandboxProcess",
+    "readSandboxFile",
+    "writeSandboxFile",
+    "listSandboxFiles",
+    "deleteSandboxFile",
+    "getSandboxRuntimeOperation",
+    "listSandboxEndpoints",
+    "createSandboxEndpoint",
+    "revokeSandboxEndpoint"
+  ]
+}

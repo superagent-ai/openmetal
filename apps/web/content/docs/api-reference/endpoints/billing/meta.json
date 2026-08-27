@@ -1,0 +1,12 @@
+{
+  "title": "Billing",
+  "description": "Credits, checkout, and automatic top ups.",
+  "pages": [
+    "getOrganizationBilling",
+    "quoteCreditPurchase",
+    "createBillingCheckout",
+    "updateAutoTopup",
+    "createBillingPaymentMethodSetup",
+    "stripeWebhook"
+  ]
+}

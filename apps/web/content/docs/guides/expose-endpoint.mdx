@@ -1,0 +1,56 @@
+---
+title: Expose an HTTP endpoint
+description: Create a time limited public route to a process in a sandbox.
+---
+
+Start a service inside a `ready` sandbox, then create a leased HTTP endpoint for its port.
+
+<Tabs items={["TypeScript", "CLI"]}>
+  <Tab value="TypeScript">
+
+```ts
+const endpoint = await metal.endpoints.create(sandbox.id, {
+  port: 8080,
+  protocol: "http",
+  lease_seconds: 3600,
+});
+
+let active;
+while (!active) {
+  const page = await metal.endpoints.list(sandbox.id, { limit: 50 });
+  const current = page.endpoints.find((item) => item.id === endpoint.id);
+
+  if (current?.state === "failed") {
+    throw new Error(current.error?.message ?? "Endpoint provisioning failed");
+  }
+
+  if (current?.state === "active") active = current;
+  else await new Promise((resolve) => setTimeout(resolve, 1000));
+}
+
+console.log(active.url);
+```
+
+  </Tab>
+  <Tab value="CLI">
+
+```bash
+openmetal endpoint expose <sandbox-id> --port 8080 --lease-seconds 3600
+openmetal endpoint list <sandbox-id> --limit 50
+openmetal endpoint revoke <sandbox-id> <endpoint-id> --yes
+```
+
+  </Tab>
+</Tabs>
+
+Endpoint creation returns a `provisioning` resource immediately. Poll the list until it becomes `active` with a URL or `failed`.
+
+Only HTTP is supported. Ports range from 1 through 65,535 and leases range from 60 through 86,400 seconds before provider restrictions.
+
+## Revoke early
+
+```ts
+await metal.endpoints.revoke(sandbox.id, endpoint.id);
+```
+
+Leases expire automatically, but explicit revocation should be part of cleanup for temporary previews.

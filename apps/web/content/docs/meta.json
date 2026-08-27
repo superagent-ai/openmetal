@@ -1,0 +1,4 @@
+{
+  "title": "OpenMetal",
+  "pages": ["index", "get-started", "sdk-and-cli", "guides", "concepts", "api-reference", "errors"]
+}

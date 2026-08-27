@@ -17,7 +17,9 @@
     "METAL_ENVIRONMENT",
     "API_HOST",
     "API_PORT",
-    "WORKER_ID"
+    "WORKER_ID",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET"
   ],
   "tasks": {
     "build": {

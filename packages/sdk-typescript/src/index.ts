@@ -3,6 +3,7 @@ export { MetalError } from "./error.js";
 export type {
   ConfiguredProviderCredential,
   InvitationRole,
+  OrganizationBilling,
   OrganizationInvitation,
   OrganizationMember,
   OrganizationMembersResponse,

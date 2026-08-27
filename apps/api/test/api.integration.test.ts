@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDatabase } from "@openmetal/db";
+import { FakeStripeGateway, grantCredits } from "@openmetal/billing";
+import { createDatabase, withTransaction } from "@openmetal/db";
 import { parseCursor, serializeCursor } from "@openmetal/events";
 import { createConfirmedUser, deleteUser, loadTestEnv } from "@openmetal/testkit";
 import { MetalClient, MetalError } from "@openmetal/sdk";
@@ -15,6 +16,7 @@ describe("metal api integration", () => {
   let runningApp: Awaited<ReturnType<typeof buildApp>>["app"];
   let apiEnv: ApiEnv;
   const users: string[] = [];
+  const stripe = new FakeStripeGateway();
 
   beforeAll(async () => {
     apiEnv = loadApiEnv({
@@ -29,8 +31,9 @@ describe("metal api integration", () => {
       API_PORT: "0",
       LOG_LEVEL: "silent",
       METAL_ENVIRONMENT: "test",
+      STRIPE_WEBHOOK_SECRET: "whsec_test",
     });
-    const { app } = await buildApp(apiEnv, database);
+    const { app } = await buildApp(apiEnv, database, { stripe });
     runningApp = app;
     const address = await app.listen({ host: "127.0.0.1", port: 0 });
     appUrl = address;
@@ -787,6 +790,13 @@ describe("metal api integration", () => {
       name: "Sandbox Operation Project",
       slug: `sandbox-op-project-${crypto.randomUUID().slice(0, 8)}`,
     });
+    await withTransaction(database.db, (tx) =>
+      grantCredits(tx, {
+        organizationId: organization.id,
+        creditMicrousd: 100_000_000n,
+        actorId: owner.user.id,
+      }),
+    );
     const createdKey = await ownerClient.apiKeys.create(project.id, {
       name: "sandbox operation key",
       expires_in: null,
@@ -1110,5 +1120,273 @@ describe("metal api integration", () => {
       id: pending.id,
       role: "admin",
     });
+  });
+
+  it("quotes purchases, creates checkout, credits from a verified webhook, and rejects unpaid sandboxes", async () => {
+    const owner = await createConfirmedUser(env);
+    users.push(owner.user.id);
+    const ownerClient = clientFor(owner.accessToken);
+    const organization = await ownerClient.organizations.create({
+      name: "Billing Org",
+      slug: `billing-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const quote = await ownerClient.billing.quote(organization.id, "100.00");
+    expect(quote).toMatchObject({
+      credit_usd: "100.00",
+      fee_usd: "5.50",
+      total_usd: "105.50",
+    });
+    const checkout = await ownerClient.billing.checkout(organization.id, { amount_usd: "100.00" });
+    expect(checkout.checkout_url).toContain("https://checkout.stripe.test/");
+    const session = stripe.checkoutSessions.at(-1);
+    expect(session).toBeTruthy();
+    const paidEvent = {
+      id: `evt_${crypto.randomUUID()}`,
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: session?.id,
+          mode: "payment",
+          payment_status: "paid",
+          customer: session?.input.customerId,
+          payment_intent: `pi_test_${crypto.randomUUID().replaceAll("-", "")}`,
+          payment_method: "pm_test_visa",
+          amount_total: 10550,
+          currency: "usd",
+          metadata: {
+            organization_id: organization.id,
+            purchase_id: checkout.purchase_id,
+          },
+        },
+      },
+    };
+    const webhook = await runningApp.inject({
+      method: "POST",
+      url: "/v1/webhooks/stripe",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "test_signature",
+      },
+      payload: JSON.stringify(paidEvent),
+    });
+    expect(webhook.statusCode).toBe(200);
+    const replay = await runningApp.inject({
+      method: "POST",
+      url: "/v1/webhooks/stripe",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "test_signature",
+      },
+      payload: JSON.stringify(paidEvent),
+    });
+    expect(replay.statusCode).toBe(200);
+    const billed = await ownerClient.billing.get(organization.id);
+    expect(billed.balance_usd).toBe("100.00");
+    expect(billed.payment_method).toMatchObject({ last4: "4242" });
+    expect(billed.purchases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "paid",
+          credit_usd: "100.00",
+          receipt_url: expect.stringContaining("https://pay.stripe.test/receipts/"),
+          invoice_url: expect.stringContaining("https://invoice.stripe.test/"),
+        }),
+      ]),
+    );
+
+    const enabled = await ownerClient.billing.updateAutoTopup(organization.id, {
+      enabled: true,
+      threshold_usd: "10.00",
+      refill_usd: "50.00",
+      monthly_cap_usd: "500.00",
+    });
+    expect(enabled.auto_topup).toMatchObject({
+      enabled: true,
+      status: "active",
+      refill_usd: "50.00",
+    });
+
+    const emptyOrg = await ownerClient.organizations.create({
+      name: "Empty Billing Org",
+      slug: `billing-empty-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const project = await ownerClient.projects.create(emptyOrg.id, {
+      name: "Unpaid Project",
+      slug: `unpaid-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const createdKey = await ownerClient.apiKeys.create(project.id, {
+      name: "unpaid key",
+      expires_in: null,
+    });
+    const projectClient = new MetalClient({
+      baseUrl: appUrl,
+      accessToken: () => createdKey.key,
+      projectId: project.id,
+      retry: { attempts: 1 },
+    });
+    await expect(
+      projectClient.sandboxes.createAsync(
+        {
+          source: {
+            kind: "environment",
+            environment: "metal/node",
+            version: "1",
+          },
+          resources: { vcpu: 1, memory_mb: 1024, architecture: "any" },
+          lifecycle: { runtime_timeout_seconds: 600 },
+        },
+        { idempotencyKey: "unpaid-create" },
+      ),
+    ).rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+  });
+
+  it("rejects invalid Stripe webhooks, mismatched payloads, and double credits", async () => {
+    const owner = await createConfirmedUser(env);
+    const member = await createConfirmedUser(env);
+    users.push(owner.user.id, member.user.id);
+    const ownerClient = clientFor(owner.accessToken);
+    const memberClient = clientFor(member.accessToken);
+    const organization = await ownerClient.organizations.create({
+      name: "Webhook Billing Org",
+      slug: `wh-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values (${organization.id}, ${member.user.id}, 'member')
+    `;
+    const readableResponse = await runningApp.inject({
+      method: "GET",
+      url: `/v1/organizations/${organization.id}/billing`,
+      headers: { authorization: `Bearer ${member.accessToken}` },
+    });
+    expect(readableResponse.statusCode).toBe(200);
+    const readable = readableResponse.json();
+    expect(readable.can_manage).toBe(false);
+    await expect(
+      memberClient.billing.checkout(organization.id, { amount_usd: "25.00" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      ownerClient.billing.updateAutoTopup(organization.id, {
+        enabled: true,
+        threshold_usd: "10.00",
+        refill_usd: "50.00",
+        monthly_cap_usd: "500.00",
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    const checkout = await ownerClient.billing.checkout(organization.id, { amount_usd: "25.00" });
+    const session = stripe.checkoutSessions.at(-1);
+    const paidObject = {
+      id: session?.id,
+      mode: "payment",
+      payment_status: "paid",
+      customer: session?.input.customerId,
+      payment_intent: `pi_${crypto.randomUUID().replaceAll("-", "")}`,
+      payment_method: "pm_test_visa",
+      amount_total: 2638,
+      currency: "usd",
+      metadata: {
+        organization_id: organization.id,
+        purchase_id: checkout.purchase_id,
+      },
+    };
+    const invalidSignature = await runningApp.inject({
+      method: "POST",
+      url: "/v1/webhooks/stripe",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "not-valid",
+      },
+      payload: JSON.stringify({
+        id: `evt_${crypto.randomUUID()}`,
+        type: "checkout.session.completed",
+        data: { object: paidObject },
+      }),
+    });
+    expect(invalidSignature.statusCode).toBe(400);
+    const mismatched = await runningApp.inject({
+      method: "POST",
+      url: "/v1/webhooks/stripe",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "test_signature",
+      },
+      payload: JSON.stringify({
+        id: `evt_${crypto.randomUUID()}`,
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            ...paidObject,
+            amount_total: 1,
+            currency: "eur",
+            customer: "cus_other",
+          },
+        },
+      }),
+    });
+    expect(mismatched.statusCode).toBe(400);
+    const unpaid = await runningApp.inject({
+      method: "POST",
+      url: "/v1/webhooks/stripe",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "test_signature",
+      },
+      payload: JSON.stringify({
+        id: `evt_${crypto.randomUUID()}`,
+        type: "checkout.session.completed",
+        data: { object: { ...paidObject, payment_status: "unpaid" } },
+      }),
+    });
+    expect(unpaid.statusCode).toBe(200);
+    expect((await ownerClient.billing.get(organization.id)).balance_usd).toBe("0.00");
+
+    const firstEvent = {
+      id: `evt_${crypto.randomUUID()}`,
+      type: "checkout.session.completed",
+      data: { object: paidObject },
+    };
+    const secondEvent = {
+      id: `evt_${crypto.randomUUID()}`,
+      type: "checkout.session.completed",
+      data: { object: paidObject },
+    };
+    const [first, second] = await Promise.all([
+      runningApp.inject({
+        method: "POST",
+        url: "/v1/webhooks/stripe",
+        headers: {
+          "content-type": "application/json",
+          "stripe-signature": "test_signature",
+        },
+        payload: JSON.stringify(firstEvent),
+      }),
+      runningApp.inject({
+        method: "POST",
+        url: "/v1/webhooks/stripe",
+        headers: {
+          "content-type": "application/json",
+          "stripe-signature": "test_signature",
+        },
+        payload: JSON.stringify(secondEvent),
+      }),
+    ]);
+    expect([first.statusCode, second.statusCode].sort()).toEqual([200, 200]);
+    const billed = await ownerClient.billing.get(organization.id);
+    expect(billed.balance_usd).toBe("25.00");
+    const [entrySum] = await database.sql`
+      select coalesce(sum(amount_microusd), 0)::text as total
+      from metal.ledger_entries
+      where organization_id = ${organization.id}
+    `;
+    expect(entrySum?.total).toBe("0");
+    const [entryId] = await database.sql`
+      select id::text as id from metal.ledger_entries
+      where organization_id = ${organization.id}
+      limit 1
+    `;
+    await expect(
+      database.sql`update metal.ledger_entries set amount_microusd = 1 where id = ${entryId?.id}`,
+    ).rejects.toThrow(/append-only/);
   });
 });

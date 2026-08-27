@@ -39,6 +39,20 @@ describe("events", () => {
 
   it("validates outbox payloads", () => {
     expect(() => validateOutboxPayload({ job_type: "other" })).toThrow();
+    expect(
+      validateOutboxPayload({
+        job_type: "billing.auto_topup.evaluate",
+        organization_id: "11111111-1111-4111-8111-111111111111",
+        reason: "usage_charge",
+      }),
+    ).toMatchObject({ job_type: "billing.auto_topup.evaluate" });
+    expect(
+      validateOutboxPayload({
+        job_type: "billing.spend_limit.enforce",
+        organization_id: "11111111-1111-4111-8111-111111111111",
+        reason: "insufficient_credits",
+      }),
+    ).toMatchObject({ job_type: "billing.spend_limit.enforce" });
   });
 
   it("deduplicates deliveries by event id and cursor", () => {

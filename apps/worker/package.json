@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@openmetal/contracts": "workspace:*",
+    "@openmetal/billing": "workspace:*",
     "@openmetal/db": "workspace:*",
     "@openmetal/events": "workspace:*",
     "@openmetal/logger": "workspace:*",

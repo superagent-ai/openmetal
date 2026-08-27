@@ -41,6 +41,14 @@ describe("logger redaction", () => {
     );
   });
 
+  it("redacts stripe keys", () => {
+    expect(redactString("sk_test_abcDEF123")).toBe(REDACTED);
+    expect(redactRecord({ STRIPE_SECRET_KEY: "rk_test_abc" }).STRIPE_SECRET_KEY).toBe(REDACTED);
+    expect(redactRecord({ STRIPE_WEBHOOK_SECRET: "whsec_abc" }).STRIPE_WEBHOOK_SECRET).toBe(
+      REDACTED,
+    );
+  });
+
   it("redacts api keys and signed urls", () => {
     expect(redactString("sk-abcdefghijklmnopqrstuvwxyz123456")).toBe(REDACTED);
     expect(redactString("https://storage.example.com/file?token=abc&signature=deadbeef")).toBe(

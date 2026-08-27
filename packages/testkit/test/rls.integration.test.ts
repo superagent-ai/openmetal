@@ -136,11 +136,13 @@ describe("rls isolation", () => {
         ('metal', 'domain_events'),
         ('metal', 'organization_provider_credentials'),
         ('metal', 'outbox_jobs'),
-        ('metal', 'idempotency_keys')
+        ('metal', 'idempotency_keys'),
+        ('metal', 'billing_accounts'),
+        ('metal', 'ledger_entries')
       )
       order by n.nspname, c.relname
     `;
-    expect(rlsRows).toHaveLength(8);
+    expect(rlsRows).toHaveLength(10);
     expect(rlsRows.every((row) => row.enabled === true)).toBe(true);
 
     const unsafeGrants = await database.sql`
@@ -157,7 +159,9 @@ describe("rls isolation", () => {
           'domain_events',
           'organization_provider_credentials',
           'outbox_jobs',
-          'idempotency_keys'
+          'idempotency_keys',
+          'billing_accounts',
+          'ledger_entries'
         )
       )
     `;

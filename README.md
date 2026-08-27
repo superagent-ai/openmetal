@@ -28,7 +28,10 @@ apps/api  --outbox-------->  apps/worker --Broadcast--> Supabase Realtime
 - `apps/worker` claims outbox jobs with `FOR UPDATE SKIP LOCKED` and publishes committed events to private Broadcast topics.
 - `packages/sdk-typescript` (`@openmetal/sdk`) is the only way the dashboard talks to the Metal API.
 - `packages/contracts` holds runtime Zod schemas shared by the API and SDK.
+- `packages/billing` holds credit purchase fees, the organization ledger, Stripe Checkout, and automatic top ups.
 - One Supabase project per environment provides Auth, PostgreSQL, and Realtime.
+
+Prepaid billing uses Stripe Checkout, a 5.5% purchase fee with an $0.80 minimum, and pass-through provider usage. See [docs/billing.md](docs/billing.md).
 
 ## Prerequisites
 

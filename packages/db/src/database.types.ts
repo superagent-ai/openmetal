@@ -446,6 +446,7 @@ export type Database = {
           provider_cost_measured_through: string | null
           provider_cost_microusd: number | null
           provider_cost_updated_at: string | null
+          customer_charged_microusd: number
           provider_credential_id: string | null
           provider_metadata: Json
           provider_options: Json
@@ -486,6 +487,7 @@ export type Database = {
           provider_cost_measured_through?: string | null
           provider_cost_microusd?: number | null
           provider_cost_updated_at?: string | null
+          customer_charged_microusd?: number
           provider_credential_id?: string | null
           provider_metadata?: Json
           provider_options: Json
@@ -526,6 +528,7 @@ export type Database = {
           provider_cost_measured_through?: string | null
           provider_cost_microusd?: number | null
           provider_cost_updated_at?: string | null
+          customer_charged_microusd?: number
           provider_credential_id?: string | null
           provider_metadata?: Json
           provider_options?: Json
@@ -551,6 +554,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      billing_accounts: {
+        Row: {
+          balance_microusd: number
+          created_at: string
+          organization_id: string
+          payment_method_brand: string | null
+          payment_method_last4: string | null
+          stripe_customer_id: string | null
+          stripe_payment_method_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          balance_microusd?: number
+          created_at?: string
+          organization_id: string
+          payment_method_brand?: string | null
+          payment_method_last4?: string | null
+          stripe_customer_id?: string | null
+          stripe_payment_method_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          balance_microusd?: number
+          created_at?: string
+          organization_id?: string
+          payment_method_brand?: string | null
+          payment_method_last4?: string | null
+          stripe_customer_id?: string | null
+          stripe_payment_method_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
     }
     Views: {

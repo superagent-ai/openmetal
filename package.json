@@ -7,7 +7,8 @@
     "pnpm": ">=11.13.1"
   },
   "scripts": {
-    "dev": "turbo run dev --filter=@openmetal/web --filter=@openmetal/api --filter=@openmetal/worker --concurrency=12",
+    "dev": "turbo run dev --filter=@openmetal/web --filter=@openmetal/api --filter=@openmetal/worker --filter=@openmetal/billing --concurrency=12",
+    "stripe:listen": "node scripts/stripe-listen.mjs",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",

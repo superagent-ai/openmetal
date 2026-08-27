@@ -20,11 +20,7 @@ Set these server-only variables:
 - `STRIPE_SECRET_KEY` — prefer a restricted key with Checkout Sessions, Customers, PaymentIntents, PaymentMethods, and webhook read
 - `STRIPE_WEBHOOK_SECRET` — signing secret for `POST /v1/webhooks/stripe`
 
-Local forwarding:
-
-```bash
-stripe listen --forward-to localhost:4000/v1/webhooks/stripe
-```
+Local forwarding is started by `pnpm dev` (`stripe listen --forward-to localhost:4000/v1/webhooks/stripe`). Copy the printed signing secret into `STRIPE_WEBHOOK_SECRET`. You can also run it on its own with `pnpm stripe:listen`.
 
 The dashboard never credits a balance from a success redirect. Stripe webhooks are the source of truth.
 

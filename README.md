@@ -40,6 +40,7 @@ Prepaid billing uses Stripe Checkout, a 5.5% purchase fee with an $0.80 minimum,
 - Bun 1.3.11 (for standalone CLI builds)
 - Docker (for local Supabase)
 - Supabase CLI 2.105.0 or later (`supabase --version`)
+- Stripe CLI (`stripe login` after `brew install stripe/stripe-cli/stripe`)
 
 ## Installation
 
@@ -199,11 +200,13 @@ Integration, RLS, and Realtime tests require local Supabase plus `pnpm env:local
 - **Magic link missing**: open Mailpit at `http://127.0.0.1:55324` rather than a real mailbox.
 - **OAuth redirect mismatch**: provider callback URLs must be `http://127.0.0.1:55321/auth/v1/callback` locally. The app route is `/auth/callback`.
 - **Port already allocated**: `pnpm supabase:stop` then start again. API uses 4000, web uses 3100.
+- **Stripe webhooks not arriving**: install the Stripe CLI, run `stripe login`, and copy the `pnpm dev` signing secret into `STRIPE_WEBHOOK_SECRET`.
 
 ## Root commands
 
 ```bash
 pnpm dev
+pnpm stripe:listen
 pnpm build
 pnpm lint
 pnpm typecheck

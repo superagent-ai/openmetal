@@ -162,7 +162,7 @@ await metal.projects.create(organizationId, { name: "Alpha", slug: "alpha" });
 await metal.events.list({ projectId, after: cursor });
 ```
 
-The package is private and is not published.
+The workspace package remains private, while `pnpm --filter @openmetal/sdk build:npm` produces the self-contained public npm artifact. See [packages/sdk-typescript/README.md](packages/sdk-typescript/README.md) for SDK usage and publishing details.
 
 ## Realtime delivery and cursor recovery
 

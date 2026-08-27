@@ -11,10 +11,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:npm": "tsdown && node scripts/prepare-npm-package.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --exclude 'test/**/*.integration.test.ts'",
-    "test:integration": "vitest run test/client.integration.test.ts"
+    "test:integration": "vitest run test/client.integration.test.ts",
+    "test:npm": "OPENMETAL_SDK_VERSION=0.0.0-test pnpm build:npm && vitest run test/npm-package.integration.test.ts"
   },
   "dependencies": {
     "@openmetal/contracts": "workspace:*",
@@ -25,6 +27,7 @@
     "@openmetal/typescript-config": "workspace:*",
     "@types/node": "24.12.0",
     "eslint": "9.39.5",
+    "tsdown": "^0.22.14",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
   }

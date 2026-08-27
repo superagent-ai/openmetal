@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 const executable =
   process.env.OPENMETAL_TEST_EXECUTABLE ??
   join(process.cwd(), "dist", process.platform === "win32" ? "openmetal.exe" : "openmetal");
+const expectedVersion = (process.env.OPENMETAL_TEST_VERSION ?? "0.1.0-dev").replace(/^cli-v/, "");
 const requests: Array<{
   url?: string;
   authorization?: string;
@@ -87,7 +88,7 @@ describe("standalone binary", () => {
   it("embeds version metadata", async () => {
     const { stdout } = await execFileAsync(executable, ["--json", "version"]);
     expect(JSON.parse(stdout)).toMatchObject({
-      version: "0.1.0-dev",
+      version: expectedVersion,
       commit: "development",
     });
   });

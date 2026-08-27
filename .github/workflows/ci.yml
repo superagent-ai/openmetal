@@ -30,3 +30,6 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm --filter @openmetal/cli test:integration
+      - run: OPENMETAL_CLI_VERSION=0.0.0-ci pnpm --filter @openmetal/cli build:npm
+      - run: OPENMETAL_TEST_EXECUTABLE=dist/npm/openmetal.js OPENMETAL_TEST_VERSION=0.0.0-ci pnpm --filter @openmetal/cli exec vitest run test/cli.integration.test.ts
+      - run: npm pack ./apps/cli/dist/npm --dry-run

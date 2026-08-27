@@ -84,9 +84,6 @@ export async function accessTokenForUser(
   settings: ResolvedSettings,
   env: RuntimeEnvironment = process.env,
 ): Promise<string> {
-  const explicit = env.OPENMETAL_ACCESS_TOKEN;
-  if (explicit) return explicit;
-
   const stored = await getStoredSession(settings.profileName, env);
   if (settings.accessToken && settings.accessToken !== stored?.accessToken) {
     return settings.accessToken;
@@ -115,12 +112,16 @@ export async function authStatus(
   settings: ResolvedSettings,
   env: RuntimeEnvironment = process.env,
 ): Promise<Record<string, unknown>> {
+  const session = await getStoredSession(settings.profileName, env);
+  if (
+    settings.accessToken &&
+    settings.accessToken !== env.OPENMETAL_ACCESS_TOKEN &&
+    settings.accessToken !== session?.accessToken
+  ) {
+    return { authenticated: true, source: "flag", profile: settings.profileName };
+  }
   if (env.OPENMETAL_ACCESS_TOKEN) {
     return { authenticated: true, source: "environment", profile: settings.profileName };
-  }
-  const session = await getStoredSession(settings.profileName, env);
-  if (settings.accessToken && settings.accessToken !== session?.accessToken) {
-    return { authenticated: true, source: "flag", profile: settings.profileName };
   }
   if (!session) {
     return { authenticated: false, source: null, profile: settings.profileName };

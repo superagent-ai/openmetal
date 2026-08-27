@@ -51,6 +51,20 @@ describe("CLI commands", () => {
     expect(runtime.stdout.read()?.toString()).toContain("Test Organization");
   });
 
+  it("prefers an access-token flag over the environment", async () => {
+    const requests: IncomingMessage[] = [];
+    const baseUrl = await fakeApi(requests);
+    const runtime = testRuntime({
+      OPENMETAL_API_URL: baseUrl,
+      OPENMETAL_ACCESS_TOKEN: "environment-token",
+    });
+
+    await expect(
+      runCli(["--access-token", "flag-token", "--json", "org", "list"], runtime.value),
+    ).resolves.toBe(0);
+    expect(requests[0]?.headers.authorization).toBe("Bearer flag-token");
+  });
+
   it("uses project credentials for operation commands", async () => {
     const requests: IncomingMessage[] = [];
     const baseUrl = await fakeApi(requests);

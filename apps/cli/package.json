@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun run scripts/build-binary.mjs",
+    "build:npm": "bun run scripts/build-npm-package.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --exclude 'test/**/*.integration.test.ts'",

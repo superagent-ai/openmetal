@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build:
@@ -136,10 +137,69 @@ jobs:
       - name: Smoke-test native binary
         env:
           OPENMETAL_TEST_EXECUTABLE: dist/smoke/${{ matrix.executable }}
+          OPENMETAL_TEST_VERSION: smoke
         run: pnpm --filter @openmetal/cli exec vitest run test/cli.integration.test.ts
 
-  release:
+  publish-npm:
     needs: [build, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - run: npm install --global npm@11
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @openmetal/contracts build
+      - run: pnpm --filter @openmetal/sdk build
+      - name: Build npm package
+        env:
+          OPENMETAL_CLI_VERSION: ${{ inputs.version || github.ref_name }}
+          OPENMETAL_BUILD_COMMIT: ${{ github.sha }}
+          OPENMETAL_DEFAULT_API_URL: ${{ vars.OPENMETAL_API_URL }}
+          OPENMETAL_DEFAULT_SUPABASE_URL: ${{ vars.OPENMETAL_SUPABASE_URL }}
+          OPENMETAL_DEFAULT_SUPABASE_KEY: ${{ vars.OPENMETAL_SUPABASE_PUBLISHABLE_KEY }}
+        run: pnpm --filter @openmetal/cli build:npm
+      - name: Pack and smoke-test npm package
+        env:
+          EXPECTED_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          package_json="$(npm pack ./apps/cli/dist/npm --pack-destination "$RUNNER_TEMP" --json)"
+          tarball="$(printf '%s' "$package_json" | node -e 'let input=\"\"; process.stdin.on(\"data\", chunk => input += chunk).on(\"end\", () => console.log(JSON.parse(input)[0].filename))')"
+          smoke_dir="$RUNNER_TEMP/openmetal-npm-smoke"
+          mkdir -p "$smoke_dir"
+          npm install --prefix "$smoke_dir" "$RUNNER_TEMP/$tarball"
+          actual_version="$("$smoke_dir/node_modules/.bin/openmetal" --json version | node -e 'let input=\"\"; process.stdin.on(\"data\", chunk => input += chunk).on(\"end\", () => console.log(JSON.parse(input).version))')"
+          expected_version="${EXPECTED_VERSION#cli-v}"
+          test "$actual_version" = "$expected_version"
+      - name: Check npm version
+        id: npm-version
+        env:
+          PACKAGE_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          version="${PACKAGE_VERSION#cli-v}"
+          if npm view "@openmetal/cli@$version" version --json >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish npm package
+        if: steps.npm-version.outputs.exists != 'true'
+        run: npm publish ./apps/cli/dist/npm --access public
+
+  release:
+    needs: [build, smoke, publish-npm]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v5

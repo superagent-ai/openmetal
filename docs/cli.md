@@ -16,6 +16,14 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/homanp/metal/main/scripts/install-openmetal.ps1 | iex
 ```
 
+With Node.js 22 or later:
+
+```bash
+npm install --global @openmetal/cli
+# or
+npx @openmetal/cli --help
+```
+
 Set `OPENMETAL_VERSION=0.1.0` to install a specific `cli-v0.1.0` release and `OPENMETAL_INSTALL_DIR` to choose the destination. Installers verify the release SHA-256 checksum. Release archives can also be downloaded directly with `curl` from the repository's Releases page.
 
 ## First-time setup
@@ -129,3 +137,39 @@ apps/cli/dist/openmetal --help
 Standalone builds use pinned Bun 1.3.11. Release CI produces macOS, Linux glibc/musl, and Windows artifacts for x64 and arm64.
 
 For production login to work without local configuration, release maintainers set the public repository variables `OPENMETAL_API_URL`, `OPENMETAL_SUPABASE_URL`, and `OPENMETAL_SUPABASE_PUBLISHABLE_KEY` before pushing a `cli-v*` tag. These public endpoints are compiled as defaults; command flags and environment variables still override them.
+
+### First npm publish
+
+The first npm release cannot use trusted publishing because npm requires `@openmetal/cli` to exist before an OIDC trust can be configured.
+
+1. Create or confirm the `@openmetal` npm scope and enable 2FA.
+2. Merge the release workflow to the default branch, then build and publish `0.1.0` from an npm-authenticated local computer:
+
+   ```bash
+   npm login
+   pnpm --filter @openmetal/contracts build
+   pnpm --filter @openmetal/sdk build
+
+   OPENMETAL_CLI_VERSION=0.1.0 \
+   OPENMETAL_BUILD_COMMIT="$(git rev-parse HEAD)" \
+   OPENMETAL_DEFAULT_API_URL="<production-api-url>" \
+   OPENMETAL_DEFAULT_SUPABASE_URL="<production-supabase-url>" \
+   OPENMETAL_DEFAULT_SUPABASE_KEY="<publishable-key>" \
+   pnpm --filter @openmetal/cli build:npm
+
+   npm publish ./apps/cli/dist/npm --access public
+   ```
+
+3. Configure npm trusted publishing for repository `homanp/metal`, workflow `release-cli.yml`, with `npm publish` allowed:
+
+   ```bash
+   npm trust github @openmetal/cli \
+     --repo homanp/metal \
+     --file release-cli.yml \
+     --allow-publish \
+     --yes
+   ```
+
+4. Run the `release-cli` workflow with version `0.1.0` to publish the native GitHub release. It detects that the npm version already exists and does not republish it.
+
+Later `cli-v*` releases publish npm through GitHub OIDC with automatic provenance. No npm token is stored in GitHub.

@@ -32,15 +32,19 @@ describe("PKCE loopback callback", () => {
   });
 
   it("reports an explicit access-token override as authenticated", async () => {
+    const settings = {
+      profileName: "default",
+      apiUrl: "https://api.example.test",
+      accessToken: "explicit-token",
+    };
     await expect(
-      authStatus(
-        {
-          profileName: "default",
-          apiUrl: "https://api.example.test",
-          accessToken: "explicit-token",
-        },
-        { OPENMETAL_CONFIG_HOME: "/nonexistent/openmetal-test" },
-      ),
+      authStatus(settings, { OPENMETAL_CONFIG_HOME: "/nonexistent/openmetal-test" }),
+    ).resolves.toMatchObject({ authenticated: true, source: "flag" });
+    await expect(
+      authStatus(settings, {
+        OPENMETAL_CONFIG_HOME: "/nonexistent/openmetal-test",
+        OPENMETAL_ACCESS_TOKEN: "environment-token",
+      }),
     ).resolves.toMatchObject({ authenticated: true, source: "flag" });
   });
 

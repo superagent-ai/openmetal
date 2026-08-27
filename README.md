@@ -56,7 +56,7 @@ pnpm --filter @openmetal/cli build
 apps/cli/dist/openmetal --help
 ```
 
-Tagged `cli-v*` releases publish checksum-verified binaries for macOS, Linux, and Windows without publishing an npm package. See [docs/cli.md](docs/cli.md) for installation, authentication, command examples, profiles, and CI usage.
+Tagged `cli-v*` releases publish checksum-verified binaries for macOS, Linux, and Windows plus a bundled Node.js package at `@openmetal/cli`. See [docs/cli.md](docs/cli.md) for installation, authentication, command examples, profiles, npm bootstrap, and CI usage.
 
 ## Environment setup
 

@@ -35,3 +35,9 @@ export const ProjectApiKeyListResponseSchema = z.object({
   api_keys: z.array(ProjectApiKeySchema),
 });
 export type ProjectApiKeyListResponse = z.infer<typeof ProjectApiKeyListResponseSchema>;
+
+export const ProjectApiKeyDeleteResponseSchema = z.object({
+  id: OpaqueIdSchema,
+  deleted: z.literal(true),
+});
+export type ProjectApiKeyDeleteResponse = z.infer<typeof ProjectApiKeyDeleteResponseSchema>;

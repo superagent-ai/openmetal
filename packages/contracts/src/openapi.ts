@@ -1,7 +1,14 @@
 import { z } from "zod";
+import {
+  CreateProjectApiKeyRequestSchema,
+  CreateProjectApiKeyResponseSchema,
+  ProjectApiKeyDeleteResponseSchema,
+  ProjectApiKeyListResponseSchema,
+  ProjectApiKeySchema,
+} from "./api-keys.js";
 import { ErrorEnvelopeSchema } from "./errors.js";
 import { CursorEventPageSchema, ListEventsQuerySchema } from "./events.js";
-import { OperationSchema } from "./operations.js";
+import { OperationEventSchema, OperationSchema } from "./operations.js";
 import { ApiMetadataResponseSchema, HealthResponseSchema, ReadinessResponseSchema } from "./ops.js";
 import {
   CreateOrganizationInvitationRequestSchema,
@@ -32,6 +39,7 @@ import {
 } from "./projects.js";
 import {
   CreateSandboxRequestSchema,
+  ProjectSandboxListResponseSchema,
   SandboxListResponseSchema,
   SandboxMutationSchema,
   SandboxSchema,
@@ -128,11 +136,18 @@ export function buildOpenApiDocument(): OpenApiObject {
         CreateProjectRequest: json(CreateProjectRequestSchema),
         UpdateProjectRequest: json(UpdateProjectRequestSchema),
         ProjectDeleteResponse: json(ProjectDeleteResponseSchema),
+        ProjectApiKey: json(ProjectApiKeySchema),
+        CreateProjectApiKeyRequest: json(CreateProjectApiKeyRequestSchema),
+        CreateProjectApiKeyResponse: json(CreateProjectApiKeyResponseSchema),
+        ProjectApiKeyListResponse: json(ProjectApiKeyListResponseSchema),
+        ProjectApiKeyDeleteResponse: json(ProjectApiKeyDeleteResponseSchema),
         CreateSandboxRequest: json(CreateSandboxRequestSchema),
         Sandbox: json(SandboxSchema),
         SandboxMutation: json(SandboxMutationSchema),
+        ProjectSandboxListResponse: json(ProjectSandboxListResponseSchema),
         SandboxListResponse: json(SandboxListResponseSchema),
         Operation: json(OperationSchema),
+        OperationEvent: json(OperationEventSchema),
         CursorEventPage: json(CursorEventPageSchema),
         BillingQuote: json(BillingQuoteSchema),
         CreateBillingCheckoutRequest: json(CreateBillingCheckoutRequestSchema),
@@ -194,6 +209,12 @@ export function buildOpenApiDocument(): OpenApiObject {
           in: "path",
           required: true,
           schema: ref("ProjectId"),
+        },
+        ApiKeyIdPath: {
+          name: "api_key_id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
         },
         SandboxIdPath: {
           name: "sandbox_id",
@@ -660,6 +681,107 @@ export function buildOpenApiDocument(): OpenApiObject {
           },
         },
       },
+      "/v1/projects/{project_id}/api-keys": {
+        parameters: [parameterRef("ProjectIdPath")],
+        get: {
+          operationId: "listProjectApiKeys",
+          tags: ["api keys"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("API keys for the project", "ProjectApiKeyListResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Project not found"),
+          },
+        },
+        post: {
+          operationId: "createProjectApiKey",
+          tags: ["api keys"],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: jsonContent("CreateProjectApiKeyRequest"),
+          },
+          responses: {
+            "201": response("Project API key created", "CreateProjectApiKeyResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Project not found"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+      },
+      "/v1/projects/{project_id}/api-keys/{api_key_id}": {
+        parameters: [parameterRef("ProjectIdPath"), parameterRef("ApiKeyIdPath")],
+        delete: {
+          operationId: "deleteProjectApiKey",
+          tags: ["api keys"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Project API key deleted", "ProjectApiKeyDeleteResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Project API key not found"),
+          },
+        },
+      },
+      "/v1/projects/{project_id}/api-keys/{api_key_id}/revoke": {
+        parameters: [parameterRef("ProjectIdPath"), parameterRef("ApiKeyIdPath")],
+        post: {
+          operationId: "revokeProjectApiKey",
+          tags: ["api keys"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Project API key revoked", "ProjectApiKey"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Project API key not found"),
+          },
+        },
+      },
+      "/v1/projects/{project_id}/sandboxes": {
+        parameters: [parameterRef("ProjectIdPath")],
+        get: {
+          operationId: "listProjectSandboxes",
+          tags: ["sandboxes"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Sandboxes in the project", "ProjectSandboxListResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Project not found"),
+          },
+        },
+      },
+      "/v1/projects/{project_id}/sandboxes/{sandbox_id}/pause": {
+        parameters: [parameterRef("ProjectIdPath"), parameterRef("SandboxIdPath")],
+        post: {
+          operationId: "pauseProjectSandbox",
+          tags: ["sandboxes"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Sandbox pause requested", "SandboxMutation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
+            "409": errorResponse("Sandbox cannot be paused"),
+          },
+        },
+      },
+      "/v1/projects/{project_id}/sandboxes/{sandbox_id}": {
+        parameters: [parameterRef("ProjectIdPath"), parameterRef("SandboxIdPath")],
+        delete: {
+          operationId: "destroyProjectSandbox",
+          tags: ["sandboxes"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Sandbox destruction requested", "SandboxMutation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
+          },
+        },
+      },
       "/v1/sandboxes": {
         parameters: [parameterRef("ProjectScopeHeader")],
         get: {
@@ -769,10 +891,16 @@ export function buildOpenApiDocument(): OpenApiObject {
           security: [{ bearerAuth: [] }],
           responses: {
             "200": {
-              description: "Resumable operation events ordered by sequence",
+              description:
+                "Finite SSE batch of operation events ordered by sequence. Each data field is an OperationEvent.",
               content: {
                 "text/event-stream": {
-                  schema: { type: "string" },
+                  schema: {
+                    type: "string",
+                    examples: [
+                      'id: 1\nevent: queued\ndata: {"sequence":1,"operation_id":"op_example","type":"queued","occurred_at":"2026-08-20T08:00:00.000Z","data":{}}\n\n',
+                    ],
+                  },
                 },
               },
             },

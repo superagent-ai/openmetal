@@ -93,6 +93,72 @@ describe("MetalClient unit", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("retrieves and validates finite operation event batches", async () => {
+    let captured: { url: string; headers: Headers } | undefined;
+    const first = {
+      sequence: 5,
+      operation_id: "op_abc123",
+      type: "attempt_started",
+      occurred_at: "2026-08-20T12:00:00.000Z",
+      data: { provider: "e2b" },
+    };
+    const second = {
+      sequence: 6,
+      operation_id: "op_abc123",
+      type: "state_changed",
+      occurred_at: "2026-08-20T12:00:01.000Z",
+      data: { state: "running" },
+    };
+    const client = new MetalClient({
+      baseUrl: "http://localhost:4000",
+      accessToken: async () => "t",
+      fetch: async (url, init) => {
+        captured = { url: String(url), headers: new Headers(init?.headers) };
+        return new Response(
+          `id: 5\nevent: attempt_started\ndata: ${JSON.stringify(first)}\n\n` +
+            `id: 6\nevent: state_changed\ndata: ${JSON.stringify(second)}\n\n`,
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      },
+    });
+
+    await expect(client.operations.events("op_abc123", { lastEventId: 4 })).resolves.toEqual([
+      first,
+      second,
+    ]);
+    expect(captured?.url).toBe("http://localhost:4000/v1/operations/op_abc123/events");
+    expect(captured?.headers.get("accept")).toBe("text/event-stream");
+    expect(captured?.headers.get("last-event-id")).toBe("4");
+  });
+
+  it("rejects operation event batches whose SSE metadata disagrees with the data", async () => {
+    const client = new MetalClient({
+      baseUrl: "http://localhost:4000",
+      accessToken: async () => "t",
+      fetch: async () =>
+        new Response(
+          'id: 2\nevent: queued\ndata: {"sequence":1,"operation_id":"op_abc123","type":"queued","occurred_at":"2026-08-20T12:00:00.000Z","data":{}}\n\n',
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+
+    await expect(client.operations.events("op_abc123")).rejects.toMatchObject({
+      code: "internal_error",
+      message: "malformed metal api response",
+    });
+  });
+
+  it("returns an empty array for an operation event poll with no new events", async () => {
+    const client = new MetalClient({
+      baseUrl: "http://localhost:4000",
+      accessToken: async () => "t",
+      fetch: async () =>
+        new Response("", { status: 200, headers: { "content-type": "text/event-stream" } }),
+    });
+
+    await expect(client.operations.events("op_abc123", { lastEventId: 6 })).resolves.toEqual([]);
+  });
+
   it("does not retry POST writes", async () => {
     const fetchMock = vi
       .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()

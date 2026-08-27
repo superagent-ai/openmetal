@@ -37,6 +37,7 @@ Prepaid billing uses Stripe Checkout, a 5.5% purchase fee with an $0.80 minimum,
 
 - Node.js 22 or later
 - pnpm 11.13.1
+- Bun 1.3.11 (for standalone CLI builds)
 - Docker (for local Supabase)
 - Supabase CLI 2.105.0 or later (`supabase --version`)
 
@@ -45,6 +46,17 @@ Prepaid billing uses Stripe Checkout, a 5.5% purchase fee with an $0.80 minimum,
 ```bash
 pnpm install --frozen-lockfile
 ```
+
+## OpenMetal CLI
+
+The private `@openmetal/cli` workspace builds the standalone `openmetal` binary. It supports browser login for control-plane administration, project API keys for sandbox operations, human-readable terminal output, and `--json`/`--no-input` automation.
+
+```bash
+pnpm --filter @openmetal/cli build
+apps/cli/dist/openmetal --help
+```
+
+Tagged `cli-v*` releases publish checksum-verified binaries for macOS, Linux, and Windows without publishing an npm package. See [docs/cli.md](docs/cli.md) for installation, authentication, command examples, profiles, and CI usage.
 
 ## Environment setup
 

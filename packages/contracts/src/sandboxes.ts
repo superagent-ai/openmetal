@@ -228,6 +228,11 @@ export const SandboxMutationSchema = z.object({
 });
 export type SandboxMutation = z.infer<typeof SandboxMutationSchema>;
 
+export const ProjectSandboxListResponseSchema = z.object({
+  sandboxes: z.array(SandboxSchema),
+});
+export type ProjectSandboxListResponse = z.infer<typeof ProjectSandboxListResponseSchema>;
+
 export const ListSandboxesQuerySchema = z.object({
   cursor: CursorSchema.optional(),
   limit: PaginationLimitSchema.default(50),

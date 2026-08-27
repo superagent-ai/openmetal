@@ -1,0 +1,32 @@
+{
+  "name": "@openmetal/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "openmetal": "./dist/openmetal"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun run scripts/build-binary.mjs",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --exclude 'test/**/*.integration.test.ts'",
+    "test:integration": "pnpm build && vitest run test/cli.integration.test.ts"
+  },
+  "dependencies": {
+    "@openmetal/contracts": "workspace:*",
+    "@openmetal/sdk": "workspace:*",
+    "@supabase/supabase-js": "2.112.3",
+    "commander": "^14.0.3",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@openmetal/eslint-config": "workspace:*",
+    "@openmetal/typescript-config": "workspace:*",
+    "@types/node": "24.12.0",
+    "eslint": "9.39.5",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

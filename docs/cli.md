@@ -170,6 +170,7 @@ The first npm release cannot use trusted publishing because npm requires `@openm
      --yes
    ```
 
-4. Run the `release-cli` workflow with version `0.1.0` to publish the native GitHub release. It detects that the npm version already exists and does not republish it.
+4. Create a GitHub Actions environment named `npm` and configure required reviewers plus deployment branch/tag restrictions.
+5. Run the `release-cli` workflow with version `0.1.0` to publish the native GitHub release. It detects that the npm version already exists and does not republish it.
 
 Later `cli-v*` releases publish npm through GitHub OIDC with automatic provenance. No npm token is stored in GitHub.

@@ -1,0 +1,26 @@
+{
+  "provider": "auto",
+  "source": {
+    "kind": "environment",
+    "environment": "metal/node",
+    "version": "latest"
+  },
+  "resources": {
+    "vcpu": 2,
+    "memory_mb": 4096,
+    "disk_mb": 8192,
+    "architecture": "any"
+  },
+  "lifecycle": {
+    "runtime_timeout_seconds": 1800,
+    "on_runtime_timeout": "destroy"
+  },
+  "fallback": {
+    "providers": ["e2b", "codesandbox", "runloop"],
+    "max_attempts": 3
+  },
+  "metadata": {
+    "agent": "example",
+    "purpose": "temporary-development"
+  }
+}

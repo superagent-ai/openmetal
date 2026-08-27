@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   detectCursorGap,
+  EventTypeValueSchema,
   isDuplicateDelivery,
   organizationTopic,
   parseCursor,
@@ -53,6 +54,38 @@ describe("events", () => {
         reason: "insufficient_credits",
       }),
     ).toMatchObject({ job_type: "billing.spend_limit.enforce" });
+    expect(
+      validateOutboxPayload({
+        job_type: "process.execute",
+        process_id: "33333333-3333-4333-8333-333333333333",
+      }),
+    ).toMatchObject({ job_type: "process.execute" });
+    expect(
+      validateOutboxPayload({
+        job_type: "filesystem.write",
+        runtime_operation_id: "44444444-4444-4444-8444-444444444444",
+      }),
+    ).toMatchObject({ job_type: "filesystem.write" });
+    expect(
+      validateOutboxPayload({
+        job_type: "endpoint.revoke",
+        endpoint_id: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).toMatchObject({ job_type: "endpoint.revoke" });
+    expect(() =>
+      validateOutboxPayload({
+        job_type: "process.cancel",
+        process_id: "proc_public-id-is-not-internal",
+      }),
+    ).toThrow();
+  });
+
+  it("publishes stable runtime lifecycle event names", () => {
+    expect(EventTypeValueSchema.parse("process.cancel_requested")).toBe("process.cancel_requested");
+    expect(EventTypeValueSchema.parse("runtime_operation.completed")).toBe(
+      "runtime_operation.completed",
+    );
+    expect(EventTypeValueSchema.parse("endpoint.expired")).toBe("endpoint.expired");
   });
 
   it("deduplicates deliveries by event id and cursor", () => {

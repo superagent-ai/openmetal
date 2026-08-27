@@ -6,6 +6,7 @@ export class MetalError extends Error {
   readonly requestId: string;
   readonly retryable: boolean;
   readonly details?: Record<string, unknown>;
+  readonly idempotencyKey?: string;
 
   constructor(input: {
     message: string;
@@ -14,6 +15,7 @@ export class MetalError extends Error {
     requestId: string;
     retryable?: boolean;
     details?: Record<string, unknown>;
+    idempotencyKey?: string;
   }) {
     super(input.message);
     this.name = "MetalError";
@@ -22,9 +24,14 @@ export class MetalError extends Error {
     this.requestId = input.requestId;
     this.retryable = input.retryable ?? false;
     this.details = input.details;
+    this.idempotencyKey = input.idempotencyKey;
   }
 
-  static fromEnvelope(status: number, envelope: ErrorEnvelope): MetalError {
+  static fromEnvelope(
+    status: number,
+    envelope: ErrorEnvelope,
+    idempotencyKey?: string,
+  ): MetalError {
     return new MetalError({
       status,
       message: envelope.message,
@@ -32,19 +39,43 @@ export class MetalError extends Error {
       requestId: envelope.request_id,
       retryable: envelope.retryable,
       details: envelope.details,
+      idempotencyKey,
     });
   }
 
-  static fromUnknown(status: number, body: unknown, requestId: string): MetalError {
+  static fromUnknown(
+    status: number,
+    body: unknown,
+    requestId: string,
+    idempotencyKey?: string,
+  ): MetalError {
     const parsed = ErrorEnvelopeSchema.safeParse(body);
     if (parsed.success) {
-      return MetalError.fromEnvelope(status, parsed.data);
+      return MetalError.fromEnvelope(status, parsed.data, idempotencyKey);
     }
     return new MetalError({
       status,
       message: "unexpected metal api response",
       code: "internal_error",
       requestId,
+      idempotencyKey,
     });
+  }
+}
+
+export class RuntimeOperationWaitError extends Error {
+  readonly operationId: string;
+  readonly idempotencyKey: string;
+
+  constructor(input: {
+    message: string;
+    operationId: string;
+    idempotencyKey: string;
+    cause?: unknown;
+  }) {
+    super(input.message, { cause: input.cause });
+    this.name = "RuntimeOperationWaitError";
+    this.operationId = input.operationId;
+    this.idempotencyKey = input.idempotencyKey;
   }
 }

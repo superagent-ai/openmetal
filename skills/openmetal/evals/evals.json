@@ -28,12 +28,13 @@
     {
       "id": 3,
       "prompt": "Create an OpenMetal sandbox, upload package.json, run npm test inside it, and return the output.",
-      "expected_output": "An explicit explanation that public command and filesystem APIs are not currently implemented, without fabricating SDK methods or CLI commands; provisioning-only alternatives may be offered.",
+      "expected_output": "A safe workflow that selects a provider supporting ordered processes and file writes, waits for a ready sandbox, uploads package.json with the exact CLI or SDK surface, runs npm test through the process API, streams or returns output, and destroys the sandbox.",
       "files": [],
       "assertions": [
-        "The response clearly states that command execution and file upload are not currently available",
-        "The response does not invent SDK methods or CLI commands",
-        "The response does not create a billable sandbox that cannot complete the requested task"
+        "The provider is compatible with both process execution and filesystem write",
+        "The response uses openmetal file upload or metal.filesystem.upload",
+        "The response uses openmetal sandbox exec or metal.processes.create and processes.events",
+        "The sandbox is ready before runtime operations and is destroyed afterward"
       ]
     }
   ]

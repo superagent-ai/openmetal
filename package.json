@@ -12,7 +12,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "test:integration": "turbo run test:integration",
+    "test:integration": "turbo run test:integration --concurrency=1 && pnpm --filter @openmetal/api test:runtime-full-stack",
     "test:rls": "pnpm --filter @openmetal/testkit test:rls",
     "test:realtime": "pnpm --filter @openmetal/testkit test:realtime",
     "test:live": "METAL_LIVE_TESTS=1 pnpm --filter @openmetal/worker test:live",

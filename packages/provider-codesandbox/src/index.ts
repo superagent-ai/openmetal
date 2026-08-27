@@ -85,6 +85,29 @@ export class CodeSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "tier",
     sources: ["environment", "provider_template"],
+    runtime: {
+      process: {
+        exec: false,
+        streams: false,
+        cancel: false,
+        maxOutputBytes: 0,
+      },
+      files: {
+        read: false,
+        write: false,
+        writeModes: [],
+        createParents: false,
+        list: false,
+        delete: false,
+        maxReadBytes: 0,
+        maxWriteBytes: 0,
+        maxListEntries: 0,
+      },
+      httpEndpoints: {
+        expose: false,
+        revoke: false,
+      },
+    },
   } as const;
   private readonly apiKey: string;
   private readonly apiUrl: string;

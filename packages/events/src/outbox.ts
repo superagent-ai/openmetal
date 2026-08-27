@@ -9,6 +9,14 @@ export const OutboxJobTypeSchema = z.enum([
   "sandbox.resume",
   "sandbox.cost.sync",
   "sandbox.destroy",
+  "process.execute",
+  "process.cancel",
+  "filesystem.read",
+  "filesystem.write",
+  "filesystem.list",
+  "filesystem.delete",
+  "endpoint.create",
+  "endpoint.revoke",
   "billing.auto_topup.evaluate",
   "billing.spend_limit.enforce",
 ]);
@@ -50,6 +58,38 @@ export const SandboxCostSyncJobPayloadSchema = z.object({
   sandbox_id: z.uuid(),
   final: z.boolean().default(false),
 });
+export const ProcessExecuteJobPayloadSchema = z.object({
+  job_type: z.literal("process.execute"),
+  process_id: z.uuid(),
+});
+export const ProcessCancelJobPayloadSchema = z.object({
+  job_type: z.literal("process.cancel"),
+  process_id: z.uuid(),
+});
+export const FilesystemReadJobPayloadSchema = z.object({
+  job_type: z.literal("filesystem.read"),
+  runtime_operation_id: z.uuid(),
+});
+export const FilesystemWriteJobPayloadSchema = z.object({
+  job_type: z.literal("filesystem.write"),
+  runtime_operation_id: z.uuid(),
+});
+export const FilesystemListJobPayloadSchema = z.object({
+  job_type: z.literal("filesystem.list"),
+  runtime_operation_id: z.uuid(),
+});
+export const FilesystemDeleteJobPayloadSchema = z.object({
+  job_type: z.literal("filesystem.delete"),
+  runtime_operation_id: z.uuid(),
+});
+export const EndpointCreateJobPayloadSchema = z.object({
+  job_type: z.literal("endpoint.create"),
+  endpoint_id: z.uuid(),
+});
+export const EndpointRevokeJobPayloadSchema = z.object({
+  job_type: z.literal("endpoint.revoke"),
+  endpoint_id: z.uuid(),
+});
 export const BillingAutoTopupEvaluateJobPayloadSchema = z.object({
   job_type: z.literal("billing.auto_topup.evaluate"),
   organization_id: z.uuid(),
@@ -68,6 +108,14 @@ export const OutboxJobPayloadSchema = z.discriminatedUnion("job_type", [
   SandboxResumeJobPayloadSchema,
   SandboxCostSyncJobPayloadSchema,
   SandboxDestroyJobPayloadSchema,
+  ProcessExecuteJobPayloadSchema,
+  ProcessCancelJobPayloadSchema,
+  FilesystemReadJobPayloadSchema,
+  FilesystemWriteJobPayloadSchema,
+  FilesystemListJobPayloadSchema,
+  FilesystemDeleteJobPayloadSchema,
+  EndpointCreateJobPayloadSchema,
+  EndpointRevokeJobPayloadSchema,
   BillingAutoTopupEvaluateJobPayloadSchema,
   BillingSpendLimitEnforceJobPayloadSchema,
 ]);

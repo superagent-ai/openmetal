@@ -4742,6 +4742,1871 @@
         ],
         "additionalProperties": false
       },
+      "CreateProcessRequest": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "minItems": 1,
+            "maxItems": 4096,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 131072
+            }
+          },
+          "cwd": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+          },
+          "environment": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 16384
+            }
+          },
+          "timeout_seconds": {
+            "default": 300,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600
+          },
+          "max_output_bytes": {
+            "default": 10485760,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 104857600
+          }
+        },
+        "required": [
+          "command",
+          "timeout_seconds",
+          "max_output_bytes"
+        ],
+        "additionalProperties": false
+      },
+      "Process": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^proc_[A-Za-z0-9]+$"
+          },
+          "type": {
+            "type": "string",
+            "const": "process"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^prj_[A-Za-z0-9]+$"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]+$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "cancelling",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "timed_out"
+            ]
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "max_output_bytes": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "output_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "output_truncated": {
+            "type": "boolean"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "termination_signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "retryable": {
+                    "type": "boolean"
+                  },
+                  "details": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "retryable"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider_capabilities": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "blaxel",
+                  "cloudflare",
+                  "codesandbox",
+                  "daytona",
+                  "e2b",
+                  "modal",
+                  "northflank",
+                  "runloop",
+                  "vercel"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "process": {
+                "type": "object",
+                "properties": {
+                  "execute": {
+                    "type": "boolean"
+                  },
+                  "cancel": {
+                    "type": "boolean"
+                  },
+                  "ordered_output": {
+                    "type": "boolean"
+                  },
+                  "max_timeout_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_output_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "execute",
+                  "cancel",
+                  "ordered_output"
+                ],
+                "additionalProperties": false
+              },
+              "filesystem": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "boolean"
+                  },
+                  "write": {
+                    "type": "boolean"
+                  },
+                  "write_modes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "create",
+                        "overwrite",
+                        "append"
+                      ]
+                    }
+                  },
+                  "create_parents": {
+                    "type": "boolean"
+                  },
+                  "list": {
+                    "type": "boolean"
+                  },
+                  "delete": {
+                    "type": "boolean"
+                  },
+                  "max_read_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_write_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "read",
+                  "write",
+                  "write_modes",
+                  "create_parents",
+                  "list",
+                  "delete"
+                ],
+                "additionalProperties": false
+              },
+              "http_endpoints": {
+                "type": "object",
+                "properties": {
+                  "create": {
+                    "type": "boolean"
+                  },
+                  "revoke": {
+                    "type": "boolean"
+                  },
+                  "max_lease_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "create",
+                  "revoke"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "provider",
+              "version"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "project_id",
+          "sandbox_id",
+          "state",
+          "command",
+          "cwd",
+          "timeout_seconds",
+          "max_output_bytes",
+          "output_bytes",
+          "output_truncated",
+          "exit_code",
+          "termination_signal",
+          "error",
+          "cancel_requested_at",
+          "created_at",
+          "started_at",
+          "completed_at"
+        ],
+        "additionalProperties": false
+      },
+      "ProcessEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "process_id": {
+                "type": "string",
+                "pattern": "^proc_[A-Za-z0-9]+$"
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "const": "queued"
+              },
+              "data": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "sequence",
+              "process_id",
+              "occurred_at",
+              "type",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "process_id": {
+                "type": "string",
+                "pattern": "^proc_[A-Za-z0-9]+$"
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "const": "started"
+              },
+              "data": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "sequence",
+              "process_id",
+              "occurred_at",
+              "type",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "process_id": {
+                "type": "string",
+                "pattern": "^proc_[A-Za-z0-9]+$"
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "const": "stdout"
+              },
+              "data": {
+                "type": "object",
+                "properties": {
+                  "data_base64": {
+                    "type": "string",
+                    "maxLength": 13981016,
+                    "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+                  },
+                  "byte_length": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "stream_offset_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "data_base64",
+                  "byte_length",
+                  "stream_offset_bytes"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "sequence",
+              "process_id",
+              "occurred_at",
+              "type",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "process_id": {
+                "type": "string",
+                "pattern": "^proc_[A-Za-z0-9]+$"
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "const": "stderr"
+              },
+              "data": {
+                "type": "object",
+                "properties": {
+                  "data_base64": {
+                    "type": "string",
+                    "maxLength": 13981016,
+                    "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+                  },
+                  "byte_length": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "stream_offset_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "data_base64",
+                  "byte_length",
+                  "stream_offset_bytes"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "sequence",
+              "process_id",
+              "occurred_at",
+              "type",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "process_id": {
+                "type": "string",
+                "pattern": "^proc_[A-Za-z0-9]+$"
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "const": "exited"
+              },
+              "data": {
+                "type": "object",
+                "properties": {
+                  "exit_code": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "exit_code"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "sequence",
+              "process_id",
+              "occurred_at",
+              "type",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "process_id": {
+                "type": "string",
+                "pattern": "^proc_[A-Za-z0-9]+$"
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "const": "cancelled"
+              },
+              "data": {
+                "type": "object",
+                "properties": {
+                  "termination_signal": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "termination_signal"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "sequence",
+              "process_id",
+              "occurred_at",
+              "type",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "process_id": {
+                "type": "string",
+                "pattern": "^proc_[A-Za-z0-9]+$"
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "const": "timed_out"
+              },
+              "data": {
+                "type": "object",
+                "properties": {
+                  "timeout_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "termination_signal": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "timeout_seconds",
+                  "termination_signal"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "sequence",
+              "process_id",
+              "occurred_at",
+              "type",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "process_id": {
+                "type": "string",
+                "pattern": "^proc_[A-Za-z0-9]+$"
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "const": "failed"
+              },
+              "data": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "retryable": {
+                    "type": "boolean"
+                  },
+                  "details": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "retryable"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "sequence",
+              "process_id",
+              "occurred_at",
+              "type",
+              "data"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ReadFileRequest": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+          },
+          "offset_bytes": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit_bytes": {
+            "default": 1048576,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10485760
+          }
+        },
+        "required": [
+          "path",
+          "offset_bytes",
+          "limit_bytes"
+        ],
+        "additionalProperties": false
+      },
+      "WriteFileRequest": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+          },
+          "data_base64": {
+            "type": "string",
+            "maxLength": 13981016,
+            "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          },
+          "mode": {
+            "default": "overwrite",
+            "type": "string",
+            "enum": [
+              "create",
+              "overwrite",
+              "append"
+            ]
+          },
+          "create_parents": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "data_base64",
+          "mode",
+          "create_parents"
+        ],
+        "additionalProperties": false
+      },
+      "ListFilesRequest": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+          },
+          "recursive": {
+            "default": false,
+            "type": "boolean"
+          },
+          "max_entries": {
+            "default": 1000,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "path",
+          "recursive",
+          "max_entries"
+        ],
+        "additionalProperties": false
+      },
+      "DeleteFileRequest": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+          },
+          "recursive": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "recursive"
+        ],
+        "additionalProperties": false
+      },
+      "RuntimeOperation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^rop_[A-Za-z0-9]+$"
+          },
+          "type": {
+            "type": "string",
+            "const": "runtime_operation"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^prj_[A-Za-z0-9]+$"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]+$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "filesystem_read",
+              "filesystem_write",
+              "filesystem_list",
+              "filesystem_delete"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "filesystem_read"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+                      },
+                      "data_base64": {
+                        "type": "string",
+                        "maxLength": 13981016,
+                        "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+                      },
+                      "offset_bytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "byte_length": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "eof": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "path",
+                      "data_base64",
+                      "offset_bytes",
+                      "byte_length",
+                      "eof"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "filesystem_write"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+                      },
+                      "bytes_written": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "path",
+                      "bytes_written"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "filesystem_list"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+                      },
+                      "entries": {
+                        "maxItems": 10000,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "file",
+                                "directory",
+                                "symlink",
+                                "other"
+                              ]
+                            },
+                            "size_bytes": {
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "modified_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "type",
+                            "size_bytes",
+                            "modified_at"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "path",
+                      "entries",
+                      "truncated"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "filesystem_delete"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+                      },
+                      "deleted": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "path",
+                      "deleted"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "retryable": {
+                    "type": "boolean"
+                  },
+                  "details": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "retryable"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider_capabilities": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "blaxel",
+                  "cloudflare",
+                  "codesandbox",
+                  "daytona",
+                  "e2b",
+                  "modal",
+                  "northflank",
+                  "runloop",
+                  "vercel"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "process": {
+                "type": "object",
+                "properties": {
+                  "execute": {
+                    "type": "boolean"
+                  },
+                  "cancel": {
+                    "type": "boolean"
+                  },
+                  "ordered_output": {
+                    "type": "boolean"
+                  },
+                  "max_timeout_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_output_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "execute",
+                  "cancel",
+                  "ordered_output"
+                ],
+                "additionalProperties": false
+              },
+              "filesystem": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "boolean"
+                  },
+                  "write": {
+                    "type": "boolean"
+                  },
+                  "write_modes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "create",
+                        "overwrite",
+                        "append"
+                      ]
+                    }
+                  },
+                  "create_parents": {
+                    "type": "boolean"
+                  },
+                  "list": {
+                    "type": "boolean"
+                  },
+                  "delete": {
+                    "type": "boolean"
+                  },
+                  "max_read_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_write_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "read",
+                  "write",
+                  "write_modes",
+                  "create_parents",
+                  "list",
+                  "delete"
+                ],
+                "additionalProperties": false
+              },
+              "http_endpoints": {
+                "type": "object",
+                "properties": {
+                  "create": {
+                    "type": "boolean"
+                  },
+                  "revoke": {
+                    "type": "boolean"
+                  },
+                  "max_lease_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "create",
+                  "revoke"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "provider",
+              "version"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "project_id",
+          "sandbox_id",
+          "kind",
+          "state",
+          "result",
+          "error",
+          "created_at",
+          "started_at",
+          "completed_at"
+        ],
+        "additionalProperties": false
+      },
+      "CreateSandboxEndpointRequest": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "protocol": {
+            "default": "http",
+            "type": "string",
+            "const": "http"
+          },
+          "lease_seconds": {
+            "default": 3600,
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400
+          }
+        },
+        "required": [
+          "port",
+          "protocol",
+          "lease_seconds"
+        ],
+        "additionalProperties": false
+      },
+      "SandboxEndpoint": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ep_[A-Za-z0-9]+$"
+          },
+          "type": {
+            "type": "string",
+            "const": "sandbox_endpoint"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^prj_[A-Za-z0-9]+$"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]+$"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "protocol": {
+            "type": "string",
+            "const": "http"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "provisioning",
+              "active",
+              "revoking",
+              "revoked",
+              "expired",
+              "failed"
+            ]
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lease_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "retryable": {
+                    "type": "boolean"
+                  },
+                  "details": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "retryable"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "provider_capabilities": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "blaxel",
+                  "cloudflare",
+                  "codesandbox",
+                  "daytona",
+                  "e2b",
+                  "modal",
+                  "northflank",
+                  "runloop",
+                  "vercel"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "process": {
+                "type": "object",
+                "properties": {
+                  "execute": {
+                    "type": "boolean"
+                  },
+                  "cancel": {
+                    "type": "boolean"
+                  },
+                  "ordered_output": {
+                    "type": "boolean"
+                  },
+                  "max_timeout_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_output_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "execute",
+                  "cancel",
+                  "ordered_output"
+                ],
+                "additionalProperties": false
+              },
+              "filesystem": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "boolean"
+                  },
+                  "write": {
+                    "type": "boolean"
+                  },
+                  "write_modes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "create",
+                        "overwrite",
+                        "append"
+                      ]
+                    }
+                  },
+                  "create_parents": {
+                    "type": "boolean"
+                  },
+                  "list": {
+                    "type": "boolean"
+                  },
+                  "delete": {
+                    "type": "boolean"
+                  },
+                  "max_read_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_write_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "read",
+                  "write",
+                  "write_modes",
+                  "create_parents",
+                  "list",
+                  "delete"
+                ],
+                "additionalProperties": false
+              },
+              "http_endpoints": {
+                "type": "object",
+                "properties": {
+                  "create": {
+                    "type": "boolean"
+                  },
+                  "revoke": {
+                    "type": "boolean"
+                  },
+                  "max_lease_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "create",
+                  "revoke"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "provider",
+              "version"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "project_id",
+          "sandbox_id",
+          "port",
+          "protocol",
+          "state",
+          "url",
+          "lease_expires_at",
+          "revoked_at",
+          "error",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "SandboxEndpointListResponse": {
+        "type": "object",
+        "properties": {
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^ep_[A-Za-z0-9]+$"
+                },
+                "type": {
+                  "type": "string",
+                  "const": "sandbox_endpoint"
+                },
+                "project_id": {
+                  "type": "string",
+                  "pattern": "^prj_[A-Za-z0-9]+$"
+                },
+                "sandbox_id": {
+                  "type": "string",
+                  "pattern": "^sbx_[A-Za-z0-9]+$"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "protocol": {
+                  "type": "string",
+                  "const": "http"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "provisioning",
+                    "active",
+                    "revoking",
+                    "revoked",
+                    "expired",
+                    "failed"
+                  ]
+                },
+                "url": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lease_expires_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revoked_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "error": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "details": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "retryable"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "provider_capabilities": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "blaxel",
+                        "cloudflare",
+                        "codesandbox",
+                        "daytona",
+                        "e2b",
+                        "modal",
+                        "northflank",
+                        "runloop",
+                        "vercel"
+                      ]
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "process": {
+                      "type": "object",
+                      "properties": {
+                        "execute": {
+                          "type": "boolean"
+                        },
+                        "cancel": {
+                          "type": "boolean"
+                        },
+                        "ordered_output": {
+                          "type": "boolean"
+                        },
+                        "max_timeout_seconds": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "max_output_bytes": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "execute",
+                        "cancel",
+                        "ordered_output"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "filesystem": {
+                      "type": "object",
+                      "properties": {
+                        "read": {
+                          "type": "boolean"
+                        },
+                        "write": {
+                          "type": "boolean"
+                        },
+                        "write_modes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "create",
+                              "overwrite",
+                              "append"
+                            ]
+                          }
+                        },
+                        "create_parents": {
+                          "type": "boolean"
+                        },
+                        "list": {
+                          "type": "boolean"
+                        },
+                        "delete": {
+                          "type": "boolean"
+                        },
+                        "max_read_bytes": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "max_write_bytes": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "read",
+                        "write",
+                        "write_modes",
+                        "create_parents",
+                        "list",
+                        "delete"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "http_endpoints": {
+                      "type": "object",
+                      "properties": {
+                        "create": {
+                          "type": "boolean"
+                        },
+                        "revoke": {
+                          "type": "boolean"
+                        },
+                        "max_lease_seconds": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "create",
+                        "revoke"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "version"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "project_id",
+                "sandbox_id",
+                "port",
+                "protocol",
+                "state",
+                "url",
+                "lease_expires_at",
+                "revoked_at",
+                "error",
+                "created_at",
+                "updated_at"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "endpoints",
+          "next_cursor"
+        ],
+        "additionalProperties": false
+      },
       "CursorEventPage": {
         "type": "object",
         "properties": {
@@ -5201,6 +7066,18 @@
         "type": "string",
         "pattern": "^op_[A-Za-z0-9]+$"
       },
+      "ProcessId": {
+        "type": "string",
+        "pattern": "^proc_[A-Za-z0-9]+$"
+      },
+      "RuntimeOperationId": {
+        "type": "string",
+        "pattern": "^rop_[A-Za-z0-9]+$"
+      },
+      "SandboxEndpointId": {
+        "type": "string",
+        "pattern": "^ep_[A-Za-z0-9]+$"
+      },
       "Cursor": {
         "type": "string",
         "minLength": 1,
@@ -5287,6 +7164,30 @@
           "$ref": "#/components/schemas/OperationId"
         }
       },
+      "ProcessIdPath": {
+        "name": "process_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ProcessId"
+        }
+      },
+      "RuntimeOperationIdPath": {
+        "name": "runtime_operation_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/RuntimeOperationId"
+        }
+      },
+      "SandboxEndpointIdPath": {
+        "name": "endpoint_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/SandboxEndpointId"
+        }
+      },
       "ProjectScopeHeader": {
         "name": "X-Metal-Project-ID",
         "in": "header",
@@ -5321,6 +7222,16 @@
         "in": "header",
         "required": false,
         "description": "Resume after the last received operation event sequence.",
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "LastProcessEventIdHeader": {
+        "name": "Last-Event-ID",
+        "in": "header",
+        "required": false,
+        "description": "Resume after the last received process event sequence.",
         "schema": {
           "type": "integer",
           "minimum": 0
@@ -7832,6 +9743,1006 @@
           },
           "409": {
             "description": "Sandbox cannot be resumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/processes": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "post": {
+        "operationId": "createSandboxProcess",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProcessRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Process execution accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Process"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Idempotency-Key is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or sandbox unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid process request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/processes/{process_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProcessIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "get": {
+        "operationId": "getSandboxProcess",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Process status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Process"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Process not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/processes/{process_id}/events": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProcessIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        },
+        {
+          "$ref": "#/components/parameters/LastProcessEventIdHeader"
+        }
+      ],
+      "get": {
+        "operationId": "streamSandboxProcessEvents",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Finite SSE batch of stdout, stderr, and lifecycle events in process sequence order.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "examples": [
+                    "id: 3\nevent: stdout\ndata: {\"sequence\":3,\"process_id\":\"proc_example\",\"type\":\"stdout\",\"occurred_at\":\"2026-08-27T08:00:00.000Z\",\"data\":{\"data_base64\":\"aGVsbG8K\",\"byte_length\":6,\"stream_offset_bytes\":0}}\n\n"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Process not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/processes/{process_id}/actions/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProcessIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "post": {
+        "operationId": "cancelSandboxProcess",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OptionalIdempotencyKeyHeader"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Process cancellation accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Process"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Process not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Process is already terminal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/filesystem/read": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "post": {
+        "operationId": "readSandboxFile",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadFileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Filesystem read accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeOperation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or file not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filesystem request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/filesystem/write": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "post": {
+        "operationId": "writeSandboxFile",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OptionalIdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WriteFileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Filesystem write accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeOperation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency or file conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filesystem request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/filesystem/list": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "post": {
+        "operationId": "listSandboxFiles",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListFilesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Filesystem list accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeOperation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or path not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filesystem request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/filesystem/delete": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "post": {
+        "operationId": "deleteSandboxFile",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OptionalIdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteFileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Filesystem delete accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeOperation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or path not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filesystem request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/runtime-operations/{runtime_operation_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/RuntimeOperationIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "get": {
+        "operationId": "getSandboxRuntimeOperation",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Runtime operation status and result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeOperation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Runtime operation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/endpoints": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "get": {
+        "operationId": "listSandboxEndpoints",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CursorQuery"
+          },
+          {
+            "$ref": "#/components/parameters/LimitQuery"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Leased HTTP endpoint page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxEndpointListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createSandboxEndpoint",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSandboxEndpointRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "HTTP endpoint lease accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxEndpoint"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Idempotency-Key is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency or endpoint conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid endpoint request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/endpoints/{endpoint_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/SandboxEndpointIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "delete": {
+        "operationId": "revokeSandboxEndpoint",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "HTTP endpoint revocation accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxEndpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Endpoint not found",
             "content": {
               "application/json": {
                 "schema": {

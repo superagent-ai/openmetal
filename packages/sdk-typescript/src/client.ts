@@ -3,8 +3,12 @@ import {
   BillingCheckoutResponseSchema,
   BillingQuoteSchema,
   BillingSetupResponseSchema,
+  CreateProcessRequestSchema,
+  CreateSandboxEndpointRequestSchema,
   CreateSandboxRequestSchema,
   ConfiguredProviderCredentialSchema,
+  DeleteFileRequestSchema,
+  ListFilesRequestSchema,
   OrganizationBillingSchema,
   OrganizationInvitationRevokeResponseSchema,
   OrganizationInvitationSchema,
@@ -14,20 +18,30 @@ import {
   OperationEventSchema,
   OperationSchema,
   ProjectApiKeySchema,
+  ProcessEventSchema,
+  ProcessSchema,
   ProviderCredentialDeleteResponseSchema,
   ProviderCredentialInputSchema,
   ProviderCredentialListResponseSchema,
+  ReadFileRequestSchema,
+  RuntimeOperationSchema,
+  SandboxEndpointListResponseSchema,
+  SandboxEndpointSchema,
   SandboxMutationSchema,
   SandboxListResponseSchema,
   SandboxSchema,
+  WriteFileRequestSchema,
   type CreateSandboxRequest,
   type InvitationRole,
   type Operation,
-  type OperationEvent,
+  type Process,
+  type ProcessEvent,
   type ProviderCredentialInput,
+  type RuntimeOperation,
+  type SandboxEndpoint,
   type SandboxMutation,
 } from "@openmetal/contracts";
-import { MetalError } from "./error.js";
+import { MetalError, RuntimeOperationWaitError } from "./error.js";
 
 export type AccessTokenProvider = () =>
   Promise<string | null | undefined> | string | null | undefined;
@@ -44,6 +58,31 @@ export type MetalClientOptions = {
   };
 };
 
+export type BinaryData = ArrayBuffer | ArrayBufferView | Blob;
+
+export type BinaryWriteFileInput = {
+  path: string;
+  data: BinaryData;
+  mode?: "create" | "overwrite" | "append";
+  create_parents?: boolean;
+};
+
+export type ProcessEventStreamOptions = {
+  lastEventId?: number;
+  projectId?: string;
+  reconnectDelayMs?: number;
+  signal?: AbortSignal;
+};
+
+export type RuntimeWaitOptions = {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  projectId?: string;
+  signal?: AbortSignal;
+};
+
+const TERMINAL_PROCESS_STATES = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
+
 type RequestOptions = {
   method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
   path: string;
@@ -54,6 +93,7 @@ type RequestOptions = {
   projectId?: string;
   responseFormat?: "json" | "text";
   schema: z.ZodType;
+  signal?: AbortSignal;
   timeoutMs?: number;
 };
 
@@ -65,9 +105,31 @@ function jitter(ms: number): number {
   return Math.round(ms * (0.5 + Math.random()));
 }
 
-function parseOperationEventBatch(raw: string): OperationEvent[] {
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new Error("operation aborted"));
+  }
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("operation aborted"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function parseEventBatch<T extends { sequence: number; type: string }>(
+  raw: string,
+  schema: z.ZodType<T>,
+  label: string,
+): T[] {
   const input = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
-  const events: OperationEvent[] = [];
+  const events: T[] = [];
   let id: string | undefined;
   let eventName: string | undefined;
   let dataLines: string[] = [];
@@ -76,15 +138,15 @@ function parseOperationEventBatch(raw: string): OperationEvent[] {
   const flush = () => {
     if (!hasEventFields) return;
     if (id === undefined || eventName === undefined || dataLines.length === 0) {
-      throw new Error("operation event is missing id, event, or data");
+      throw new Error(`${label} event is missing id, event, or data`);
     }
 
-    const event = OperationEventSchema.parse(JSON.parse(dataLines.join("\n")) as unknown);
+    const event = schema.parse(JSON.parse(dataLines.join("\n")) as unknown);
     if (String(event.sequence) !== id) {
-      throw new Error("operation event id does not match its sequence");
+      throw new Error(`${label} event id does not match its sequence`);
     }
     if (event.type !== eventName) {
-      throw new Error("operation event name does not match its type");
+      throw new Error(`${label} event name does not match its type`);
     }
     events.push(event);
     id = undefined;
@@ -122,7 +184,7 @@ function parseOperationEventBatch(raw: string): OperationEvent[] {
 
 const OperationEventBatchSseSchema = z.string().transform((raw, context) => {
   try {
-    return parseOperationEventBatch(raw);
+    return parseEventBatch(raw, OperationEventSchema, "operation");
   } catch (error) {
     context.addIssue({
       code: "custom",
@@ -131,6 +193,46 @@ const OperationEventBatchSseSchema = z.string().transform((raw, context) => {
     return z.NEVER;
   }
 });
+
+const ProcessEventBatchSseSchema = z.string().transform((raw, context) => {
+  try {
+    return parseEventBatch(raw, ProcessEventSchema, "process");
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "invalid process event batch",
+    });
+    return z.NEVER;
+  }
+});
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 32_768;
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+async function binaryDataToBytes(data: BinaryData): Promise<Uint8Array> {
+  if (data instanceof Blob) {
+    return new Uint8Array(await data.arrayBuffer());
+  }
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+  return new Uint8Array(data);
+}
 
 export class MetalClient {
   private readonly baseUrl: string;
@@ -504,6 +606,274 @@ export class MetalClient {
     },
   };
 
+  readonly processes = {
+    create: async (
+      sandboxId: string,
+      input: z.input<typeof CreateProcessRequestSchema>,
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) => {
+      const idempotencyKey = options?.idempotencyKey ?? crypto.randomUUID();
+      return this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/processes`,
+        body: CreateProcessRequestSchema.parse(input),
+        idempotencyKey,
+        projectId: options?.projectId,
+        schema: ProcessSchema,
+      }) as Promise<Process>;
+    },
+    get: (sandboxId: string, processId: string, options?: { projectId?: string }) =>
+      this.request({
+        method: "GET",
+        path: `/v1/sandboxes/${sandboxId}/processes/${processId}`,
+        projectId: options?.projectId,
+        schema: ProcessSchema,
+      }) as Promise<Process>,
+    events: (
+      sandboxId: string,
+      processId: string,
+      options: ProcessEventStreamOptions = {},
+    ): AsyncIterable<ProcessEvent> => this.streamProcessEvents(sandboxId, processId, options),
+    cancel: (
+      sandboxId: string,
+      processId: string,
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/processes/${processId}/actions/cancel`,
+        idempotencyKey: options?.idempotencyKey,
+        projectId: options?.projectId,
+        schema: ProcessSchema,
+      }) as Promise<Process>,
+  };
+
+  readonly runtimeOperations = {
+    get: (
+      sandboxId: string,
+      runtimeOperationId: string,
+      options?: { projectId?: string; signal?: AbortSignal },
+    ) =>
+      this.request({
+        method: "GET",
+        path: `/v1/sandboxes/${sandboxId}/runtime-operations/${runtimeOperationId}`,
+        projectId: options?.projectId,
+        schema: RuntimeOperationSchema,
+        signal: options?.signal,
+      }) as Promise<RuntimeOperation>,
+    wait: async (
+      operationOrId: RuntimeOperation | string,
+      options: RuntimeWaitOptions & { sandboxId?: string } = {},
+    ) => {
+      const operationId = typeof operationOrId === "string" ? operationOrId : operationOrId.id;
+      const sandboxId =
+        typeof operationOrId === "string" ? options.sandboxId : operationOrId.sandbox_id;
+      if (!sandboxId) {
+        throw new Error("sandboxId is required when waiting by runtime operation ID");
+      }
+      const deadline = Date.now() + (options.timeoutMs ?? 180_000);
+      while (Date.now() < deadline) {
+        if (options.signal?.aborted) {
+          throw options.signal.reason ?? new Error("runtime operation wait aborted");
+        }
+        const operation = await this.runtimeOperations.get(sandboxId, operationId, options);
+        if (["succeeded", "failed", "cancelled"].includes(operation.state)) {
+          return operation;
+        }
+        await abortableSleep(options.pollIntervalMs ?? 500, options.signal);
+      }
+      throw new Error(`runtime operation ${operationId} did not complete before timeout`);
+    },
+  };
+
+  readonly filesystem = {
+    read: (
+      sandboxId: string,
+      input: z.input<typeof ReadFileRequestSchema>,
+      options?: { projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/filesystem/read`,
+        body: ReadFileRequestSchema.parse(input),
+        projectId: options?.projectId,
+        schema: RuntimeOperationSchema,
+      }) as Promise<RuntimeOperation>,
+    write: async (
+      sandboxId: string,
+      input: z.input<typeof WriteFileRequestSchema> | BinaryWriteFileInput,
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) => {
+      const idempotencyKey = options?.idempotencyKey ?? crypto.randomUUID();
+      const body =
+        "data" in input
+          ? {
+              path: input.path,
+              data_base64: bytesToBase64(await binaryDataToBytes(input.data)),
+              mode: input.mode,
+              create_parents: input.create_parents,
+            }
+          : input;
+      return this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/filesystem/write`,
+        body: WriteFileRequestSchema.parse(body),
+        idempotencyKey,
+        projectId: options?.projectId,
+        schema: RuntimeOperationSchema,
+      }) as Promise<RuntimeOperation>;
+    },
+    list: (
+      sandboxId: string,
+      input: z.input<typeof ListFilesRequestSchema>,
+      options?: { projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/filesystem/list`,
+        body: ListFilesRequestSchema.parse(input),
+        projectId: options?.projectId,
+        schema: RuntimeOperationSchema,
+      }) as Promise<RuntimeOperation>,
+    delete: (
+      sandboxId: string,
+      input: z.input<typeof DeleteFileRequestSchema>,
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/filesystem/delete`,
+        body: DeleteFileRequestSchema.parse(input),
+        idempotencyKey: options?.idempotencyKey,
+        projectId: options?.projectId,
+        schema: RuntimeOperationSchema,
+      }) as Promise<RuntimeOperation>,
+    upload: async (
+      sandboxId: string,
+      path: string,
+      data: BinaryData,
+      options: RuntimeWaitOptions & {
+        createParents?: boolean;
+        idempotencyKey?: string;
+        mode?: "create" | "overwrite" | "append";
+      } = {},
+    ) => {
+      const idempotencyKey = options.idempotencyKey ?? crypto.randomUUID();
+      const operation = await this.filesystem.write(
+        sandboxId,
+        {
+          path,
+          data,
+          mode: options.mode,
+          create_parents: options.createParents,
+        },
+        { ...options, idempotencyKey },
+      );
+      try {
+        const completed = await this.runtimeOperations.wait(operation, options);
+        if (completed.state !== "succeeded") {
+          throw new Error(completed.error?.message ?? `filesystem write for ${path} failed`);
+        }
+        return completed;
+      } catch (error) {
+        throw new RuntimeOperationWaitError({
+          message: error instanceof Error ? error.message : `filesystem write for ${path} failed`,
+          operationId: operation.id,
+          idempotencyKey,
+          cause: error,
+        });
+      }
+    },
+    download: async (
+      sandboxId: string,
+      path: string,
+      options: RuntimeWaitOptions & {
+        chunkSizeBytes?: number;
+        limitBytes?: number;
+        offsetBytes?: number;
+      } = {},
+    ) => {
+      let offset = options.offsetBytes ?? 0;
+      const chunks: Uint8Array[] = [];
+      let totalBytes = 0;
+      while (true) {
+        const operation = await this.filesystem.read(
+          sandboxId,
+          {
+            path,
+            offset_bytes: offset,
+            limit_bytes: options.chunkSizeBytes ?? options.limitBytes,
+          },
+          options,
+        );
+        const completed = await this.runtimeOperations.wait(operation, options);
+        if (completed.state !== "succeeded" || completed.result?.kind !== "filesystem_read") {
+          throw new Error(completed.error?.message ?? `filesystem read for ${path} failed`);
+        }
+        const result = completed.result;
+        if (result.path !== path) {
+          throw new Error(
+            `filesystem read for ${path} returned path ${result.path} instead of ${path}`,
+          );
+        }
+        if (result.offset_bytes !== offset) {
+          throw new Error(
+            `filesystem read for ${path} returned offset ${result.offset_bytes} instead of ${offset}`,
+          );
+        }
+        const chunk = base64ToBytes(result.data_base64);
+        if (chunk.byteLength !== result.byte_length) {
+          throw new Error(`filesystem read for ${path} returned an invalid byte length`);
+        }
+        if (!result.eof && chunk.byteLength === 0) {
+          throw new Error(`filesystem read for ${path} made no progress`);
+        }
+        chunks.push(chunk);
+        totalBytes += chunk.byteLength;
+        if (result.eof) break;
+        offset += chunk.byteLength;
+      }
+      const bytes = new Uint8Array(totalBytes);
+      let targetOffset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, targetOffset);
+        targetOffset += chunk.byteLength;
+      }
+      return bytes;
+    },
+  };
+
+  readonly endpoints = {
+    create: (
+      sandboxId: string,
+      input: z.input<typeof CreateSandboxEndpointRequestSchema>,
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/endpoints`,
+        body: CreateSandboxEndpointRequestSchema.parse(input),
+        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        projectId: options?.projectId,
+        schema: SandboxEndpointSchema,
+      }) as Promise<SandboxEndpoint>,
+    list: (sandboxId: string, options?: { cursor?: string; limit?: number; projectId?: string }) =>
+      this.request({
+        method: "GET",
+        path: `/v1/sandboxes/${sandboxId}/endpoints`,
+        query: { cursor: options?.cursor, limit: options?.limit },
+        projectId: options?.projectId,
+        schema: SandboxEndpointListResponseSchema,
+      }),
+    revoke: (sandboxId: string, endpointId: string, options?: { projectId?: string }) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/sandboxes/${sandboxId}/endpoints/${endpointId}`,
+        projectId: options?.projectId,
+        schema: SandboxEndpointSchema,
+      }) as Promise<SandboxEndpoint>,
+  };
+
   readonly sandboxes = {
     list: (projectId: string) =>
       this.request({
@@ -648,6 +1018,64 @@ export class MetalClient {
       }),
   };
 
+  private async *streamProcessEvents(
+    sandboxId: string,
+    processId: string,
+    options: ProcessEventStreamOptions,
+  ): AsyncGenerator<ProcessEvent> {
+    let lastEventId =
+      options.lastEventId === undefined
+        ? 0
+        : z.number().int().nonnegative().parse(options.lastEventId);
+    const reconnectDelayMs = z
+      .number()
+      .nonnegative()
+      .parse(options.reconnectDelayMs ?? 250);
+    let firstRequest = true;
+
+    while (true) {
+      if (options.signal?.aborted) {
+        throw options.signal.reason ?? new Error("process event stream aborted");
+      }
+      const events = await this.request({
+        method: "GET",
+        path: `/v1/sandboxes/${sandboxId}/processes/${processId}/events`,
+        lastEventId: firstRequest && options.lastEventId === undefined ? undefined : lastEventId,
+        projectId: options.projectId,
+        responseFormat: "text",
+        schema: ProcessEventBatchSseSchema,
+        signal: options.signal,
+      });
+      firstRequest = false;
+
+      for (const event of events) {
+        if (event.sequence !== lastEventId + 1) {
+          throw new MetalError({
+            status: 200,
+            code: "internal_error",
+            message: `process event sequence ${event.sequence} followed ${lastEventId}`,
+            requestId: crypto.randomUUID(),
+          });
+        }
+        lastEventId = event.sequence;
+        yield event;
+        if (["exited", "cancelled", "timed_out", "failed"].includes(event.type)) {
+          return;
+        }
+      }
+
+      if (events.length === 0) {
+        const process = await this.processes.get(sandboxId, processId, {
+          projectId: options.projectId,
+        });
+        if (TERMINAL_PROCESS_STATES.has(process.state)) {
+          return;
+        }
+      }
+      await abortableSleep(reconnectDelayMs, options.signal);
+    }
+  }
+
   private async request<T>(options: RequestOptions & { schema: z.ZodType<T> }): Promise<T> {
     const idempotent = options.method === "GET";
     const attempts = idempotent ? this.retryAttempts + 1 : 1;
@@ -681,6 +1109,12 @@ export class MetalClient {
     const controller = new AbortController();
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const abortFromSignal = () => controller.abort(options.signal?.reason);
+    if (options.signal?.aborted) {
+      abortFromSignal();
+    } else {
+      options.signal?.addEventListener("abort", abortFromSignal, { once: true });
+    }
     const requestId = crypto.randomUUID();
     const headers: Record<string, string> = {
       accept: options.responseFormat === "text" ? "text/event-stream" : "application/json",
@@ -721,11 +1155,12 @@ export class MetalClient {
             code: "internal_error",
             message: "malformed json response",
             requestId,
+            idempotencyKey: options.idempotencyKey,
           });
         }
       }
       if (!response.ok) {
-        throw MetalError.fromUnknown(response.status, parsed, requestId);
+        throw MetalError.fromUnknown(response.status, parsed, requestId, options.idempotencyKey);
       }
       const validated = options.schema.safeParse(parsed);
       if (!validated.success) {
@@ -735,12 +1170,16 @@ export class MetalClient {
           message: "malformed metal api response",
           requestId,
           details: { issues: validated.error.issues },
+          idempotencyKey: options.idempotencyKey,
         });
       }
       return validated.data;
     } catch (error) {
       if (error instanceof MetalError) {
         throw error;
+      }
+      if (options.signal?.aborted) {
+        throw options.signal.reason ?? new Error("request aborted");
       }
       if (error instanceof Error && error.name === "AbortError") {
         throw new MetalError({
@@ -749,6 +1188,7 @@ export class MetalClient {
           message: "request timed out",
           requestId,
           retryable: true,
+          idempotencyKey: options.idempotencyKey,
         });
       }
       throw new MetalError({
@@ -757,9 +1197,11 @@ export class MetalClient {
         message: error instanceof Error ? error.message : "network error",
         requestId,
         retryable: true,
+        idempotencyKey: options.idempotencyKey,
       });
     } finally {
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abortFromSignal);
     }
   }
 }

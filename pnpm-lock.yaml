@@ -75,6 +75,9 @@ importers:
       '@openmetal/typescript-config':
         specifier: workspace:*
         version: link:../../packages/config-typescript
+      '@openmetal/worker':
+        specifier: workspace:*
+        version: link:../worker
       '@types/node':
         specifier: 24.12.0
         version: 24.12.0

@@ -5,18 +5,25 @@ import {
   enforceSpendLimit,
   type StripeGateway,
 } from "@openmetal/billing";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import {
   claimOutboxJobs,
   domainEvents,
+  ownsOutboxJobLease,
   operationEvents,
   operations,
   outboxJobs,
   providerAttempts,
   providerCostSnapshots,
+  renewOutboxJobLease,
+  runtimeOperations,
+  sandboxEndpoints,
+  sandboxProcesses,
   sandboxes,
   withTransaction,
+  type ClaimedJob,
   type MetalDb,
+  type OutboxLease,
 } from "@openmetal/db";
 import {
   OutboxJobPayloadSchema,
@@ -32,6 +39,7 @@ import {
   resolveMetalEnvironment,
   resolveProviderResources,
   type ProviderCreateSandboxInput,
+  type ProviderExecEvent,
   type SandboxProvider,
   type SandboxProviderName,
 } from "@openmetal/provider-core";
@@ -43,6 +51,65 @@ import {
 import type { BroadcastPublisher } from "./publisher.js";
 
 type SandboxProviders = Partial<Record<SandboxProviderName, SandboxProvider>>;
+
+class OutboxLeaseLostError extends Error {
+  constructor() {
+    super("outbox lease ownership was lost");
+    this.name = "OutboxLeaseLostError";
+  }
+}
+
+type JobLeaseGuard = {
+  token: string;
+  assertOwned(): Promise<void>;
+  stop(): void;
+};
+
+function createJobLeaseGuard(
+  db: MetalDb,
+  job: ClaimedJob,
+  workerId: string,
+  leaseMs: number,
+): JobLeaseGuard {
+  if (!job.leaseToken) throw new Error("claimed outbox job has no lease token");
+  const lease: OutboxLease = {
+    jobId: job.id,
+    workerId,
+    leaseToken: job.leaseToken,
+    leaseMs,
+  };
+  let stopped = false;
+  let lost = false;
+  let renewal: Promise<void> | undefined;
+  const renew = () => {
+    if (stopped || renewal) return;
+    renewal = renewOutboxJobLease(db, lease)
+      .then((owned) => {
+        if (!owned) lost = true;
+      })
+      .catch(() => {
+        lost = true;
+      })
+      .finally(() => {
+        renewal = undefined;
+      });
+  };
+  const timer = setInterval(renew, Math.max(250, Math.floor(leaseMs / 3)));
+  timer.unref();
+  return {
+    token: lease.leaseToken,
+    async assertOwned() {
+      if (lost || !(await ownsOutboxJobLease(db, lease))) {
+        lost = true;
+        throw new OutboxLeaseLostError();
+      }
+    },
+    stop() {
+      stopped = true;
+      clearInterval(timer);
+    },
+  };
+}
 
 function backoffMs(attempt: number, base: number): number {
   const exp = Math.min(base * 2 ** Math.max(attempt - 1, 0), 30_000);
@@ -167,7 +234,17 @@ async function recordSandboxEvent(
     | "sandbox.resumed"
     | "sandbox.cost_updated"
     | "sandbox.failed"
-    | "sandbox.deleted",
+    | "sandbox.deleted"
+    | "process.started"
+    | "process.completed"
+    | "process.cancelled"
+    | "process.failed"
+    | "runtime_operation.completed"
+    | "runtime_operation.failed"
+    | "endpoint.created"
+    | "endpoint.revoked"
+    | "endpoint.expired"
+    | "endpoint.failed",
   data: Record<string, unknown>,
 ) {
   const [event] = await tx
@@ -177,7 +254,7 @@ async function recordSandboxEvent(
       organizationId: sandbox.organizationId,
       projectId: sandbox.projectId,
       actorId: sandbox.createdBy,
-      payload: { sandbox_id: sandbox.id, ...data },
+      payload: { sandbox_id: sandbox.publicId, ...data },
       occurredAt: new Date(),
     })
     .returning();
@@ -357,6 +434,7 @@ async function provisionSandbox(
         secretRefs: sandbox.secretRefs,
         metadata: sandbox.metadata,
       });
+      const resolvedResources = remote.resolvedResources ?? resolved;
       await withTransaction(db, async (tx) => {
         await tx
           .update(providerAttempts)
@@ -364,13 +442,7 @@ async function provisionSandbox(
             state: "succeeded",
             providerResourceId: remote.providerResourceId,
             providerMetadata: remote.providerMetadata ?? {},
-            resolvedResources: remote.resolvedResources ?? {
-              vcpu: resolved.vcpu,
-              memoryMb: resolved.memoryMb,
-              diskMb: resolved.diskMb,
-              architecture: resolved.architecture,
-              providerSize: resolved.providerSize,
-            },
+            resolvedResources,
             outcome: "created",
             completedAt: new Date(),
             updatedAt: new Date(),
@@ -386,12 +458,12 @@ async function provisionSandbox(
             providerResourceId: remote.providerResourceId,
             providerOrganizationId: remote.providerOrganizationId,
             providerMetadata: remote.providerMetadata ?? {},
-            resolvedResources: remote.resolvedResources ?? {
-              vcpu: resolved.vcpu,
-              memory_mb: resolved.memoryMb,
-              disk_mb: resolved.diskMb,
-              architecture: resolved.architecture,
-              provider_size: resolved.providerSize,
+            resolvedResources: {
+              vcpu: resolvedResources.vcpu,
+              memory_mb: resolvedResources.memoryMb,
+              disk_mb: resolvedResources.diskMb,
+              architecture: resolvedResources.architecture,
+              provider_size: resolvedResources.providerSize,
             },
             readyAt: new Date(),
             updatedAt: new Date(),
@@ -751,14 +823,1173 @@ async function syncSandboxCost(
   });
 }
 
+const terminalProcessStates = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
+const terminalRuntimeOperationStates = new Set(["succeeded", "failed", "cancelled"]);
+
+function runtimeCapabilities(provider: SandboxProvider): Record<string, unknown> {
+  const runtime = provider.capabilities.runtime;
+  return {
+    provider: provider.name,
+    version: "1",
+    ...(runtime?.process
+      ? {
+          process: {
+            execute: runtime.process.exec,
+            cancel: runtime.process.cancel,
+            ordered_output: runtime.process.streams,
+            max_output_bytes: runtime.process.maxOutputBytes,
+          },
+        }
+      : {}),
+    ...(runtime?.files
+      ? {
+          filesystem: {
+            read: runtime.files.read,
+            write: runtime.files.write,
+            write_modes: [...runtime.files.writeModes],
+            create_parents: runtime.files.createParents,
+            list: runtime.files.list,
+            delete: runtime.files.delete,
+            max_read_bytes: runtime.files.maxReadBytes,
+            max_write_bytes: runtime.files.maxWriteBytes,
+          },
+        }
+      : {}),
+    ...(runtime?.httpEndpoints
+      ? {
+          http_endpoints: {
+            create: runtime.httpEndpoints.expose,
+            revoke: runtime.httpEndpoints.revoke,
+            ...(runtime.httpEndpoints.maxLeaseDurationSeconds
+              ? { max_lease_seconds: runtime.httpEndpoints.maxLeaseDurationSeconds }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+function runtimeError(error: unknown, fallbackCode = "runtime_operation_failed") {
+  const classification = classifyProviderFailure(error);
+  return {
+    code: classification.kind === "unsupported" ? "capability_unsupported" : fallbackCode,
+    message: error instanceof ProviderError ? safeError(error) : "runtime operation failed",
+    retryable: classification.retryable,
+  };
+}
+
+async function appendProcessEvent(
+  db: MetalDb,
+  processId: string,
+  type: string,
+  data: Record<string, unknown> = {},
+) {
+  await db.execute(sql`
+    with locked as (
+      select id from metal.sandbox_processes where id = ${processId} for update
+    )
+    insert into metal.process_events (process_id, sequence, type, data)
+    select ${processId}, coalesce(max(events.sequence), 0) + 1, ${type}, ${JSON.stringify(data)}::jsonb
+    from locked
+    left join metal.process_events events on events.process_id = locked.id
+    group by locked.id
+  `);
+}
+
+async function finishProcess(
+  db: MetalDb,
+  processId: string,
+  guard: JobLeaseGuard,
+  input: {
+    state: "succeeded" | "failed" | "cancelled" | "timed_out";
+    exitCode?: number | null;
+    terminationSignal?: string | null;
+    outputTruncated?: boolean;
+    error?: Record<string, unknown> | null;
+    eventType: "exited" | "failed" | "cancelled" | "timed_out";
+    eventData: Record<string, unknown>;
+  },
+) {
+  await guard.assertOwned();
+  await withTransaction(db, async (tx) => {
+    const current = await tx
+      .select({
+        sandbox: sandboxes,
+      })
+      .from(sandboxProcesses)
+      .innerJoin(sandboxes, eq(sandboxes.id, sandboxProcesses.sandboxId))
+      .where(eq(sandboxProcesses.id, processId))
+      .then((rows) => rows[0]);
+    if (!current) return;
+    const now = new Date();
+    const [updated] = await tx
+      .update(sandboxProcesses)
+      .set({
+        state: input.state,
+        exitCode: input.exitCode,
+        terminationSignal: input.terminationSignal,
+        ...(input.outputTruncated !== undefined ? { outputTruncated: input.outputTruncated } : {}),
+        error: input.error,
+        completedAt: now,
+      })
+      .where(
+        and(
+          eq(sandboxProcesses.id, processId),
+          eq(sandboxProcesses.operationToken, guard.token),
+          inArray(sandboxProcesses.state, ["queued", "running", "cancelling"]),
+        ),
+      )
+      .returning({ publicId: sandboxProcesses.publicId });
+    if (!updated) return;
+    await appendProcessEvent(tx, processId, input.eventType, input.eventData);
+    await recordSandboxEvent(
+      tx,
+      current.sandbox,
+      input.state === "succeeded"
+        ? "process.completed"
+        : input.state === "cancelled"
+          ? "process.cancelled"
+          : "process.failed",
+      {
+        process_id: updated.publicId,
+        state: input.state,
+        ...(input.exitCode !== undefined ? { exit_code: input.exitCode } : {}),
+      },
+    );
+  });
+}
+
+async function failProcess(
+  db: MetalDb,
+  processId: string,
+  guard: JobLeaseGuard,
+  error: unknown,
+  timeoutSeconds: number,
+) {
+  const providerError = error instanceof ProviderError ? error : undefined;
+  if (providerError?.kind === "timeout_absent") {
+    await finishProcess(db, processId, guard, {
+      state: "timed_out",
+      terminationSignal: null,
+      eventType: "timed_out",
+      eventData: { timeout_seconds: timeoutSeconds, termination_signal: null },
+    });
+    return;
+  }
+  const safe = runtimeError(error, "process_failed");
+  await finishProcess(db, processId, guard, {
+    state: "failed",
+    error: safe,
+    eventType: "failed",
+    eventData: safe,
+  });
+}
+
+function processOutputChunks(event: Extract<ProviderExecEvent, { type: "stdout" | "stderr" }>) {
+  const chunks: Uint8Array[] = [];
+  const maxChunkBytes = 256 * 1_024;
+  for (let offset = 0; offset < event.data.byteLength; offset += maxChunkBytes) {
+    chunks.push(event.data.slice(offset, offset + maxChunkBytes));
+  }
+  if (event.data.byteLength === 0) chunks.push(event.data);
+  return chunks;
+}
+
+async function executeProcess(
+  db: MetalDb,
+  provider: SandboxProvider,
+  processId: string,
+  guard: JobLeaseGuard,
+) {
+  await guard.assertOwned();
+  let row = await db
+    .select({ process: sandboxProcesses, sandbox: sandboxes })
+    .from(sandboxProcesses)
+    .innerJoin(sandboxes, eq(sandboxes.id, sandboxProcesses.sandboxId))
+    .where(eq(sandboxProcesses.id, processId))
+    .then((rows) => rows[0]);
+  if (!row || terminalProcessStates.has(row.process.state)) return;
+
+  if (row.process.state !== "queued") {
+    const [claimed] = await db
+      .update(sandboxProcesses)
+      .set({ operationToken: guard.token })
+      .where(
+        and(
+          eq(sandboxProcesses.id, processId),
+          inArray(sandboxProcesses.state, ["running", "cancelling"]),
+          sql`${sandboxProcesses.operationToken} is not distinct from ${row.process.operationToken}::uuid`,
+        ),
+      )
+      .returning();
+    if (!claimed) return;
+    if (claimed.state === "cancelling" && !claimed.startedAt && !claimed.providerExecutionId) {
+      await finishProcess(db, processId, guard, {
+        state: "cancelled",
+        terminationSignal: null,
+        eventType: "cancelled",
+        eventData: { termination_signal: null },
+      });
+      return;
+    }
+    if (claimed.providerExecutionId) {
+      const canCancel =
+        row.sandbox.providerResourceId &&
+        provider.capabilities.runtime?.process?.cancel &&
+        provider.cancelExec;
+      if (canCancel) {
+        await guard.assertOwned();
+        const result = await provider.cancelExec!({
+          providerResourceId: row.sandbox.providerResourceId!,
+          executionId: claimed.providerExecutionId,
+        });
+        if (result.executionId !== claimed.providerExecutionId || !result.cancelled) {
+          throw new ProviderError(
+            "reclaimed process execution could not be remotely reconciled",
+            "unknown_outcome",
+            true,
+          );
+        }
+        if (claimed.state === "cancelling") {
+          await finishProcess(db, processId, guard, {
+            state: "cancelled",
+            terminationSignal: null,
+            eventType: "cancelled",
+            eventData: { termination_signal: null },
+          });
+          return;
+        }
+      }
+    }
+    await failProcess(
+      db,
+      processId,
+      guard,
+      new ProviderError(
+        claimed.providerExecutionId
+          ? "process execution was reclaimed; remote termination must be reconciled"
+          : "process execution identity was not persisted before worker ownership changed",
+        "unknown_outcome",
+        false,
+      ),
+      claimed.timeoutSeconds,
+    );
+    return;
+  }
+
+  const capabilities = provider.capabilities.runtime?.process;
+  const snapshot = runtimeCapabilities(provider);
+  const startedAt = new Date();
+  const [claimed] = await db
+    .update(sandboxProcesses)
+    .set({
+      state: "running",
+      providerCapabilities: snapshot,
+      operationToken: guard.token,
+    })
+    .where(and(eq(sandboxProcesses.id, processId), eq(sandboxProcesses.state, "queued")))
+    .returning();
+  if (!claimed) return;
+  row = { ...row, process: claimed };
+
+  if (
+    row.sandbox.status !== "ready" ||
+    !row.sandbox.providerResourceId ||
+    !capabilities?.exec ||
+    !capabilities.streams ||
+    !provider.exec
+  ) {
+    await failProcess(
+      db,
+      processId,
+      guard,
+      new ProviderError(
+        "provider does not support ordered process execution",
+        "unsupported",
+        false,
+      ),
+      row.process.timeoutSeconds,
+    );
+    return;
+  }
+  if (row.process.maxOutputBytes > capabilities.maxOutputBytes) {
+    await failProcess(
+      db,
+      processId,
+      guard,
+      new ProviderError("requested process output exceeds provider limit", "unsupported", false),
+      row.process.timeoutSeconds,
+    );
+    return;
+  }
+  const started = await withTransaction(db, async (tx) => {
+    const [owned] = await tx
+      .update(sandboxProcesses)
+      .set({ startedAt })
+      .where(
+        and(
+          eq(sandboxProcesses.id, processId),
+          eq(sandboxProcesses.state, "running"),
+          eq(sandboxProcesses.operationToken, guard.token),
+        ),
+      )
+      .returning({ id: sandboxProcesses.id });
+    if (!owned) return false;
+    await appendProcessEvent(tx, processId, "started");
+    await recordSandboxEvent(tx, row.sandbox, "process.started", {
+      process_id: row.process.publicId,
+    });
+    return true;
+  });
+  if (!started) return;
+  const controller = new AbortController();
+  const deadline = new Date(startedAt.getTime() + row.process.timeoutSeconds * 1_000);
+  const timer = setTimeout(() => controller.abort(), row.process.timeoutSeconds * 1_000);
+  let outputBytes = row.process.outputBytes;
+  let outputTruncated = row.process.outputTruncated;
+  const offsets = { stdout: 0, stderr: 0 };
+  let lastProviderSequence = -1;
+  let executionId: string | undefined;
+  try {
+    await guard.assertOwned();
+    const execution = await provider.exec({
+      providerResourceId: row.sandbox.providerResourceId,
+      command: row.process.command,
+      cwd: row.process.cwd ?? undefined,
+      environment: row.process.environment,
+      maxOutputBytes: row.process.maxOutputBytes,
+      deadline,
+      signal: controller.signal,
+    });
+    if (!execution.executionId) {
+      throw new ProviderError("provider returned an empty execution id", "unknown_outcome", false);
+    }
+    executionId = execution.executionId;
+    const [identified] = await db
+      .update(sandboxProcesses)
+      .set({
+        providerExecutionId: execution.executionId,
+      })
+      .where(
+        and(
+          eq(sandboxProcesses.id, processId),
+          inArray(sandboxProcesses.state, ["running", "cancelling"]),
+          sql`${sandboxProcesses.providerExecutionId} is null`,
+        ),
+      )
+      .returning({ operationToken: sandboxProcesses.operationToken });
+    if (!identified) {
+      throw new ProviderError(
+        "provider execution identity conflicted with persisted state",
+        "unknown_outcome",
+        false,
+      );
+    }
+    await guard.assertOwned();
+    if (identified.operationToken !== guard.token) return;
+
+    for await (const event of execution.events) {
+      await guard.assertOwned();
+      const current = await db
+        .select({
+          state: sandboxProcesses.state,
+          operationToken: sandboxProcesses.operationToken,
+        })
+        .from(sandboxProcesses)
+        .where(eq(sandboxProcesses.id, processId))
+        .then((rows) => rows[0]);
+      if (
+        !current ||
+        current.operationToken !== guard.token ||
+        terminalProcessStates.has(current.state)
+      )
+        return;
+      if (event.sequence <= lastProviderSequence) {
+        throw new ProviderError(
+          "provider returned out-of-order process events",
+          "unknown_outcome",
+          false,
+        );
+      }
+      lastProviderSequence = event.sequence;
+      if (event.type === "stdout" || event.type === "stderr") {
+        if (event.truncated) outputTruncated = true;
+        for (const chunk of processOutputChunks(event)) {
+          const remaining = Math.max(0, row.process.maxOutputBytes - outputBytes);
+          const bounded = chunk.slice(0, remaining);
+          if (bounded.byteLength < chunk.byteLength) outputTruncated = true;
+          if (bounded.byteLength === 0 && chunk.byteLength > 0) {
+            await db
+              .update(sandboxProcesses)
+              .set({ outputTruncated: true })
+              .where(
+                and(
+                  eq(sandboxProcesses.id, processId),
+                  eq(sandboxProcesses.operationToken, guard.token),
+                  inArray(sandboxProcesses.state, ["running", "cancelling"]),
+                ),
+              );
+            continue;
+          }
+          const streamOffset = offsets[event.type];
+          const persisted = await withTransaction(db, async (tx) => {
+            const [updated] = await tx
+              .update(sandboxProcesses)
+              .set({
+                outputBytes: outputBytes + bounded.byteLength,
+                outputTruncated,
+              })
+              .where(
+                and(
+                  eq(sandboxProcesses.id, processId),
+                  eq(sandboxProcesses.operationToken, guard.token),
+                  inArray(sandboxProcesses.state, ["running", "cancelling"]),
+                ),
+              )
+              .returning({ id: sandboxProcesses.id });
+            if (!updated) return false;
+            await appendProcessEvent(tx, processId, event.type, {
+              data_base64: Buffer.from(bounded).toString("base64"),
+              byte_length: bounded.byteLength,
+              stream_offset_bytes: streamOffset,
+            });
+            return true;
+          });
+          if (!persisted) return;
+          outputBytes += bounded.byteLength;
+          offsets[event.type] += bounded.byteLength;
+        }
+        continue;
+      }
+      if (event.type !== "exit") continue;
+      outputTruncated ||= event.outputTruncated;
+      if (event.cancelled) {
+        await finishProcess(db, processId, guard, {
+          state: "cancelled",
+          terminationSignal: event.signal,
+          outputTruncated,
+          eventType: "cancelled",
+          eventData: { termination_signal: event.signal },
+        });
+      } else if (event.exitCode === null) {
+        await failProcess(
+          db,
+          processId,
+          guard,
+          new Error("provider process exited without an exit code"),
+          row.process.timeoutSeconds,
+        );
+      } else if (event.exitCode === 0) {
+        await finishProcess(db, processId, guard, {
+          state: "succeeded",
+          exitCode: event.exitCode,
+          terminationSignal: event.signal,
+          outputTruncated,
+          eventType: "exited",
+          eventData: { exit_code: event.exitCode },
+        });
+      } else {
+        await finishProcess(db, processId, guard, {
+          state: "failed",
+          exitCode: event.exitCode,
+          terminationSignal: event.signal,
+          outputTruncated,
+          error: {
+            code: "process_exit_nonzero",
+            message: `process exited with code ${event.exitCode}`,
+            retryable: false,
+          },
+          eventType: "exited",
+          eventData: { exit_code: event.exitCode },
+        });
+      }
+    }
+  } catch (error) {
+    if (controller.signal.aborted || new Date() >= deadline) {
+      const canCancel =
+        executionId &&
+        row.sandbox.providerResourceId &&
+        provider.capabilities.runtime?.process?.cancel &&
+        provider.cancelExec;
+      const cancellation = canCancel
+        ? await provider.cancelExec!({
+            providerResourceId: row.sandbox.providerResourceId,
+            executionId: executionId!,
+          }).catch(() => null)
+        : null;
+      if (cancellation?.cancelled) {
+        await finishProcess(db, processId, guard, {
+          state: "timed_out",
+          terminationSignal: null,
+          outputTruncated,
+          eventType: "timed_out",
+          eventData: {
+            timeout_seconds: row.process.timeoutSeconds,
+            termination_signal: null,
+          },
+        });
+      } else {
+        await failProcess(
+          db,
+          processId,
+          guard,
+          new ProviderError(
+            "process timed out but remote termination could not be confirmed",
+            "unknown_outcome",
+            false,
+          ),
+          row.process.timeoutSeconds,
+        );
+      }
+    } else {
+      await failProcess(db, processId, guard, error, row.process.timeoutSeconds);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function cancelProcessExecution(
+  db: MetalDb,
+  provider: SandboxProvider,
+  processId: string,
+  guard: JobLeaseGuard,
+) {
+  await guard.assertOwned();
+  const row = await db
+    .select({ process: sandboxProcesses, sandbox: sandboxes })
+    .from(sandboxProcesses)
+    .innerJoin(sandboxes, eq(sandboxes.id, sandboxProcesses.sandboxId))
+    .where(eq(sandboxProcesses.id, processId))
+    .then((rows) => rows[0]);
+  if (!row || terminalProcessStates.has(row.process.state)) return;
+  const [claimed] = await db
+    .update(sandboxProcesses)
+    .set({ operationToken: guard.token })
+    .where(
+      and(
+        eq(sandboxProcesses.id, processId),
+        inArray(sandboxProcesses.state, ["queued", "running", "cancelling"]),
+        sql`${sandboxProcesses.operationToken} is not distinct from ${row.process.operationToken}::uuid`,
+      ),
+    )
+    .returning();
+  if (!claimed) return;
+  const executionId = claimed.providerExecutionId ?? undefined;
+  if (!executionId) {
+    if (!claimed.startedAt) {
+      await finishProcess(db, processId, guard, {
+        state: "cancelled",
+        terminationSignal: null,
+        eventType: "cancelled",
+        eventData: { termination_signal: null },
+      });
+      return;
+    }
+    throw new ProviderError(
+      "process cancellation is waiting for a durable provider execution id",
+      "unknown_outcome",
+      true,
+    );
+  }
+  if (claimed.state !== "cancelling") {
+    return;
+  }
+  if (
+    !row.sandbox.providerResourceId ||
+    !provider.capabilities.runtime?.process?.cancel ||
+    !provider.cancelExec
+  ) {
+    await failProcess(
+      db,
+      processId,
+      guard,
+      new ProviderError("provider does not support process cancellation", "unsupported", false),
+      row.process.timeoutSeconds,
+    );
+    return;
+  }
+  await guard.assertOwned();
+  const result = await provider.cancelExec({
+    providerResourceId: row.sandbox.providerResourceId,
+    executionId,
+  });
+  if (result.executionId !== executionId || !result.cancelled) {
+    throw new ProviderError(
+      "provider did not confirm process cancellation",
+      "unknown_outcome",
+      true,
+    );
+  }
+  await finishProcess(db, processId, guard, {
+    state: "cancelled",
+    terminationSignal: null,
+    eventType: "cancelled",
+    eventData: { termination_signal: null },
+  });
+}
+
+async function executeFilesystemOperation(
+  db: MetalDb,
+  provider: SandboxProvider,
+  operationId: string,
+  guard: JobLeaseGuard,
+) {
+  await guard.assertOwned();
+  const row = await db
+    .select({ operation: runtimeOperations, sandbox: sandboxes })
+    .from(runtimeOperations)
+    .innerJoin(sandboxes, eq(sandboxes.id, runtimeOperations.sandboxId))
+    .where(eq(runtimeOperations.id, operationId))
+    .then((rows) => rows[0]);
+  if (!row || terminalRuntimeOperationStates.has(row.operation.state)) return;
+  const snapshot = runtimeCapabilities(provider);
+  const capabilities = provider.capabilities.runtime?.files;
+  const request = row.operation.request;
+  const now = new Date();
+  const [claimed] = await db
+    .update(runtimeOperations)
+    .set({
+      state: "running",
+      startedAt: row.operation.startedAt ?? now,
+      providerCapabilities: snapshot,
+      operationToken: guard.token,
+    })
+    .where(
+      row.operation.state === "queued"
+        ? and(eq(runtimeOperations.id, operationId), eq(runtimeOperations.state, "queued"))
+        : and(
+            eq(runtimeOperations.id, operationId),
+            eq(runtimeOperations.state, "running"),
+            sql`${runtimeOperations.operationToken} is not distinct from ${row.operation.operationToken}::uuid`,
+          ),
+    )
+    .returning();
+  if (!claimed) return;
+  try {
+    if (row.operation.state !== "queued") {
+      throw new ProviderError(
+        "filesystem operation was reclaimed without provider reconciliation support",
+        "unknown_outcome",
+        false,
+      );
+    }
+    if (row.sandbox.status !== "ready" || !row.sandbox.providerResourceId) {
+      throw new ProviderError("sandbox is not ready", "customer", false);
+    }
+    let result: Record<string, unknown>;
+    if (row.operation.kind === "filesystem_read") {
+      if (!capabilities?.read || !provider.readFile)
+        throw new ProviderError("filesystem read is unsupported", "unsupported", false);
+      const limit = Number(request.limit_bytes);
+      if (limit > capabilities.maxReadBytes)
+        throw new ProviderError("filesystem read exceeds provider limit", "unsupported", false);
+      await guard.assertOwned();
+      const value = await provider.readFile({
+        providerResourceId: row.sandbox.providerResourceId,
+        path: String(request.path),
+        encoding: "binary",
+        offsetBytes: Number(request.offset_bytes),
+        maxBytes: limit,
+      });
+      const data =
+        typeof value.data === "string" ? Buffer.from(value.data) : Buffer.from(value.data);
+      result = {
+        kind: row.operation.kind,
+        path: value.path,
+        data_base64: data.toString("base64"),
+        offset_bytes: value.offsetBytes,
+        byte_length: value.byteLength,
+        eof: value.eof,
+      };
+    } else if (row.operation.kind === "filesystem_write") {
+      if (!capabilities?.write || !provider.writeFile)
+        throw new ProviderError("filesystem write is unsupported", "unsupported", false);
+      const data = Buffer.from(String(request.data_base64), "base64");
+      if (data.byteLength > capabilities.maxWriteBytes)
+        throw new ProviderError("filesystem write exceeds provider limit", "unsupported", false);
+      const mode = request.mode as "create" | "overwrite" | "append";
+      if (!capabilities.writeModes.includes(mode))
+        throw new ProviderError(
+          `filesystem write mode ${mode} is unsupported`,
+          "unsupported",
+          false,
+        );
+      if (request.create_parents === true && !capabilities.createParents)
+        throw new ProviderError("filesystem parent creation is unsupported", "unsupported", false);
+      await guard.assertOwned();
+      const value = await provider.writeFile({
+        providerResourceId: row.sandbox.providerResourceId,
+        path: String(request.path),
+        data,
+        mode,
+        createParents: Boolean(request.create_parents),
+      });
+      result = { kind: row.operation.kind, path: value.path, bytes_written: value.bytesWritten };
+    } else if (row.operation.kind === "filesystem_list") {
+      if (!capabilities?.list || !provider.listFiles)
+        throw new ProviderError("filesystem list is unsupported", "unsupported", false);
+      const maxEntries = Number(request.max_entries);
+      if (maxEntries > capabilities.maxListEntries)
+        throw new ProviderError("filesystem list exceeds provider limit", "unsupported", false);
+      await guard.assertOwned();
+      const value = await provider.listFiles({
+        providerResourceId: row.sandbox.providerResourceId,
+        path: String(request.path),
+        recursive: Boolean(request.recursive),
+        maxEntries,
+      });
+      result = {
+        kind: row.operation.kind,
+        path: String(request.path),
+        entries: value.entries.map((entry) => ({
+          path: entry.path,
+          type: entry.type,
+          size_bytes: entry.sizeBytes,
+          modified_at: entry.modifiedAt?.toISOString() ?? null,
+        })),
+        truncated: value.truncated,
+      };
+    } else {
+      if (!capabilities?.delete || !provider.deleteFile)
+        throw new ProviderError("filesystem delete is unsupported", "unsupported", false);
+      await guard.assertOwned();
+      const value = await provider.deleteFile({
+        providerResourceId: row.sandbox.providerResourceId,
+        path: String(request.path),
+        recursive: Boolean(request.recursive),
+      });
+      result = { kind: row.operation.kind, path: value.path, deleted: value.deleted };
+    }
+    await guard.assertOwned();
+    await withTransaction(db, async (tx) => {
+      const [updated] = await tx
+        .update(runtimeOperations)
+        .set({ state: "succeeded", result, error: null, completedAt: new Date() })
+        .where(
+          and(
+            eq(runtimeOperations.id, operationId),
+            eq(runtimeOperations.state, "running"),
+            eq(runtimeOperations.operationToken, guard.token),
+          ),
+        )
+        .returning({ id: runtimeOperations.id });
+      if (!updated) return;
+      await recordSandboxEvent(tx, row.sandbox, "runtime_operation.completed", {
+        runtime_operation_id: row.operation.publicId,
+        kind: row.operation.kind,
+      });
+    });
+  } catch (error) {
+    if (error instanceof OutboxLeaseLostError) throw error;
+    await withTransaction(db, async (tx) => {
+      const safe = runtimeError(error);
+      const [updated] = await tx
+        .update(runtimeOperations)
+        .set({ state: "failed", error: safe, completedAt: new Date() })
+        .where(
+          and(
+            eq(runtimeOperations.id, operationId),
+            eq(runtimeOperations.state, "running"),
+            eq(runtimeOperations.operationToken, guard.token),
+          ),
+        )
+        .returning({ id: runtimeOperations.id });
+      if (!updated) return;
+      await recordSandboxEvent(tx, row.sandbox, "runtime_operation.failed", {
+        runtime_operation_id: row.operation.publicId,
+        kind: row.operation.kind,
+        code: safe.code,
+      });
+    });
+  }
+}
+
+async function createHttpEndpoint(
+  db: MetalDb,
+  provider: SandboxProvider,
+  endpointId: string,
+  guard: JobLeaseGuard,
+) {
+  await guard.assertOwned();
+  const row = await db
+    .select({ endpoint: sandboxEndpoints, sandbox: sandboxes })
+    .from(sandboxEndpoints)
+    .innerJoin(sandboxes, eq(sandboxes.id, sandboxEndpoints.sandboxId))
+    .where(eq(sandboxEndpoints.id, endpointId))
+    .then((rows) => rows[0]);
+  if (!row || row.endpoint.state !== "provisioning") return;
+  const snapshot = runtimeCapabilities(provider);
+  const [claimed] = await db
+    .update(sandboxEndpoints)
+    .set({ operationToken: guard.token, providerCapabilities: snapshot })
+    .where(
+      and(
+        eq(sandboxEndpoints.id, endpointId),
+        eq(sandboxEndpoints.state, "provisioning"),
+        sql`${sandboxEndpoints.operationToken} is not distinct from ${row.endpoint.operationToken}::uuid`,
+      ),
+    )
+    .returning();
+  if (!claimed) return;
+  let remoteLease:
+    | {
+        leaseId: string;
+        url: string;
+        expiresAt: Date;
+      }
+    | undefined;
+  const revokeOrphan = async (leaseId: string) => {
+    if (!row.sandbox.providerResourceId || !provider.revokeHttpEndpoint) return;
+    const result = await provider
+      .revokeHttpEndpoint({
+        providerResourceId: row.sandbox.providerResourceId,
+        leaseId,
+      })
+      .catch(() => null);
+    if (result?.leaseId !== leaseId || !result.revoked) return;
+    await withTransaction(db, async (tx) => {
+      const [updated] = await tx
+        .update(sandboxEndpoints)
+        .set({ state: "revoked", revokedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(sandboxEndpoints.id, endpointId),
+            eq(sandboxEndpoints.state, "revoking"),
+            eq(sandboxEndpoints.operationToken, guard.token),
+          ),
+        )
+        .returning({ id: sandboxEndpoints.id });
+      if (updated) {
+        await recordSandboxEvent(tx, row.sandbox, "endpoint.revoked", {
+          endpoint_id: row.endpoint.publicId,
+        });
+      }
+    });
+  };
+  try {
+    const capability = provider.capabilities.runtime?.httpEndpoints;
+    if (
+      row.sandbox.status !== "ready" ||
+      !row.sandbox.providerResourceId ||
+      !capability?.expose ||
+      !provider.exposeHttpEndpoint
+    ) {
+      throw new ProviderError("HTTP endpoints are unsupported", "unsupported", false);
+    }
+    const now = new Date();
+    const leaseSeconds = Math.floor((claimed.leaseExpiresAt.getTime() - now.getTime()) / 1_000);
+    if (leaseSeconds < 1) {
+      return;
+    }
+    if (capability.maxLeaseDurationSeconds && leaseSeconds > capability.maxLeaseDurationSeconds) {
+      throw new ProviderError("endpoint lease exceeds provider limit", "unsupported", false);
+    }
+    const persistedLeaseId =
+      typeof claimed.providerMetadata.lease_id === "string"
+        ? claimed.providerMetadata.lease_id
+        : undefined;
+    const persistedLeaseUrl =
+      typeof claimed.providerMetadata.lease_url === "string"
+        ? claimed.providerMetadata.lease_url
+        : undefined;
+    const persistedExpiry =
+      typeof claimed.providerMetadata.lease_expires_at === "string"
+        ? new Date(claimed.providerMetadata.lease_expires_at)
+        : undefined;
+    if (row.endpoint.operationToken) {
+      if (persistedLeaseId) await revokeOrphan(persistedLeaseId);
+      throw new ProviderError(
+        "endpoint provisioning was reclaimed after provider exposure may have started",
+        "unknown_outcome",
+        false,
+      );
+    }
+    if (persistedLeaseId && persistedLeaseUrl && persistedExpiry) {
+      remoteLease = {
+        leaseId: persistedLeaseId,
+        url: persistedLeaseUrl,
+        expiresAt: persistedExpiry,
+      };
+    } else {
+      await guard.assertOwned();
+      remoteLease = await provider.exposeHttpEndpoint({
+        providerResourceId: row.sandbox.providerResourceId,
+        port: row.endpoint.port,
+        leaseDurationSeconds: leaseSeconds,
+      });
+    }
+    if (
+      !remoteLease.leaseId ||
+      !/^https?:\/\//.test(remoteLease.url) ||
+      !Number.isFinite(remoteLease.expiresAt.getTime()) ||
+      remoteLease.expiresAt <= now ||
+      remoteLease.expiresAt > claimed.leaseExpiresAt
+    ) {
+      throw new ProviderError(
+        "provider returned an invalid or overlong endpoint lease",
+        "unknown_outcome",
+        false,
+      );
+    }
+    await guard.assertOwned();
+    const [metadataPersisted] = await db
+      .update(sandboxEndpoints)
+      .set({
+        providerMetadata: {
+          ...claimed.providerMetadata,
+          lease_id: remoteLease.leaseId,
+          lease_url: remoteLease.url,
+          lease_expires_at: remoteLease.expiresAt.toISOString(),
+        },
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(sandboxEndpoints.id, endpointId),
+          eq(sandboxEndpoints.state, "provisioning"),
+          eq(sandboxEndpoints.operationToken, guard.token),
+        ),
+      )
+      .returning({ id: sandboxEndpoints.id });
+    if (!metadataPersisted) {
+      await revokeOrphan(remoteLease.leaseId);
+      return;
+    }
+    const activated = await withTransaction(db, async (tx) => {
+      const [updated] = await tx
+        .update(sandboxEndpoints)
+        .set({
+          state: "active",
+          url: remoteLease!.url,
+          providerCapabilities: snapshot,
+          error: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(sandboxEndpoints.id, endpointId),
+            eq(sandboxEndpoints.state, "provisioning"),
+            eq(sandboxEndpoints.operationToken, guard.token),
+            sql`${sandboxEndpoints.leaseExpiresAt} > now()`,
+          ),
+        )
+        .returning({ id: sandboxEndpoints.id });
+      if (!updated) return false;
+      await recordSandboxEvent(tx, row.sandbox, "endpoint.created", {
+        endpoint_id: row.endpoint.publicId,
+        port: row.endpoint.port,
+      });
+      return true;
+    });
+    if (!activated) await revokeOrphan(remoteLease.leaseId);
+  } catch (error) {
+    if (error instanceof OutboxLeaseLostError) throw error;
+    if (remoteLease) await revokeOrphan(remoteLease.leaseId);
+    await withTransaction(db, async (tx) => {
+      const safe = runtimeError(error, "endpoint_create_failed");
+      if (classifyProviderFailure(error).unknown) safe.code = "provider_unknown_outcome";
+      const [updated] = await tx
+        .update(sandboxEndpoints)
+        .set({
+          state: "failed",
+          error: safe,
+          providerCapabilities: snapshot,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(sandboxEndpoints.id, endpointId),
+            eq(sandboxEndpoints.state, "provisioning"),
+            eq(sandboxEndpoints.operationToken, guard.token),
+          ),
+        )
+        .returning({ id: sandboxEndpoints.id });
+      if (!updated) return;
+      if (row.endpoint.state !== "failed") {
+        await recordSandboxEvent(tx, row.sandbox, "endpoint.failed", {
+          endpoint_id: row.endpoint.publicId,
+          code: safe.code,
+        });
+      }
+    });
+  }
+}
+
+async function revokeHttpEndpoint(
+  db: MetalDb,
+  provider: SandboxProvider,
+  endpointId: string,
+  guard: JobLeaseGuard,
+) {
+  await guard.assertOwned();
+  const row = await db
+    .select({ endpoint: sandboxEndpoints, sandbox: sandboxes })
+    .from(sandboxEndpoints)
+    .innerJoin(sandboxes, eq(sandboxes.id, sandboxEndpoints.sandboxId))
+    .where(eq(sandboxEndpoints.id, endpointId))
+    .then((rows) => rows[0]);
+  if (
+    !row ||
+    (row.endpoint.state !== "revoking" &&
+      row.endpoint.state !== "expired" &&
+      row.endpoint.state !== "failed")
+  )
+    return;
+  const expired = row.endpoint.state === "expired" || row.endpoint.leaseExpiresAt <= new Date();
+  const [claimed] = await db
+    .update(sandboxEndpoints)
+    .set({ operationToken: guard.token })
+    .where(
+      and(
+        eq(sandboxEndpoints.id, endpointId),
+        inArray(sandboxEndpoints.state, ["revoking", "expired", "failed"]),
+        sql`${sandboxEndpoints.operationToken} is not distinct from ${row.endpoint.operationToken}::uuid`,
+      ),
+    )
+    .returning();
+  if (!claimed) return;
+  const leaseId =
+    typeof claimed.providerMetadata.lease_id === "string"
+      ? claimed.providerMetadata.lease_id
+      : undefined;
+  try {
+    const canRevoke =
+      provider.capabilities.runtime?.httpEndpoints?.revoke && provider.revokeHttpEndpoint;
+    if (leaseId && !canRevoke) {
+      throw new ProviderError("HTTP endpoint revocation is unsupported", "unsupported", false);
+    }
+    if (leaseId && row.sandbox.providerResourceId && canRevoke) {
+      await guard.assertOwned();
+      const result = await provider.revokeHttpEndpoint!({
+        providerResourceId: row.sandbox.providerResourceId,
+        leaseId,
+      });
+      if (result.leaseId !== leaseId || !result.revoked) {
+        throw new ProviderError(
+          "provider did not confirm HTTP endpoint revocation",
+          "unknown_outcome",
+          true,
+        );
+      }
+    } else if (leaseId) {
+      throw new ProviderError(
+        "HTTP endpoint revocation could not be verified",
+        "unknown_outcome",
+        true,
+      );
+    }
+    await guard.assertOwned();
+    await withTransaction(db, async (tx) => {
+      const [updated] = await tx
+        .update(sandboxEndpoints)
+        .set({
+          state: expired ? "expired" : "revoked",
+          revokedAt: row.endpoint.revokedAt ?? new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(sandboxEndpoints.id, endpointId),
+            eq(sandboxEndpoints.operationToken, guard.token),
+            inArray(sandboxEndpoints.state, ["revoking", "expired", "failed"]),
+          ),
+        )
+        .returning({ id: sandboxEndpoints.id });
+      if (!updated) return;
+      if (!expired) {
+        await recordSandboxEvent(tx, row.sandbox, "endpoint.revoked", {
+          endpoint_id: row.endpoint.publicId,
+        });
+      }
+    });
+  } catch (error) {
+    if (error instanceof OutboxLeaseLostError) throw error;
+    const safe = runtimeError(error, "endpoint_revoke_failed");
+    await withTransaction(db, async (tx) => {
+      const [updated] = await tx
+        .update(sandboxEndpoints)
+        .set({ state: "failed", error: safe, updatedAt: new Date() })
+        .where(
+          and(
+            eq(sandboxEndpoints.id, endpointId),
+            eq(sandboxEndpoints.operationToken, guard.token),
+            inArray(sandboxEndpoints.state, ["revoking", "expired", "failed"]),
+          ),
+        )
+        .returning({ id: sandboxEndpoints.id });
+      if (!updated) return;
+      if (row.endpoint.state !== "failed") {
+        await recordSandboxEvent(tx, row.sandbox, "endpoint.failed", {
+          endpoint_id: row.endpoint.publicId,
+          code: safe.code,
+        });
+      }
+    });
+    if (safe.retryable) throw error;
+  }
+}
+
+async function scheduleExpiredEndpoints(db: MetalDb, now = new Date()) {
+  await withTransaction(db, async (tx) => {
+    const expired = await tx
+      .update(sandboxEndpoints)
+      .set({ state: "expired", updatedAt: now })
+      .where(
+        and(
+          inArray(sandboxEndpoints.state, ["provisioning", "active"]),
+          lte(sandboxEndpoints.leaseExpiresAt, now),
+        ),
+      )
+      .returning();
+    for (const endpoint of expired) {
+      const sandbox = await tx
+        .select()
+        .from(sandboxes)
+        .where(eq(sandboxes.id, endpoint.sandboxId))
+        .then((rows) => rows[0]);
+      if (sandbox) {
+        await recordSandboxEvent(tx, sandbox, "endpoint.expired", {
+          endpoint_id: endpoint.publicId,
+        });
+      }
+      await tx
+        .insert(outboxJobs)
+        .values({
+          jobType: "endpoint.revoke",
+          dedupeKey: `endpoint:expire:${endpoint.id}`,
+          payload: { job_type: "endpoint.revoke", endpoint_id: endpoint.id },
+        })
+        .onConflictDoNothing();
+    }
+  });
+}
+
+async function cleanupExpiredProcessEvents(db: MetalDb, retentionMs: number) {
+  await db.execute(sql`
+    delete from metal.process_events
+    where id in (
+      select events.id
+      from metal.process_events events
+      inner join metal.sandbox_processes processes on processes.id = events.process_id
+      where processes.state in ('succeeded', 'failed', 'cancelled', 'timed_out')
+        and processes.completed_at < now() - (${retentionMs} * interval '1 millisecond')
+      order by processes.completed_at, events.sequence
+      limit 1000
+    )
+  `);
+}
+
 async function recordTerminalSandboxFailure(
   db: MetalDb,
   payload: Exclude<OutboxJobPayload, { job_type: "realtime.broadcast" }>,
 ) {
   if (
-    payload.job_type === "sandbox.cost.sync" ||
-    payload.job_type === "billing.auto_topup.evaluate" ||
-    payload.job_type === "billing.spend_limit.enforce"
+    payload.job_type !== "sandbox.provision" &&
+    payload.job_type !== "sandbox.reconcile" &&
+    payload.job_type !== "sandbox.pause" &&
+    payload.job_type !== "sandbox.resume" &&
+    payload.job_type !== "sandbox.destroy"
   ) {
     return;
   }
@@ -797,6 +2028,61 @@ async function recordTerminalSandboxFailure(
   });
 }
 
+async function recordTerminalRuntimeFailure(
+  db: MetalDb,
+  payload: Exclude<OutboxJobPayload, { job_type: "realtime.broadcast" }>,
+  error: unknown,
+  guard: JobLeaseGuard,
+) {
+  const safe = runtimeError(
+    error,
+    payload.job_type === "endpoint.create"
+      ? "endpoint_create_failed"
+      : payload.job_type === "endpoint.revoke"
+        ? "endpoint_revoke_failed"
+        : "runtime_operation_failed",
+  );
+  if (payload.job_type === "process.execute" || payload.job_type === "process.cancel") {
+    const process = await db
+      .select({ timeoutSeconds: sandboxProcesses.timeoutSeconds })
+      .from(sandboxProcesses)
+      .where(eq(sandboxProcesses.id, payload.process_id))
+      .then((rows) => rows[0]);
+    if (process) await failProcess(db, payload.process_id, guard, error, process.timeoutSeconds);
+    return;
+  }
+  if (
+    payload.job_type === "filesystem.read" ||
+    payload.job_type === "filesystem.write" ||
+    payload.job_type === "filesystem.list" ||
+    payload.job_type === "filesystem.delete"
+  ) {
+    await db
+      .update(runtimeOperations)
+      .set({ state: "failed", error: safe, completedAt: new Date() })
+      .where(
+        and(
+          eq(runtimeOperations.id, payload.runtime_operation_id),
+          eq(runtimeOperations.operationToken, guard.token),
+          inArray(runtimeOperations.state, ["queued", "running"]),
+        ),
+      );
+    return;
+  }
+  if (payload.job_type === "endpoint.create" || payload.job_type === "endpoint.revoke") {
+    await db
+      .update(sandboxEndpoints)
+      .set({ state: "failed", error: safe, updatedAt: new Date() })
+      .where(
+        and(
+          eq(sandboxEndpoints.id, payload.endpoint_id),
+          eq(sandboxEndpoints.operationToken, guard.token),
+          inArray(sandboxEndpoints.state, ["provisioning", "revoking", "expired"]),
+        ),
+      );
+  }
+}
+
 async function resolveSandboxProvider(
   db: MetalDb,
   providers: SandboxProviders,
@@ -822,6 +2108,40 @@ async function resolveSandboxProvider(
   return provider;
 }
 
+async function runtimeSandboxId(
+  db: MetalDb,
+  payload:
+    | Extract<OutboxJobPayload, { job_type: "process.execute" | "process.cancel" }>
+    | Extract<
+        OutboxJobPayload,
+        {
+          job_type:
+            "filesystem.read" | "filesystem.write" | "filesystem.list" | "filesystem.delete";
+        }
+      >
+    | Extract<OutboxJobPayload, { job_type: "endpoint.create" | "endpoint.revoke" }>,
+) {
+  if (payload.job_type === "process.execute" || payload.job_type === "process.cancel") {
+    return db
+      .select({ sandboxId: sandboxProcesses.sandboxId })
+      .from(sandboxProcesses)
+      .where(eq(sandboxProcesses.id, payload.process_id))
+      .then((rows) => rows[0]?.sandboxId);
+  }
+  if (payload.job_type === "endpoint.create" || payload.job_type === "endpoint.revoke") {
+    return db
+      .select({ sandboxId: sandboxEndpoints.sandboxId })
+      .from(sandboxEndpoints)
+      .where(eq(sandboxEndpoints.id, payload.endpoint_id))
+      .then((rows) => rows[0]?.sandboxId);
+  }
+  return db
+    .select({ sandboxId: runtimeOperations.sandboxId })
+    .from(runtimeOperations)
+    .where(eq(runtimeOperations.id, payload.runtime_operation_id))
+    .then((rows) => rows[0]?.sandboxId);
+}
+
 export async function processOnce(
   db: MetalDb,
   publisher: BroadcastPublisher,
@@ -834,13 +2154,19 @@ export async function processOnce(
     environment: env.METAL_ENVIRONMENT,
     level: env.LOG_LEVEL,
   });
+  await scheduleExpiredEndpoints(db);
+  await cleanupExpiredProcessEvents(db, env.WORKER_PROCESS_EVENT_RETENTION_MS);
   const jobs = await claimOutboxJobs(db, {
     workerId: env.WORKER_ID,
     limit: env.WORKER_BATCH_SIZE,
     leaseMs: env.WORKER_LEASE_MS,
   });
+  const guards = new Map(
+    jobs.map((job) => [job.id, createJobLeaseGuard(db, job, env.WORKER_ID, env.WORKER_LEASE_MS)]),
+  );
 
   for (const job of jobs) {
+    const guard = guards.get(job.id)!;
     const child = logger.child({
       job_id: job.id,
       service: "worker",
@@ -872,9 +2198,35 @@ export async function processOnce(
       } else if (payload.job_type === "sandbox.cost.sync") {
         const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
         await syncSandboxCost(db, sandboxProvider, payload.sandbox_id, payload.final);
-      } else {
+      } else if (payload.job_type === "sandbox.destroy") {
         const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
         await destroySandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
+      } else {
+        const sandboxId = await runtimeSandboxId(db, payload);
+        if (sandboxId) {
+          const sandboxProvider = await resolveSandboxProvider(db, providers, sandboxId);
+          if (payload.job_type === "process.execute") {
+            await executeProcess(db, sandboxProvider, payload.process_id, guard);
+          } else if (payload.job_type === "process.cancel") {
+            await cancelProcessExecution(db, sandboxProvider, payload.process_id, guard);
+          } else if (
+            payload.job_type === "filesystem.read" ||
+            payload.job_type === "filesystem.write" ||
+            payload.job_type === "filesystem.list" ||
+            payload.job_type === "filesystem.delete"
+          ) {
+            await executeFilesystemOperation(
+              db,
+              sandboxProvider,
+              payload.runtime_operation_id,
+              guard,
+            );
+          } else if (payload.job_type === "endpoint.create") {
+            await createHttpEndpoint(db, sandboxProvider, payload.endpoint_id, guard);
+          } else {
+            await revokeHttpEndpoint(db, sandboxProvider, payload.endpoint_id, guard);
+          }
+        }
       }
       await db
         .update(outboxJobs)
@@ -883,17 +2235,24 @@ export async function processOnce(
           completedAt: new Date(),
           updatedAt: new Date(),
           lastError: null,
-          leaseOwner: env.WORKER_ID,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          leaseToken: null,
         })
         .where(
           and(
             eq(outboxJobs.id, job.id),
             eq(outboxJobs.status, "leased"),
             eq(outboxJobs.leaseOwner, env.WORKER_ID),
+            eq(outboxJobs.leaseToken, guard.token),
           ),
         );
       child.info({ job_id: job.id, job_type: payload.job_type }, "processed outbox job");
     } catch (error) {
+      if (error instanceof OutboxLeaseLostError) {
+        child.warn({ job_id: job.id }, "outbox lease lost; stale worker stopped");
+        continue;
+      }
       const attempts = job.attemptCount;
       const terminal = attempts >= env.WORKER_MAX_ATTEMPTS;
       const retryDelayMs =
@@ -902,6 +2261,7 @@ export async function processOnce(
           : backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS);
       if (terminal && payload && payload.job_type !== "realtime.broadcast") {
         await recordTerminalSandboxFailure(db, payload);
+        await recordTerminalRuntimeFailure(db, payload, error, guard);
         if ("operation_id" in payload && payload.operation_id) {
           await setOperationState(db, payload.operation_id, "failed", {
             code: "operation_failed",
@@ -918,6 +2278,7 @@ export async function processOnce(
           availableAt: terminal ? new Date() : new Date(Date.now() + retryDelayMs),
           leaseOwner: null,
           leaseExpiresAt: null,
+          leaseToken: null,
           updatedAt: new Date(),
           completedAt: terminal ? new Date() : null,
         })
@@ -926,12 +2287,15 @@ export async function processOnce(
             eq(outboxJobs.id, job.id),
             eq(outboxJobs.status, "leased"),
             eq(outboxJobs.leaseOwner, env.WORKER_ID),
+            eq(outboxJobs.leaseToken, guard.token),
           ),
         );
       child.warn(
         { job_id: job.id, attempt: attempts, terminal, err: safeError(error) },
         "outbox job failed",
       );
+    } finally {
+      guard.stop();
     }
   }
 

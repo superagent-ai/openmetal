@@ -1,12 +1,31 @@
-export { MetalClient, type MetalClientOptions, type AccessTokenProvider } from "./client.js";
-export { MetalError } from "./error.js";
+export {
+  MetalClient,
+  type AccessTokenProvider,
+  type BinaryData,
+  type BinaryWriteFileInput,
+  type MetalClientOptions,
+  type ProcessEventStreamOptions,
+  type RuntimeWaitOptions,
+} from "./client.js";
+export { MetalError, RuntimeOperationWaitError } from "./error.js";
 export type {
   ConfiguredProviderCredential,
+  CreateProcessRequest,
+  CreateSandboxEndpointRequest,
+  DeleteFileRequest,
   InvitationRole,
+  ListFilesRequest,
   OrganizationBilling,
   OrganizationInvitation,
   OrganizationMember,
   OrganizationMembersResponse,
   OperationEvent,
+  Process,
+  ProcessEvent,
   ProviderCredentialInput,
+  ReadFileRequest,
+  RuntimeOperation,
+  SandboxEndpoint,
+  SandboxEndpointListResponse,
+  WriteFileRequest,
 } from "@openmetal/contracts";

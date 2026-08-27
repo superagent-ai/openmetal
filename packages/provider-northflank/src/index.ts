@@ -92,6 +92,10 @@ function findResourceCost(
   return undefined;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 export class NorthflankSandboxProvider implements SandboxProvider {
   readonly name = "northflank" as const;
   readonly capabilities = {
@@ -100,6 +104,25 @@ export class NorthflankSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "tier",
     sources: ["environment", "oci_image"],
+    runtime: {
+      process: {
+        exec: false,
+        streams: false,
+        cancel: false,
+        maxOutputBytes: 1,
+      },
+      files: {
+        read: false,
+        write: false,
+        writeModes: [],
+        createParents: false,
+        list: false,
+        delete: false,
+        maxReadBytes: 1,
+        maxWriteBytes: 1,
+        maxListEntries: 1,
+      },
+    },
   } as const;
   private readonly apiToken: string;
   private readonly projectId: string;
@@ -150,7 +173,9 @@ export class NorthflankSandboxProvider implements SandboxProvider {
           instances: 1,
           docker: {
             configType: "customCommand",
-            customCommand: "sleep infinity",
+            customCommand: input.source.command
+              ? input.source.command.map(shellQuote).join(" ")
+              : "sleep infinity",
           },
           external: {
             imagePath: input.image ?? this.defaultImage,
@@ -344,7 +369,7 @@ export class NorthflankSandboxProvider implements SandboxProvider {
   private async request(
     path: string,
     options: {
-      method: "DELETE" | "GET" | "POST";
+      method: "DELETE" | "GET" | "PATCH" | "POST";
       body?: string;
       signal?: AbortSignal;
       allowConflict?: boolean;

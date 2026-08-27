@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests --exclude 'test/**/*.integration.test.ts'",
-    "test:integration": "vitest run test"
+    "test:integration": "vitest run test --exclude test/runtime-full-stack.integration.test.ts",
+    "test:runtime-full-stack": "pnpm --filter @openmetal/worker... build && pnpm --filter @openmetal/cli... build && vitest run test/runtime-full-stack.integration.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",
@@ -31,6 +32,7 @@
     "@openmetal/sdk": "workspace:*",
     "@openmetal/testkit": "workspace:*",
     "@openmetal/typescript-config": "workspace:*",
+    "@openmetal/worker": "workspace:*",
     "@types/node": "24.12.0",
     "eslint": "9.39.5",
     "tsx": "4.23.12",

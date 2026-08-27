@@ -7,7 +7,7 @@ import {
   type Operation,
   type OperationEvent,
 } from "@openmetal/contracts";
-import { MetalError } from "@openmetal/sdk";
+import { MetalError, RuntimeOperationWaitError } from "@openmetal/sdk";
 import { z } from "zod";
 import { authStatus, login, logout, openExternalUrl } from "./auth.js";
 import { anonymousClient, projectClient, userClient } from "./clients.js";
@@ -33,6 +33,11 @@ import {
   writeText,
   type CliIo,
 } from "./io.js";
+import {
+  CliProcessExit,
+  CliProcessStreamError,
+  registerRuntimeCommands,
+} from "./runtime-commands.js";
 
 declare const __OPENMETAL_VERSION__: string;
 declare const __OPENMETAL_COMMIT__: string;
@@ -71,9 +76,38 @@ export async function runCli(
     if (error instanceof CommanderError) {
       return error.exitCode;
     }
+    if (error instanceof CliProcessExit) {
+      if (error.detail) writeError(runtime.io, error.detail);
+      return error.exitCode;
+    }
+    if (error instanceof CliProcessStreamError) {
+      const cause = error.cause;
+      if (cause instanceof MetalError) {
+        writeError(runtime.io, cause.message, { code: cause.code, requestId: cause.requestId });
+      } else {
+        writeError(runtime.io, error.message);
+      }
+      runtime.io.stderr.write(`process_id: ${error.processId}\n`);
+      runtime.io.stderr.write(`idempotency_key: ${error.idempotencyKey}\n`);
+      return cause instanceof MetalError ? metalErrorExitCode(cause) : 1;
+    }
+    if (error instanceof RuntimeOperationWaitError) {
+      const cause = error.cause;
+      if (cause instanceof MetalError) {
+        writeError(runtime.io, cause.message, { code: cause.code, requestId: cause.requestId });
+      } else {
+        writeError(runtime.io, error.message);
+      }
+      runtime.io.stderr.write(`runtime_operation_id: ${error.operationId}\n`);
+      runtime.io.stderr.write(`idempotency_key: ${error.idempotencyKey}\n`);
+      return cause instanceof MetalError ? metalErrorExitCode(cause) : 1;
+    }
     if (error instanceof MetalError) {
       writeError(runtime.io, error.message, { code: error.code, requestId: error.requestId });
-      return error.status === 401 || error.status === 403 ? 3 : error.code === "timeout" ? 4 : 1;
+      if (error.idempotencyKey) {
+        runtime.io.stderr.write(`idempotency_key: ${error.idempotencyKey}\n`);
+      }
+      return metalErrorExitCode(error);
     }
     if (error instanceof z.ZodError) {
       writeError(runtime.io, error.issues.map((issue) => issue.message).join("; "), {
@@ -84,6 +118,10 @@ export async function runCli(
     writeError(runtime.io, error instanceof Error ? error.message : String(error));
     return 1;
   }
+}
+
+function metalErrorExitCode(error: MetalError): number {
+  return error.status === 401 || error.status === 403 ? 3 : error.code === "timeout" ? 4 : 1;
 }
 
 export function createProgram(runtime: CliRuntime): Command {
@@ -140,6 +178,13 @@ export function createProgram(runtime: CliRuntime): Command {
   registerProjectCommands(program, runtime, settings, output, confirmation);
   registerCredentialCommands(program, runtime, settings, output, confirmation);
   registerComputeCommands(program, runtime, settings, output, confirmation);
+  registerRuntimeCommands(program, {
+    io,
+    settings,
+    output,
+    json: () => Boolean(globalOptions().json),
+    confirmation,
+  });
   registerTeamCommands(program, runtime, settings, output, confirmation);
   registerBillingCommands(program, runtime, settings, output);
   registerSetupCommand(program, runtime, settings, output);
@@ -1231,7 +1276,7 @@ function slugify(value: string): string {
 
 function completionScript(shell: string): string {
   const commands =
-    "auth config context setup org project api-key provider-credential sandbox operation events member invitation billing doctor health ready meta version completion";
+    "auth config context setup org project api-key provider-credential sandbox process file endpoint operation events member invitation billing doctor health ready meta version completion";
   switch (shell) {
     case "bash":
       return `_openmetal() { COMPREPLY=( $(compgen -W "${commands}" -- "\${COMP_WORDS[1]}") ); }\ncomplete -F _openmetal openmetal`;

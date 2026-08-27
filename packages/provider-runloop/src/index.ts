@@ -1,12 +1,22 @@
 import { z } from "zod";
 import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
+  ProviderCancelExecInput,
+  ProviderCancelExecResult,
   ProviderCreateSandboxInput,
+  ProviderExecEvent,
+  ProviderExecInput,
+  ProviderExecResult,
+  ProviderReadFileInput,
+  ProviderReadFileResult,
   ProviderSandbox,
   ProviderSandboxCost,
   ProviderSandboxCostInput,
+  ProviderWriteFileInput,
+  ProviderWriteFileResult,
   SandboxProvider,
 } from "@openmetal/provider-core";
+import { ProviderError } from "@openmetal/provider-core";
 
 const DevboxStatusSchema = z.enum([
   "scheduled",
@@ -54,8 +64,24 @@ const DevboxUsageSchema = z
   })
   .passthrough();
 
+const AsyncExecutionSchema = z
+  .object({
+    devbox_id: z.string().min(1),
+    execution_id: z.string().min(1),
+    status: z.enum(["queued", "running", "completed"]),
+    stdout: z.string().nullable().optional(),
+    stderr: z.string().nullable().optional(),
+    exit_status: z.number().int().nullable().optional(),
+    stdout_truncated: z.boolean().nullable().optional(),
+    stderr_truncated: z.boolean().nullable().optional(),
+  })
+  .passthrough();
+
 const ResourceSizeSchema = z.enum(["X_SMALL", "SMALL", "MEDIUM", "LARGE", "X_LARGE", "XX_LARGE"]);
 export type RunloopResourceSize = z.infer<typeof ResourceSizeSchema>;
+
+const MAX_RUNTIME_OUTPUT_BYTES = 10 * 1_024 * 1_024;
+const MAX_RUNTIME_FILE_BYTES = 10 * 1_024 * 1_024;
 
 const hourlyRateMicrousd: Record<RunloopResourceSize, bigint> = {
   X_SMALL: 80_600n,
@@ -95,6 +121,25 @@ export class RunloopSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "tier",
     sources: ["environment", "provider_template"],
+    runtime: {
+      process: {
+        exec: true,
+        streams: false,
+        cancel: true,
+        maxOutputBytes: MAX_RUNTIME_OUTPUT_BYTES,
+      },
+      files: {
+        read: true,
+        write: true,
+        writeModes: ["create", "overwrite"],
+        createParents: false,
+        list: false,
+        delete: false,
+        maxReadBytes: MAX_RUNTIME_FILE_BYTES,
+        maxWriteBytes: MAX_RUNTIME_FILE_BYTES,
+        maxListEntries: 0,
+      },
+    },
   } as const;
   private readonly apiKey: string;
   private readonly apiUrl: string;
@@ -109,6 +154,10 @@ export class RunloopSandboxProvider implements SandboxProvider {
   private readonly startupTimeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private accountId?: string;
+  private readonly executions = new Map<
+    string,
+    { providerResourceId: string; cancelRequested: boolean }
+  >();
 
   constructor(options: RunloopSandboxProviderOptions) {
     this.apiKey = options.apiKey;
@@ -186,6 +235,136 @@ export class RunloopSandboxProvider implements SandboxProvider {
       },
       resolvedResources: resolved,
     };
+  }
+
+  async exec(input: ProviderExecInput): Promise<ProviderExecResult> {
+    if (input.command.length === 0) {
+      throw new ProviderError("command must not be empty", "invalid_request", false);
+    }
+    if (input.stdin !== undefined) {
+      throw new ProviderError(
+        "Runloop direct HTTP execution does not support portable stdin",
+        "unsupported",
+        false,
+      );
+    }
+    const maxOutputBytes = boundedInteger(
+      input.maxOutputBytes ?? MAX_RUNTIME_OUTPUT_BYTES,
+      0,
+      MAX_RUNTIME_OUTPUT_BYTES,
+      "maxOutputBytes",
+    );
+    const signal = runtimeSignal(input);
+    const command = runloopCommand(input);
+    const execution = AsyncExecutionSchema.parse(
+      await this.request(
+        `/v1/devboxes/${encodeURIComponent(input.providerResourceId)}/execute_async`,
+        {
+          method: "POST",
+          body: JSON.stringify({ command }),
+          signal,
+        },
+      ),
+    );
+    this.executions.set(execution.execution_id, {
+      providerResourceId: input.providerResourceId,
+      cancelRequested: false,
+    });
+    return {
+      executionId: execution.execution_id,
+      events: this.executionEvents(
+        input.providerResourceId,
+        execution.execution_id,
+        maxOutputBytes,
+        signal,
+      ),
+    };
+  }
+
+  async cancelExec(input: ProviderCancelExecInput): Promise<ProviderCancelExecResult> {
+    await this.killExecution(input.providerResourceId, input.executionId, runtimeSignal(input));
+    const tracked = this.executions.get(input.executionId);
+    if (tracked?.providerResourceId === input.providerResourceId) {
+      tracked.cancelRequested = true;
+    }
+    return { executionId: input.executionId, cancelled: true };
+  }
+
+  async readFile(input: ProviderReadFileInput): Promise<ProviderReadFileResult> {
+    const offsetBytes = boundedInteger(
+      input.offsetBytes ?? 0,
+      0,
+      Number.MAX_SAFE_INTEGER,
+      "offsetBytes",
+    );
+    const maxBytes = boundedInteger(
+      input.maxBytes ?? MAX_RUNTIME_FILE_BYTES,
+      0,
+      MAX_RUNTIME_FILE_BYTES,
+      "maxBytes",
+    );
+    const response = await this.requestRaw(
+      `/v1/devboxes/${encodeURIComponent(input.providerResourceId)}/download_file`,
+      {
+        method: "POST",
+        body: JSON.stringify({ path: runloopPath(input.path) }),
+        signal: runtimeSignal(input),
+        contentType: "application/json",
+      },
+    );
+    const { bytes, sizeBytes } = await readBoundedResponse(response, offsetBytes, maxBytes);
+    const encoding = input.encoding ?? "binary";
+    const eof = offsetBytes + bytes.byteLength >= sizeBytes;
+    return {
+      path: input.path,
+      encoding,
+      data: encoding === "utf8" ? new TextDecoder("utf-8", { fatal: true }).decode(bytes) : bytes,
+      offsetBytes,
+      byteLength: bytes.byteLength,
+      sizeBytes,
+      eof,
+      truncated: !eof,
+    };
+  }
+
+  async writeFile(input: ProviderWriteFileInput): Promise<ProviderWriteFileResult> {
+    const bytes =
+      typeof input.data === "string" ? new TextEncoder().encode(input.data) : input.data.slice();
+    if (bytes.byteLength > MAX_RUNTIME_FILE_BYTES) {
+      throw new ProviderError("file exceeds Runloop write limit", "invalid_request", false);
+    }
+    if (input.mode === "append") {
+      throw new ProviderError(
+        "Runloop upload_file does not provide atomic append",
+        "unsupported",
+        false,
+      );
+    }
+    if (input.createParents) {
+      throw new ProviderError(
+        "Runloop upload_file does not guarantee parent creation",
+        "unsupported",
+        false,
+      );
+    }
+    const path = runloopPath(input.path);
+    const existed = await this.runloopFileExists(
+      input.providerResourceId,
+      path,
+      runtimeSignal(input),
+    );
+    if (input.mode === "create" && existed) {
+      throw new ProviderError("file already exists", "invalid_request", false);
+    }
+    const form = new FormData();
+    form.set("path", path);
+    form.set("file", new Blob([bytes]));
+    await this.request(`/v1/devboxes/${encodeURIComponent(input.providerResourceId)}/upload_file`, {
+      method: "POST",
+      body: form,
+      signal: runtimeSignal(input),
+    });
+    return { path: input.path, bytesWritten: bytes.byteLength, created: !existed };
   }
 
   async pause(providerResourceId: string, signal?: AbortSignal): Promise<void> {
@@ -352,6 +531,123 @@ export class RunloopSandboxProvider implements SandboxProvider {
     return account.id;
   }
 
+  private async *executionEvents(
+    providerResourceId: string,
+    executionId: string,
+    maxOutputBytes: number,
+    signal?: AbortSignal,
+  ): AsyncIterable<ProviderExecEvent> {
+    let sequence = 0;
+    let emittedBytes = 0;
+    let outputTruncated = false;
+    try {
+      const completed = await this.waitForExecution(providerResourceId, executionId, signal);
+      for (const [type, output] of [
+        ["stdout", completed.stdout],
+        ["stderr", completed.stderr],
+      ] as const) {
+        if (!output) continue;
+        const bytes = new TextEncoder().encode(output);
+        const available = Math.max(0, maxOutputBytes - emittedBytes);
+        const data = bytes.slice(0, available);
+        const truncated = data.byteLength < bytes.byteLength;
+        outputTruncated ||= truncated;
+        emittedBytes += data.byteLength;
+        if (data.byteLength > 0) {
+          yield {
+            type,
+            sequence: sequence++,
+            data,
+            ...(truncated ? { truncated } : {}),
+          };
+        }
+      }
+      outputTruncated ||= Boolean(completed.stdout_truncated || completed.stderr_truncated);
+      yield {
+        type: "exit",
+        sequence,
+        exitCode: completed.exit_status ?? null,
+        signal: null,
+        cancelled: this.executions.get(executionId)?.cancelRequested ?? false,
+        outputTruncated,
+      };
+    } catch (error) {
+      if (signal?.aborted) {
+        const recoverySignal = AbortSignal.timeout(this.requestTimeoutMs);
+        await this.killExecution(providerResourceId, executionId, recoverySignal).catch(
+          () => undefined,
+        );
+        const tracked = this.executions.get(executionId);
+        if (tracked?.providerResourceId === providerResourceId) tracked.cancelRequested = true;
+      }
+      throw error;
+    } finally {
+      this.executions.delete(executionId);
+    }
+  }
+
+  private async waitForExecution(
+    providerResourceId: string,
+    executionId: string,
+    signal?: AbortSignal,
+  ): Promise<z.infer<typeof AsyncExecutionSchema>> {
+    while (true) {
+      const result = AsyncExecutionSchema.parse(
+        await this.request(
+          `/v1/devboxes/${encodeURIComponent(providerResourceId)}/executions/${encodeURIComponent(
+            executionId,
+          )}`,
+          { method: "GET", signal },
+        ),
+      );
+      if (result.status === "completed") return result;
+      await abortableDelay(50, signal);
+    }
+  }
+
+  private async killExecution(
+    providerResourceId: string,
+    executionId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const killed = AsyncExecutionSchema.safeParse(
+      await this.request(
+        `/v1/devboxes/${encodeURIComponent(providerResourceId)}/executions/${encodeURIComponent(
+          executionId,
+        )}/kill`,
+        {
+          method: "POST",
+          body: JSON.stringify({ kill_process_group: true }),
+          signal,
+        },
+      ),
+    );
+    if (!killed.success || killed.data.status !== "completed") {
+      await this.waitForExecution(providerResourceId, executionId, signal);
+    }
+  }
+
+  private async runloopFileExists(
+    providerResourceId: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const response = await this.requestRaw(
+      `/v1/devboxes/${encodeURIComponent(providerResourceId)}/download_file`,
+      {
+        method: "POST",
+        body: JSON.stringify({ path }),
+        signal,
+        contentType: "application/json",
+        allowNotFound: true,
+        allowMissingFile: true,
+      },
+    );
+    if (response.status === 400 || response.status === 404) return false;
+    await response.body?.cancel();
+    return true;
+  }
+
   private async findByMetalSandboxId(
     metalSandboxId: string,
     signal?: AbortSignal,
@@ -427,12 +723,33 @@ export class RunloopSandboxProvider implements SandboxProvider {
     path: string,
     options: {
       method: "GET" | "POST";
-      body?: string;
+      body?: string | FormData;
       signal?: AbortSignal;
       allowNotFound?: boolean;
+      allowMissingFile?: boolean;
       allowTimeout?: boolean;
     },
   ): Promise<unknown | null> {
+    const response = await this.requestRaw(path, options);
+    if (options.allowNotFound && response.status === 404) return null;
+    if (options.allowTimeout && response.status === 408) return null;
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
+  }
+
+  private async requestRaw(
+    path: string,
+    options: {
+      method: "GET" | "POST";
+      body?: string | FormData;
+      signal?: AbortSignal;
+      allowNotFound?: boolean;
+      allowMissingFile?: boolean;
+      allowTimeout?: boolean;
+      accept?: string;
+      contentType?: string;
+    },
+  ): Promise<Response> {
     const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs);
     const signal = options.signal
       ? AbortSignal.any([options.signal, timeoutSignal])
@@ -441,22 +758,133 @@ export class RunloopSandboxProvider implements SandboxProvider {
       method: options.method,
       headers: {
         authorization: `Bearer ${this.apiKey}`,
-        accept: "application/json",
-        ...(options.body ? { "content-type": "application/json" } : {}),
+        accept: options.accept ?? "application/json",
+        ...(options.contentType
+          ? { "content-type": options.contentType }
+          : typeof options.body === "string"
+            ? { "content-type": "application/json" }
+            : {}),
       },
       body: options.body,
       signal,
     });
     if (
       (options.allowNotFound && response.status === 404) ||
-      (options.allowTimeout && response.status === 408)
+      (options.allowMissingFile && response.status === 400)
     ) {
-      return null;
+      return response;
     }
+    if (options.allowTimeout && response.status === 408) return response;
     if (!response.ok) {
       throw new RunloopRequestError(response.status);
     }
-    const text = await response.text();
-    return text ? JSON.parse(text) : {};
+    return response;
   }
+}
+
+function boundedInteger(value: number, minimum: number, maximum: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new ProviderError(
+      `${name} must be an integer between ${minimum} and ${maximum}`,
+      "invalid_request",
+      false,
+    );
+  }
+  return value;
+}
+
+function runtimeSignal(operation: {
+  deadline?: Date;
+  signal?: AbortSignal;
+}): AbortSignal | undefined {
+  operation.signal?.throwIfAborted();
+  if (!operation.deadline) return operation.signal;
+  const remaining = operation.deadline.getTime() - Date.now();
+  if (remaining <= 0) {
+    throw new ProviderError("runtime operation deadline exceeded", "timeout_absent", false);
+  }
+  const deadlineSignal = AbortSignal.timeout(remaining);
+  return operation.signal ? AbortSignal.any([operation.signal, deadlineSignal]) : deadlineSignal;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function runloopCommand(input: ProviderExecInput): string {
+  const command = input.command.map(shellQuote).join(" ");
+  const environment = Object.entries(input.environment ?? {}).map(([key, value]) => {
+    if (!key || key.includes("=") || key.includes("\0")) {
+      throw new ProviderError("invalid environment variable name", "invalid_request", false);
+    }
+    return shellQuote(`${key}=${value}`);
+  });
+  const invoked = environment.length > 0 ? `env ${environment.join(" ")} ${command}` : command;
+  return input.cwd ? `cd -- ${shellQuote(input.cwd)} && ${invoked}` : invoked;
+}
+
+function runloopPath(path: string): string {
+  if (!path.startsWith("/") || path === "/" || path.includes("\0")) {
+    throw new ProviderError(
+      "Runloop file path must identify an absolute file",
+      "invalid_request",
+      false,
+    );
+  }
+  return path.startsWith("/workspace/") ? path.slice("/workspace/".length) : path.slice(1);
+}
+
+async function readBoundedResponse(
+  response: Response,
+  offsetBytes: number,
+  maxBytes: number,
+): Promise<{ bytes: Uint8Array; sizeBytes: number }> {
+  const declaredLength = response.headers.get("content-length");
+  const contentLength =
+    declaredLength !== null && /^\d+$/.test(declaredLength) ? Number(declaredLength) : undefined;
+  const reader = response.body?.getReader();
+  if (!reader) return { bytes: new Uint8Array(), sizeBytes: contentLength ?? 0 };
+  const end = offsetBytes + maxBytes;
+  const selected: number[] = [];
+  let position = 0;
+  let reachedEof = false;
+  while (position <= end) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      reachedEof = true;
+      break;
+    }
+    for (const byte of chunk.value) {
+      if (position >= offsetBytes && position < end) selected.push(byte);
+      position += 1;
+      if (position > end) break;
+    }
+  }
+  if (!reachedEof) await reader.cancel();
+  if (contentLength === undefined && !reachedEof) {
+    throw new ProviderError(
+      "provider omitted Content-Length for a truncated file response",
+      "unsupported",
+      false,
+    );
+  }
+  return {
+    bytes: Uint8Array.from(selected),
+    sizeBytes: contentLength ?? position,
+  };
+}
+
+function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
+    const timer = setTimeout(resolve, milliseconds);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
 }

@@ -75,6 +75,26 @@ completed
 
 Events have increasing positive sequence numbers. The events endpoint returns finite SSE batches and accepts the last sequence through `Last-Event-ID` in the SDK or `--after` in the CLI. Save the last processed sequence before polling again.
 
+## Runtime States And Events
+
+Process states are:
+
+```text
+queued, running, cancelling, succeeded, failed, cancelled, timed_out
+```
+
+Process event types are:
+
+```text
+queued, started, stdout, stderr, exited, cancelled, timed_out, failed
+```
+
+The process events route is also a finite SSE batch. Output data is base64 and includes `byte_length` plus a per-stream `stream_offset_bytes`. The SDK's `processes.events()` reconnects from the last event ID, enforces contiguous process sequences, and stops at a terminal event.
+
+Filesystem runtime-operation states are `queued`, `running`, `succeeded`, `failed`, and `cancelled`. Kinds are `filesystem_read`, `filesystem_write`, `filesystem_list`, and `filesystem_delete`. Wait for the terminal operation and inspect its matching `result` or `error`.
+
+Endpoint states are `provisioning`, `active`, `revoking`, `revoked`, `expired`, and `failed`. Endpoint create is asynchronous but has no operation resource or single-endpoint GET. Poll the endpoint list until active or failed.
+
 ## Error Envelope
 
 API errors use this safe shape:
@@ -93,26 +113,36 @@ Log `code`, `message`, `request_id`, and `retryable`. Review `details` before lo
 
 ## Common Errors
 
-| Code                            | Meaning                                      | Response                                                                                 |
-| ------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `unauthenticated`               | Missing, expired, or invalid token           | Refresh the appropriate token; verify project-key versus user-session scope.             |
-| `forbidden`                     | Credential lacks access                      | Verify organization/project membership and that the key belongs to the selected project. |
-| `validation_error`              | Request does not match the contract          | Correct the request; do not retry unchanged.                                             |
-| `not_found`                     | Resource is absent or inaccessible           | Verify ID and project scope. Do not assume cross-project visibility.                     |
-| `conflict`                      | Resource state or request conflicts          | Fetch current sandbox and operation state before deciding.                               |
-| `idempotency_mismatch`          | A key was reused with different input        | Use the original input or a new key for a genuinely new operation.                       |
-| `insufficient_credits`          | Managed balance is not positive              | Fund the organization or intentionally choose eligible BYOK.                             |
-| `capability_unsupported`        | No candidate can meet a known requirement    | Relax the requirement or choose a compatible provider.                                   |
-| `no_eligible_provider`          | Routing found no usable provider             | Check source support, credentials, billing, and fallback candidates.                     |
-| `provider_auth_error`           | Upstream credential failed                   | Fix the provider credential; do not fan out automatically.                               |
-| `provider_quota_exceeded`       | Upstream quota is exhausted                  | Increase quota or select another intentionally configured provider.                      |
-| `provider_capacity_unavailable` | Provider lacks capacity                      | Retry when marked retryable or allow safe fallback.                                      |
-| `provider_unavailable`          | Provider service is unavailable              | Retry with backoff when marked retryable.                                                |
-| `provider_unknown_outcome`      | Creation may or may not have happened        | Wait for reconciliation; do not create a duplicate.                                      |
-| `invalid_sandbox_state`         | Action is invalid for current state          | Fetch the sandbox and choose an action valid for that state.                             |
-| `unsupported_operation`         | Provider cannot perform the lifecycle action | Choose a supported provider or skip the action.                                          |
-| `timeout`                       | A request deadline elapsed                   | Check the operation before retrying a mutation.                                          |
-| `service_unavailable`           | OpenMetal is temporarily unavailable         | Retry safe reads with bounded backoff.                                                   |
+| Code                            | Meaning                                        | Response                                                                                 |
+| ------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `unauthenticated`               | Missing, expired, or invalid token             | Refresh the appropriate token; verify project-key versus user-session scope.             |
+| `forbidden`                     | Credential lacks access                        | Verify organization/project membership and that the key belongs to the selected project. |
+| `validation_error`              | Request does not match the contract            | Correct the request; do not retry unchanged.                                             |
+| `not_found`                     | Resource is absent or inaccessible             | Verify ID and project scope. Do not assume cross-project visibility.                     |
+| `conflict`                      | Resource state or request conflicts            | Fetch current sandbox and operation state before deciding.                               |
+| `idempotency_key_required`      | A required mutation omitted its key            | Generate and persist a key before submitting process, endpoint, or sandbox creation.     |
+| `idempotency_in_progress`       | The same keyed request is still being handled  | Wait, then replay the identical request with the same key.                               |
+| `idempotency_conflict`          | A keyed request could not be reconciled        | Stop and inspect state before choosing another key.                                      |
+| `idempotency_mismatch`          | A key was reused with different input          | Use the original input or a new key for a genuinely new operation.                       |
+| `insufficient_credits`          | Managed balance is not positive                | Fund the organization or intentionally choose eligible BYOK.                             |
+| `capability_unsupported`        | Provider lacks an operation or requested limit | Relax the requirement or choose a compatible provider.                                   |
+| `no_eligible_provider`          | Routing found no usable provider               | Check source support, credentials, billing, and fallback candidates.                     |
+| `provider_auth_error`           | Upstream credential failed                     | Fix the provider credential; do not fan out automatically.                               |
+| `provider_quota_exceeded`       | Upstream quota is exhausted                    | Increase quota or select another intentionally configured provider.                      |
+| `provider_capacity_unavailable` | Provider lacks capacity                        | Retry when marked retryable or allow safe fallback.                                      |
+| `provider_unavailable`          | Provider service is unavailable                | Retry with backoff when marked retryable.                                                |
+| `provider_unknown_outcome`      | Creation may or may not have happened          | Wait for reconciliation; do not create a duplicate.                                      |
+| `invalid_sandbox_state`         | Action is invalid for current state            | Fetch the sandbox and choose an action valid for that state.                             |
+| `process_terminal`              | Cancellation targeted a terminal process       | Fetch the process; do not submit cancellation again.                                     |
+| `process_exit_nonzero`          | The process returned a nonzero exit code       | Inspect the exit code and stderr; retry only when the workload permits it.               |
+| `process_failed`                | Provider process execution failed              | Inspect process events and provider capability snapshot.                                 |
+| `runtime_operation_failed`      | A filesystem provider call failed              | Inspect the terminal runtime operation; do not treat HTTP 202 as success.                |
+| `endpoint_conflict`             | A live endpoint already uses the port          | List endpoints and revoke or reuse the existing lease.                                   |
+| `endpoint_create_failed`        | Provider endpoint creation failed              | Inspect the endpoint error and choose a supported provider or port.                      |
+| `endpoint_revoke_failed`        | Provider endpoint revocation failed            | Retain the endpoint ID and rely on expiry while escalating cleanup.                      |
+| `unsupported_operation`         | Provider cannot perform the lifecycle action   | Choose a supported provider or skip the action.                                          |
+| `timeout`                       | A request deadline elapsed                     | Check the operation before retrying a mutation.                                          |
+| `service_unavailable`           | OpenMetal is temporarily unavailable           | Retry safe reads with bounded backoff.                                                   |
 
 Runtime may emit additional string error codes. Preserve unknown codes rather than converting them to a known code.
 
@@ -137,9 +167,8 @@ For pause, resume, and destroy, do not automatically resubmit after a lost respo
 ## Current Compatibility Issues
 
 - Operation authorization is tied to the exact project API key that created the sandbox. Use the same key for operation polling; another valid key for the project can receive `not_found`.
-- Provider adapters can persist resolved resource keys in camel case while the public response schema expects snake case. Once a sandbox has resolved resources, SDK and CLI reads can fail with `internal_error: malformed metal api response` even though provisioning succeeded.
-- `createAsync()` returns IDs before resolved resources are populated, but lifecycle mutation responses can fail validation before returning their new operation ID. If response validation fails after a mutation request, assume the action may have been accepted, do not resubmit it, and escalate when current state cannot be read safely.
 - The API does not consistently enforce Daytona's advertised pause capability. Treat Daytona pause as unreliable until the implementation is corrected.
+- Runtime capability failures are asynchronous: process, filesystem, and endpoint creation can be accepted with HTTP 202 before the worker records `capability_unsupported`. Inspect the terminal resource state.
 
 ## Cleanup Failures
 

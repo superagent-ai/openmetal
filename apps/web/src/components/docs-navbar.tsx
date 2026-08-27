@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { SidebarLeftIcon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, SidebarLeftIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNotebookLayout } from "fumadocs-ui/layouts/notebook";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,7 @@ export function DocsNavbar() {
           render={<Link href={isAuthenticated ? "/dashboard" : "/login"} />}
         >
           {isAuthenticated ? "My account" : "Login"}
+          <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} data-icon="inline-end" />
         </Button>
         {SidebarTrigger ? (
           <SidebarTrigger aria-label="Open documentation navigation" className="p-2 md:hidden">

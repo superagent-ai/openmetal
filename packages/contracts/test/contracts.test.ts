@@ -152,6 +152,34 @@ describe("contract parsing", () => {
     ).toBe("updateOrganizationInvitation");
   });
 
+  it("documents project API-key and project-path sandbox operations", () => {
+    const document = buildOpenApiDocument() as {
+      components: { schemas: Record<string, unknown> };
+      paths: Record<string, Record<string, { operationId?: string }>>;
+    };
+    const operations = [
+      ["get", "/v1/projects/{project_id}/api-keys", "listProjectApiKeys"],
+      ["post", "/v1/projects/{project_id}/api-keys", "createProjectApiKey"],
+      ["post", "/v1/projects/{project_id}/api-keys/{api_key_id}/revoke", "revokeProjectApiKey"],
+      ["delete", "/v1/projects/{project_id}/api-keys/{api_key_id}", "deleteProjectApiKey"],
+      ["get", "/v1/projects/{project_id}/sandboxes", "listProjectSandboxes"],
+      ["post", "/v1/projects/{project_id}/sandboxes/{sandbox_id}/pause", "pauseProjectSandbox"],
+      ["delete", "/v1/projects/{project_id}/sandboxes/{sandbox_id}", "destroyProjectSandbox"],
+    ] as const;
+
+    for (const [method, path, operationId] of operations) {
+      expect(document.paths[path]?.[method]?.operationId).toBe(operationId);
+    }
+    expect(document.components.schemas).toMatchObject({
+      ProjectApiKey: expect.any(Object),
+      CreateProjectApiKeyRequest: expect.any(Object),
+      CreateProjectApiKeyResponse: expect.any(Object),
+      ProjectApiKeyListResponse: expect.any(Object),
+      ProjectApiKeyDeleteResponse: expect.any(Object),
+      ProjectSandboxListResponse: expect.any(Object),
+    });
+  });
+
   it("accepts an organization invitation payload", () => {
     expect(
       CreateOrganizationInvitationRequestSchema.parse({

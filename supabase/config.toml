@@ -166,6 +166,8 @@ additional_redirect_urls = [
   "http://127.0.0.1:3100/auth/confirm**",
   "http://127.0.0.1:3100/auth/callback",
   "http://127.0.0.1:3100/auth/callback**",
+  "http://127.0.0.1:54389/callback",
+  "http://127.0.0.1:54389/callback**",
   "http://localhost:3100",
   "http://localhost:3100/auth/confirm",
   "http://localhost:3100/auth/confirm**",

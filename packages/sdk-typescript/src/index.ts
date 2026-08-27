@@ -7,5 +7,6 @@ export type {
   OrganizationInvitation,
   OrganizationMember,
   OrganizationMembersResponse,
+  OperationEvent,
   ProviderCredentialInput,
 } from "@openmetal/contracts";

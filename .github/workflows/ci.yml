@@ -20,9 +20,16 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm --filter @openmetal/cli test:integration
+      - run: OPENMETAL_CLI_VERSION=0.0.0-ci pnpm --filter @openmetal/cli build:npm
+      - run: OPENMETAL_TEST_EXECUTABLE=dist/npm/openmetal.js OPENMETAL_TEST_VERSION=0.0.0-ci pnpm --filter @openmetal/cli exec vitest run test/cli.integration.test.ts
+      - run: npm pack ./apps/cli/dist/npm --dry-run

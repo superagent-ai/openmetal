@@ -11,6 +11,7 @@ import {
   OrganizationMemberDeleteResponseSchema,
   OrganizationMemberSchema,
   OrganizationMembersResponseSchema,
+  OperationEventSchema,
   OperationSchema,
   ProjectApiKeySchema,
   ProviderCredentialDeleteResponseSchema,
@@ -22,6 +23,7 @@ import {
   type CreateSandboxRequest,
   type InvitationRole,
   type Operation,
+  type OperationEvent,
   type ProviderCredentialInput,
   type SandboxMutation,
 } from "@openmetal/contracts";
@@ -48,7 +50,9 @@ type RequestOptions = {
   body?: unknown;
   query?: Record<string, string | number | undefined>;
   idempotencyKey?: string;
+  lastEventId?: number;
   projectId?: string;
+  responseFormat?: "json" | "text";
   schema: z.ZodType;
   timeoutMs?: number;
 };
@@ -60,6 +64,73 @@ function sleep(ms: number): Promise<void> {
 function jitter(ms: number): number {
   return Math.round(ms * (0.5 + Math.random()));
 }
+
+function parseOperationEventBatch(raw: string): OperationEvent[] {
+  const input = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+  const events: OperationEvent[] = [];
+  let id: string | undefined;
+  let eventName: string | undefined;
+  let dataLines: string[] = [];
+  let hasEventFields = false;
+
+  const flush = () => {
+    if (!hasEventFields) return;
+    if (id === undefined || eventName === undefined || dataLines.length === 0) {
+      throw new Error("operation event is missing id, event, or data");
+    }
+
+    const event = OperationEventSchema.parse(JSON.parse(dataLines.join("\n")) as unknown);
+    if (String(event.sequence) !== id) {
+      throw new Error("operation event id does not match its sequence");
+    }
+    if (event.type !== eventName) {
+      throw new Error("operation event name does not match its type");
+    }
+    events.push(event);
+    id = undefined;
+    eventName = undefined;
+    dataLines = [];
+    hasEventFields = false;
+  };
+
+  for (const line of input.split(/\r\n|\r|\n/)) {
+    if (line === "") {
+      flush();
+      continue;
+    }
+    if (line.startsWith(":")) continue;
+
+    const separator = line.indexOf(":");
+    const field = separator === -1 ? line : line.slice(0, separator);
+    const rawValue = separator === -1 ? "" : line.slice(separator + 1);
+    const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+    if (field === "id") {
+      id = value;
+      hasEventFields = true;
+    } else if (field === "event") {
+      eventName = value;
+      hasEventFields = true;
+    } else if (field === "data") {
+      dataLines.push(value);
+      hasEventFields = true;
+    }
+  }
+  flush();
+
+  return events;
+}
+
+const OperationEventBatchSseSchema = z.string().transform((raw, context) => {
+  try {
+    return parseOperationEventBatch(raw);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "invalid operation event batch",
+    });
+    return z.NEVER;
+  }
+});
 
 export class MetalClient {
   private readonly baseUrl: string;
@@ -400,6 +471,19 @@ export class MetalClient {
         path: `/v1/operations/${operationId}`,
         schema: OperationSchema,
       }) as Promise<Operation>,
+    events: (operationId: string, options: { lastEventId?: number } = {}) => {
+      const lastEventId =
+        options.lastEventId === undefined
+          ? undefined
+          : z.number().int().nonnegative().parse(options.lastEventId);
+      return this.request({
+        method: "GET",
+        path: `/v1/operations/${operationId}/events`,
+        lastEventId,
+        responseFormat: "text",
+        schema: OperationEventBatchSseSchema,
+      });
+    },
     wait: async (
       operationOrId: Operation | string,
       options: { timeoutMs?: number; signal?: AbortSignal } = {},
@@ -599,7 +683,7 @@ export class MetalClient {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const requestId = crypto.randomUUID();
     const headers: Record<string, string> = {
-      accept: "application/json",
+      accept: options.responseFormat === "text" ? "text/event-stream" : "application/json",
       "x-request-id": requestId,
     };
     if (token) {
@@ -610,6 +694,9 @@ export class MetalClient {
     }
     if (options.idempotencyKey) {
       headers["idempotency-key"] = options.idempotencyKey;
+    }
+    if (options.lastEventId !== undefined) {
+      headers["last-event-id"] = String(options.lastEventId);
     }
     const projectId = options.projectId ?? this.projectId;
     if (projectId) {
@@ -624,8 +711,8 @@ export class MetalClient {
         signal: controller.signal,
       });
       const raw = await response.text();
-      let parsed: unknown = {};
-      if (raw.length > 0) {
+      let parsed: unknown = options.responseFormat === "text" && response.ok ? raw : {};
+      if (raw.length > 0 && (options.responseFormat !== "text" || !response.ok)) {
         try {
           parsed = JSON.parse(raw);
         } catch {

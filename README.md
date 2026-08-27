@@ -1,6 +1,6 @@
 # Metal
 
-Metal is the universal compute gateway for AI agents. This repository currently implements **Milestone 1**: the production control plane foundation. It does not provision sandboxes, talk to compute providers, route workloads, or bill usage.
+Metal is the universal compute gateway for AI agents. This repository implements a hosted control plane that provisions CPU sandboxes, routes creation across supported compute providers, manages lifecycle operations, and bills managed usage.
 
 ## Product model
 
@@ -13,7 +13,7 @@ Metal is OpenRouter for cloud sandboxes and GPUs:
 - Customers pay Metal; Metal reconciles and pays providers.
 - The public API and TypeScript SDK hide provider-specific lifecycle, usage, and billing differences.
 
-The initial provider set is E2B, Daytona, Modal, Railway, and Vercel. Provider integrations remain behind one capability-oriented Metal API; they are not separate customer-facing products.
+The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Modal, Northflank, Runloop, and Vercel. Provider integrations remain behind one capability-oriented Metal API; they are not separate customer-facing products.
 
 ## Architecture
 
@@ -57,6 +57,16 @@ apps/cli/dist/openmetal --help
 ```
 
 Tagged `cli-v*` releases publish checksum-verified binaries for macOS, Linux, and Windows plus a bundled Node.js package at `@openmetal/cli`. See [docs/cli.md](docs/cli.md) for installation, authentication, command examples, profiles, npm bootstrap, and CI usage.
+
+## OpenMetal Agent Skill
+
+Install the OpenMetal skill to give compatible coding agents detailed CLI and TypeScript SDK guidance for configuring, provisioning, observing, and managing sandboxes:
+
+```bash
+npx skills add homanp/metal --skill openmetal
+```
+
+The skill follows the open [Agent Skills specification](https://agentskills.io) and works with OpenCode, Claude Code, Codex, Cursor, and other clients supported by the Skills CLI. Its source and reference material are in [`skills/openmetal`](skills/openmetal).
 
 ## Environment setup
 
@@ -114,7 +124,7 @@ Local Auth reads credentials from `supabase/.env` via `config.toml` `env()` subs
 | `SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID` | GitHub OAuth App client ID       |
 | `SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET`    | GitHub OAuth App client secret   |
 
-Metal's local Auth callback is `http://127.0.0.1:55321/auth/v1/callback`, not the CLI default port 54321.
+Metal's local Auth callback is `http://127.0.0.1:55321/auth/v1/callback`, not the CLI callback port 54389.
 
 **Google Cloud (Web application)**
 

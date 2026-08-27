@@ -1,0 +1,40 @@
+{
+  "skill_name": "openmetal",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Set up a non-interactive CI job that creates a two-vCPU OpenMetal Node sandbox, waits for provisioning, prints machine-readable status, and always cleans it up without leaking credentials.",
+      "expected_output": "A CLI workflow using OpenMetal environment variables, --json, --no-input, an explicit runtime timeout, asynchronous operation handling, and confirmed cleanup without printing secrets.",
+      "files": [],
+      "assertions": [
+        "Credentials are read from environment variables and their values are never printed",
+        "Create uses --json, --no-input, --async, two vCPUs, and an explicit runtime timeout",
+        "The accepted operation is waited on before the sandbox is treated as ready",
+        "Cleanup retains the sandbox ID and requests destruction without blindly retrying the mutation"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Add TypeScript code to create an auto-routed OpenMetal sandbox with E2B then CodeSandbox fallback, 4 GiB memory, a 30-minute lifetime, and reliable retry behavior.",
+      "expected_output": "Valid MetalClient code with the current request shape, a stable idempotency key for caller retries, operation handling, and accurate limits on automatic retries and fallback.",
+      "files": [],
+      "assertions": [
+        "The request uses provider auto and fallback providers in E2B then CodeSandbox order",
+        "The request uses memory_mb 4096 and runtime_timeout_seconds 1800",
+        "Creation retries reuse one persisted idempotency key with identical input",
+        "The response does not claim that mutating SDK calls are automatically retried"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Create an OpenMetal sandbox, upload package.json, run npm test inside it, and return the output.",
+      "expected_output": "An explicit explanation that public command and filesystem APIs are not currently implemented, without fabricating SDK methods or CLI commands; provisioning-only alternatives may be offered.",
+      "files": [],
+      "assertions": [
+        "The response clearly states that command execution and file upload are not currently available",
+        "The response does not invent SDK methods or CLI commands",
+        "The response does not create a billable sandbox that cannot complete the requested task"
+      ]
+    }
+  ]
+}

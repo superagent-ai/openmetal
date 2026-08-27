@@ -1,0 +1,55 @@
+---
+title: Asynchronous operations
+description: Track accepted mutations, terminal states, events, and uncertain outcomes.
+---
+
+Sandbox lifecycle and filesystem mutations continue after the initial HTTP response.
+
+## Accepted is not complete
+
+A create, pause, resume, or delete request returns a sandbox mutation:
+
+```json
+{
+  "sandbox": {
+    "id": "sbx_example",
+    "state": "requested"
+  },
+  "operation": {
+    "id": "op_example",
+    "type": "sandbox_create",
+    "state": "queued"
+  }
+}
+```
+
+Persist both IDs before waiting.
+
+## States
+
+Operations move through `queued`, `running`, and sometimes `reconciling`.
+
+Only `succeeded`, `failed`, and `cancelled` are terminal.
+
+A successful create should end with a `ready` sandbox. A successful delete should end with a `stopped` sandbox.
+
+## Events
+
+Operation events use increasing positive sequence numbers. The events endpoint returns finite SSE batches. Resume by passing the last handled sequence through `Last-Event-ID`, the SDK option, or CLI `--after`.
+
+```ts
+const events = await metal.operations.events(operation.id, {
+  lastEventId: 42,
+});
+```
+
+## Reconciliation
+
+`reconciling` means the provider result is uncertain. Metal avoids fallback because another attempt could duplicate live capacity.
+
+<Callout type="warn" title="Bound your wait">
+  Current reconciliation can remain active without a public recovery command. Stop after a bounded
+  wait and retain the operation and sandbox IDs for an operator.
+</Callout>
+
+See [common errors](/errors/common-errors) for safe retry rules.

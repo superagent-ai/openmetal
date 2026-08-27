@@ -1,0 +1,71 @@
+---
+title: CLI reference
+description: Configure profiles and automate Metal from a terminal or CI.
+---
+
+## Install
+
+```bash
+npm install --global @openmetal/cli
+openmetal --help
+```
+
+## Global options
+
+Place global options before the subcommand.
+
+```bash
+openmetal --json --no-input --profile ci sandbox list
+```
+
+- `--json` emits stable JSON.
+- `--no-input` fails instead of prompting.
+- `--yes` confirms destructive operations.
+- `--profile`, `--api-url`, `--organization`, and `--project` override stored context.
+
+Prefer environment variables to secret command arguments in automation.
+
+```bash
+export OPENMETAL_API_URL="http://localhost:4000"
+export OPENMETAL_PROJECT_ID="prj_your_project"
+export OPENMETAL_API_KEY="metal_sk_your_key"
+```
+
+## Profiles
+
+Use profiles to separate local, staging, and production contexts.
+
+```bash
+openmetal config use-profile staging
+openmetal --profile staging config set \
+  --api-url https://staging-api.example.com \
+  --supabase-url https://example.supabase.co \
+  --supabase-publishable-key <publishable-key>
+openmetal doctor
+```
+
+Configuration precedence starts with command flags, then `OPENMETAL_*` variables, legacy `METAL_*` aliases, profile values, and compiled defaults.
+
+## Automation pattern
+
+```bash
+mutation="$(
+  openmetal --json --no-input sandbox create \
+    --environment metal/node \
+    --environment-version latest \
+    --vcpu 2 \
+    --memory-mb 4096 \
+    --runtime-timeout 1800 \
+    --async
+)"
+
+# Extract and persist both IDs before waiting.
+openmetal operation wait <operation-id> --timeout 180
+```
+
+<Callout type="warn" title="Do not expose one time keys">
+  API key creation prints the plaintext key once, including JSON mode. Run it in a trusted terminal,
+  not an agent transcript or CI log.
+</Callout>
+
+See [the CLI quickstart](/get-started/cli) for a complete first run.

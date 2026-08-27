@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { CircuitBoardIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { LoginForm } from "@/components/login-form";
 import { LoginRouteDiagram } from "@/components/login-route-diagram";
+import { OpenMetalLogo } from "@/components/openmetal-logo";
 import { DEFAULT_POST_AUTH_PATH, postAuthPath } from "@/lib/auth-redirect";
 
 export default async function LoginPage({
@@ -18,9 +17,8 @@ export default async function LoginPage({
     <div className="grid min-h-svh lg:grid-cols-2">
       <div className="flex flex-col gap-4 p-6 md:p-10">
         <div className="flex justify-center gap-2 md:justify-start">
-          <Link href="/" className="flex items-center gap-2 font-medium">
-            <HugeiconsIcon icon={CircuitBoardIcon} strokeWidth={2} className="size-6" />
-            Metal
+          <Link href="/" aria-label="OpenMetal documentation">
+            <OpenMetalLogo />
           </Link>
         </div>
         <div className="flex flex-1 items-center justify-center">
@@ -30,16 +28,18 @@ export default async function LoginPage({
         </div>
       </div>
       <div className="relative hidden overflow-hidden bg-muted lg:block">
-        <div className="absolute inset-10 bottom-24">
-          <LoginRouteDiagram />
+        <div className="absolute inset-0 flex items-center justify-center p-24">
+          <div className="aspect-video w-full max-w-2xl">
+            <LoginRouteDiagram />
+          </div>
         </div>
         <div className="relative flex h-full flex-col justify-end p-10">
           <p className="max-w-md bg-gradient-to-r from-[#000000] to-[#666666] bg-clip-text text-3xl font-semibold text-balance text-transparent dark:from-white dark:to-[#9B9B9B]">
-            Give your agent Metal from one control plane.
+            Give your agent access to OpenMetal.
           </p>
           <p className="mt-4 max-w-md text-sm text-pretty text-muted-foreground">
-            Run agents across every sandbox provider with one API, automatic routing, and durable
-            lifecycle events.
+            One API for agent compute across providers, from sandboxes and CPUs to GPUs and
+            persistent machines.
           </p>
         </div>
       </div>

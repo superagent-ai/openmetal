@@ -23,6 +23,7 @@
     "supabase:reset": "supabase db reset --local",
     "db:types": "supabase gen types --local --lang typescript --schema public --schema metal > packages/db/src/database.types.ts",
     "openapi:generate": "pnpm --filter @openmetal/contracts openapi:generate",
+    "docs:generate": "pnpm openapi:generate && pnpm --filter @openmetal/web docs:generate-api",
     "env:local": "node scripts/write-local-env.mjs",
     "prepare": "simple-git-hooks"
   },

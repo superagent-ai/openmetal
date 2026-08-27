@@ -1,0 +1,15 @@
+{
+  "pages": [
+    "ops",
+    "organizations",
+    "members",
+    "billing",
+    "projects",
+    "provider-credentials",
+    "api-keys",
+    "sandboxes",
+    "runtime",
+    "operations",
+    "events"
+  ]
+}

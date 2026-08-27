@@ -1,0 +1,10 @@
+{
+  "title": "Api keys",
+  "description": "Project scoped API keys.",
+  "pages": [
+    "listProjectApiKeys",
+    "createProjectApiKey",
+    "deleteProjectApiKey",
+    "revokeProjectApiKey"
+  ]
+}

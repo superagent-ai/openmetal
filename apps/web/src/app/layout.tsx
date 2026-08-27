@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
-import { ThemeProvider } from "@/components/theme-provider";
+import { RootProvider } from "fumadocs-ui/provider/next";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import "./globals.css";
@@ -8,17 +8,26 @@ import "./globals.css";
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "Metal control plane",
-  description: "Create organizations and projects, then watch durable events in real time.",
+  title: {
+    default: "OpenMetal documentation",
+    template: "%s | OpenMetal",
+  },
+  description: "Give AI agents access to OpenMetal with one skill, one CLI, and one portable API.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={cn("font-sans", geist.variable)} suppressHydrationWarning>
       <body className="min-h-svh antialiased">
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+        <RootProvider
+          theme={{
+            defaultTheme: "dark",
+            enableSystem: true,
+            disableTransitionOnChange: true,
+          }}
+        >
           <TooltipProvider>{children}</TooltipProvider>
-        </ThemeProvider>
+        </RootProvider>
       </body>
     </html>
   );

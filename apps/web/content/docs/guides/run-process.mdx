@@ -1,0 +1,58 @@
+---
+title: Run a process
+description: Execute an argv based command and consume ordered output.
+---
+
+The sandbox must be `ready`. Metal runs processes asynchronously and persists ordered stdout and stderr events.
+
+<Tabs items={["TypeScript", "CLI"]}>
+  <Tab value="TypeScript">
+
+```ts
+const process = await metal.processes.create(sandbox.id, {
+  command: ["node", "app.js", "--port", "8080"],
+  cwd: "/workspace",
+  environment: { NODE_ENV: "production" },
+  timeout_seconds: 300,
+  max_output_bytes: 10 * 1024 * 1024,
+});
+
+for await (const event of metal.processes.events(sandbox.id, process.id)) {
+  if (event.type === "stdout" || event.type === "stderr") {
+    const bytes = Uint8Array.from(atob(event.data.data_base64), (value) => value.charCodeAt(0));
+    // Route bytes to the matching local stream.
+  }
+}
+```
+
+  </Tab>
+  <Tab value="CLI">
+
+```bash
+openmetal sandbox exec <sandbox-id> \
+  --cwd /workspace \
+  --env NODE_ENV=production \
+  --timeout 300 \
+  --max-output-bytes 10485760 \
+  -- node app.js --port 8080
+```
+
+  </Tab>
+</Tabs>
+
+## Resume output
+
+Events have contiguous positive sequence numbers. Save the last handled sequence and resume from it.
+
+```bash
+openmetal process events <sandbox-id> <process-id> --after 42
+```
+
+The SDK event iterator reconnects finite SSE batches and stops after a terminal event. Process states are `queued`, `running`, `cancelling`, `succeeded`, `failed`, `cancelled`, and `timed_out`.
+
+<Callout type="info" title="Runtime boundary">
+  Metal executes argv arrays. It does not provide an interactive terminal, streaming stdin, SSH,
+  WebSocket, or a general connection API.
+</Callout>
+
+See [process endpoints](/api-reference/endpoints/runtime) and [common errors](/errors/common-errors).

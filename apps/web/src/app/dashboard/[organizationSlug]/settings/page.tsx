@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireOrganizationBySlug } from "@/lib/dashboard-organizations";
 import { createClient } from "@/lib/supabase/server";
@@ -58,13 +60,13 @@ export default async function OrganizationSettingsPage({
         <CardHeader>
           <CardTitle>API Reference</CardTitle>
           <CardDescription>
-            The generated OpenAPI 3.1 contract is available in the repository.
+            Explore the generated OpenAPI 3.1 reference, request schemas, and interactive examples.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <code className="rounded-md bg-muted px-2 py-1 text-sm">
-            packages/contracts/openapi.json
-          </code>
+          <Button nativeButton={false} render={<Link href="/api-reference" />} variant="outline">
+            Open API reference
+          </Button>
         </CardContent>
       </Card>
     </div>

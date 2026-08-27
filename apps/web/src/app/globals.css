@@ -1,8 +1,20 @@
 @import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+@import "fumadocs-openapi/css/preset.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0 !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
 
 :root {
   color-scheme: light;
@@ -137,6 +149,27 @@
   li {
     text-wrap: pretty;
   }
+}
+
+.home-icon-cards [data-card] > div:first-child {
+  border: 0;
+  background: transparent !important;
+  padding: 0;
+  box-shadow: none;
+}
+
+.docs-home > h2 {
+  margin-top: 4rem !important;
+  margin-bottom: 0 !important;
+}
+
+.docs-home > h2 + p {
+  margin-top: 0.5rem !important;
+  margin-bottom: 1.5rem !important;
+}
+
+.docs-home > h2 + .grid {
+  margin-top: 1.5rem !important;
 }
 
 .login-route-diagram {

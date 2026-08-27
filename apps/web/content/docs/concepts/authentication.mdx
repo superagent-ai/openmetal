@@ -1,0 +1,38 @@
+---
+title: Authentication model
+description: Understand user sessions, project keys, and resource scope.
+---
+
+Metal separates administration from runtime access.
+
+## User sessions
+
+A Supabase access token represents a person. It authorizes organization scoped administration:
+
+- organizations and members
+- projects and project API keys
+- provider credentials
+- billing and automatic top ups
+- webhooks and durable project events
+
+Authorization still checks organization membership and role on every request.
+
+## Project keys
+
+A `metal_sk_` key represents application access to one project. Pair it with the public `prj_` project ID for sandbox and runtime routes.
+
+Project keys cannot administer the organization. User sessions cannot replace project keys on sandbox routes.
+
+## Operation scope
+
+Operation reads and events use the exact key associated with the originating sandbox. They do not require the project ID header.
+
+This keeps operation access bound to its original project even when a client manages several project contexts.
+
+## Secret handling
+
+New project keys are returned once. Metal stores only the protected credential state needed for later verification.
+
+Provider BYOK credentials are encrypted in Supabase Vault and never returned by API responses.
+
+See [authenticate requests](/get-started/authentication) for headers and SDK examples.

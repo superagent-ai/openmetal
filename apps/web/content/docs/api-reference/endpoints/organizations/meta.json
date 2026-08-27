@@ -1,0 +1,5 @@
+{
+  "title": "Organizations",
+  "description": "Organization lifecycle and access.",
+  "pages": ["listOrganizations", "createOrganization", "getOrganization"]
+}

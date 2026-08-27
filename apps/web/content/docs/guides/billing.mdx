@@ -1,0 +1,40 @@
+---
+title: Manage billing and credits
+description: Fund managed compute, understand charges, and configure automatic top ups.
+---
+
+Metal uses prepaid organization credits for managed capacity. Provider usage is deducted at cost. The platform fee applies when credits are purchased.
+
+## Purchase credits
+
+The purchase fee is 5.5 percent of the credit amount with a USD 0.80 minimum.
+
+```bash
+openmetal billing show --organization <organization-id>
+openmetal billing quote --organization <organization-id> --amount-usd 20.00
+```
+
+The dashboard confirms the final amount before opening Stripe Checkout. A success redirect never changes the balance by itself. Signed Stripe webhooks are the source of truth.
+
+## Automatic top ups
+
+Owners and admins can choose a balance threshold, refill amount, and monthly cap after saving a payment method.
+
+A declined payment or required customer action pauses the policy instead of retrying indefinitely. Update the payment method in the dashboard to recover.
+
+## Spend behavior
+
+Managed sandbox creation requires a balance above zero. Usage is charged when durable provider cost evidence arrives, so delayed metering can temporarily produce a negative balance.
+
+When a durable charge leaves the balance at or below zero and no automatic top up can run, Metal schedules managed sandboxes to stop.
+
+## BYOK
+
+BYOK capacity is billed by the provider and does not consume Metal credits. A single explicitly selected BYOK provider without fallback can create capacity without a positive managed balance.
+
+<Callout type="info" title="Keep money exact">
+  Metal stores amounts as integer micro USD. Never calculate balances or fees with binary floating
+  point.
+</Callout>
+
+See [billing endpoints](/api-reference) for the user session API.

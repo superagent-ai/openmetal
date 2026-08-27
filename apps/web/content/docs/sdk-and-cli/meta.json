@@ -1,0 +1,4 @@
+{
+  "title": "Agent tools",
+  "pages": ["agent-skill", "cli", "typescript-sdk"]
+}

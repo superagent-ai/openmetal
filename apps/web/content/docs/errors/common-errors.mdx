@@ -1,0 +1,81 @@
+---
+title: Diagnose common errors
+description: Match stable error codes to safe recovery actions.
+---
+
+## Authentication and scope
+
+### `unauthenticated`
+
+The credential is missing, expired, or invalid. Confirm the API origin and token source without printing the token.
+
+### `forbidden`
+
+The credential is valid but lacks access to the organization, project, or operation. Confirm membership, role, project ID, and that the operation came from the same project key.
+
+## Request validation
+
+### `validation_error`
+
+The request failed schema validation. Read the response details and compare field names, limits, and enum values with the endpoint reference.
+
+### `idempotency_key_required`
+
+The raw create request omitted `Idempotency-Key`. The SDK and CLI generate one automatically for supported mutations.
+
+### `idempotency_mismatch`
+
+The same idempotency key was reused with different input. Never change the request body when recovering an uncertain mutation.
+
+## Resource state
+
+### `invalid_sandbox_state`
+
+The action is not valid for the current state. Runtime operations require `ready`. Pause requires `ready` and resume requires `paused`.
+
+### `not_found`
+
+The resource does not exist in the authenticated scope. Confirm both the ID and project context.
+
+## Provider and runtime
+
+### `capability_unsupported`
+
+The selected provider cannot perform the accepted runtime operation. Choose a provider with the required capability or adjust the workflow.
+
+### `process_exit_nonzero`
+
+The process ran and returned a nonzero exit code. Inspect its ordered stdout and stderr events. This is workload failure, not a transport retry.
+
+### `reconciling`
+
+The provider result is uncertain. Do not create replacement capacity. Stop after a bounded wait and escalate with the operation and sandbox IDs.
+
+## Retry rules
+
+Safe GET requests can be retried with backoff.
+
+For a mutation with an uncertain network or timeout result, replay only the identical request with its original idempotency key.
+
+Never retry an append write with a new key. Never treat HTTP `202` as successful completion.
+
+```ts
+try {
+  const operation = await metal.operations.wait(mutation.operation, {
+    timeoutMs: 180_000,
+  });
+
+  if (operation.state !== "succeeded") {
+    throw new Error(operation.error?.message ?? operation.state);
+  }
+} catch (error) {
+  // Retain mutation.operation.id and mutation.sandbox.id for inspection.
+  throw error;
+}
+```
+
+<Cards>
+  <Card title="Asynchronous operations" href="/concepts/operations" />
+  <Card title="Authentication model" href="/concepts/authentication" />
+  <Card title="API reference" href="/api-reference" />
+</Cards>

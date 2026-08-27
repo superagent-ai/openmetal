@@ -1,0 +1,5 @@
+{
+  "title": "Ops",
+  "description": "Service health, readiness, and API metadata.",
+  "pages": ["getHealth", "getReady", "getMeta"]
+}

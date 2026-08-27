@@ -1,0 +1,58 @@
+name: release-sdk
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SDK version without the sdk-v prefix"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.13.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22.18.0"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm install --global npm@11
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @openmetal/contracts build
+      - run: pnpm --filter @openmetal/sdk lint
+      - run: pnpm --filter @openmetal/sdk typecheck
+      - run: pnpm --filter @openmetal/sdk test
+      - run: pnpm --filter @openmetal/sdk test:integration
+      - name: Build npm package
+        env:
+          OPENMETAL_SDK_VERSION: ${{ inputs.version || github.ref_name }}
+        run: pnpm --filter @openmetal/sdk build:npm
+      - name: Test packed npm package
+        run: pnpm --filter @openmetal/sdk exec vitest run test/npm-package.integration.test.ts
+      - name: Check npm version
+        id: npm-version
+        env:
+          PACKAGE_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          version="${PACKAGE_VERSION#sdk-v}"
+          if npm view "@openmetal/sdk@$version" version --json >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish npm package
+        if: steps.npm-version.outputs.exists != 'true'
+        run: npm publish ./packages/sdk-typescript/dist/npm --access public

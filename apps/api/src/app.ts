@@ -6,19 +6,29 @@ import { API_SEMVER, API_VERSION, buildOpenApiDocument } from "@openmetal/contra
 import {
   CreateOrganizationInvitationRequestSchema,
   CreateOrganizationRequestSchema,
+  CreateProcessRequestSchema,
   CreateProjectApiKeyRequestSchema,
   CreateProjectRequestSchema,
+  CreateSandboxEndpointRequestSchema,
   CreateSandboxRequestSchema,
+  DeleteFileRequestSchema,
   ListEventsQuerySchema,
+  ListFilesRequestSchema,
+  ListSandboxEndpointsQuerySchema,
   ListSandboxesQuerySchema,
   OpaqueIdSchema,
   OperationIdSchema,
+  ProcessIdSchema,
   ProjectIdSchema,
   ProviderCredentialInputSchema,
+  ReadFileRequestSchema,
+  RuntimeOperationIdSchema,
+  SandboxEndpointIdSchema,
   SandboxProviderSchema,
   SandboxIdSchema,
   UpdateProjectRequestSchema,
   UpdateOrganizationRoleRequestSchema,
+  WriteFileRequestSchema,
 } from "@openmetal/contracts";
 import { createStripeGateway, type StripeGateway } from "@openmetal/billing";
 import { createDatabase, type MetalDatabase } from "@openmetal/db";
@@ -77,6 +87,17 @@ import {
   startOrganizationCheckout,
   startPaymentMethodSetup,
 } from "./billing.js";
+import {
+  cancelProcess,
+  createEndpoint,
+  createProcess,
+  createRuntimeOperation,
+  getProcess,
+  getRuntimeOperation,
+  listEndpoints,
+  listProcessEvents,
+  revokeEndpoint,
+} from "./runtime-service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -342,7 +363,14 @@ export async function buildApp(
     origin: env.CORS_ALLOWED_ORIGINS.split(",").map((value) => value.trim()),
     credentials: true,
     methods: ["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"],
-    allowedHeaders: ["authorization", "content-type", "idempotency-key", "x-request-id"],
+    allowedHeaders: [
+      "authorization",
+      "content-type",
+      "idempotency-key",
+      "last-event-id",
+      "x-metal-project-id",
+      "x-request-id",
+    ],
   });
 
   app.addHook("onRequest", async (request, reply) => {
@@ -1047,6 +1075,280 @@ export async function buildApp(
     reply.header("location", `/${API_VERSION}/operations/${mutation.operation.id}`);
     return reply.status(202).send(mutation);
   });
+
+  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/processes`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    const parsed = CreateProcessRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid process payload", {
+        issues: parsed.error.issues,
+      });
+    }
+    const key = headerValue(request.headers["idempotency-key"]);
+    if (!key) {
+      throw new ApiError(400, "idempotency_key_required", "Idempotency-Key is required");
+    }
+    const result = await executeIdempotent(
+      db.db,
+      {
+        principalId: principal.keyId,
+        operation: `processes.create:${principal.projectId}:${sandboxId}`,
+        key,
+        body: parsed.data,
+      },
+      async (tx) => ({
+        status: 202,
+        body: await createProcess(tx, {
+          organizationId: principal.organizationId,
+          projectId: principal.projectId,
+          sandboxId,
+          request: parsed.data,
+        }),
+      }),
+    );
+    const process = result.body;
+    reply.header("location", `/${API_VERSION}/sandboxes/${sandboxId}/processes/${process.id}`);
+    return reply.status(result.status).send(process);
+  });
+
+  app.get(`/${API_VERSION}/sandboxes/:sandbox_id/processes/:process_id`, async (request) => {
+    const principal = await requireProjectScope(request);
+    const params = request.params as { sandbox_id: string; process_id: string };
+    const sandboxId = SandboxIdSchema.parse(params.sandbox_id);
+    const processId = ProcessIdSchema.parse(params.process_id);
+    return (
+      await getProcess(db.db, {
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+        sandboxId,
+        processId,
+      })
+    ).serialized;
+  });
+
+  app.get(
+    `/${API_VERSION}/sandboxes/:sandbox_id/processes/:process_id/events`,
+    async (request, reply) => {
+      const principal = await requireProjectScope(request);
+      const params = request.params as { sandbox_id: string; process_id: string };
+      const sandboxId = SandboxIdSchema.parse(params.sandbox_id);
+      const processId = ProcessIdSchema.parse(params.process_id);
+      const header = request.headers["last-event-id"];
+      if (header !== undefined && (typeof header !== "string" || !/^\d+$/.test(header))) {
+        throw new ApiError(422, "validation_error", "Last-Event-ID must be an event sequence");
+      }
+      const after = typeof header === "string" ? Number(header) : 0;
+      const batch = await listProcessEvents(db.db, {
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+        sandboxId,
+        processId,
+        after,
+      });
+      reply.header("content-type", "text/event-stream");
+      reply.header("cache-control", "no-cache");
+      return batch.events
+        .map(
+          (event) =>
+            `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify({
+              sequence: event.sequence,
+              process_id: batch.process.id,
+              type: event.type,
+              occurred_at: event.occurredAt.toISOString(),
+              data: event.data,
+            })}\n\n`,
+        )
+        .join("");
+    },
+  );
+
+  app.post(
+    `/${API_VERSION}/sandboxes/:sandbox_id/processes/:process_id/actions/cancel`,
+    async (request, reply) => {
+      const principal = await requireProjectScope(request);
+      const params = request.params as { sandbox_id: string; process_id: string };
+      const sandboxId = SandboxIdSchema.parse(params.sandbox_id);
+      const processId = ProcessIdSchema.parse(params.process_id);
+      const key = headerValue(request.headers["idempotency-key"]);
+      const result = await executeIdempotent(
+        db.db,
+        {
+          principalId: principal.keyId,
+          operation: `processes.cancel:${principal.projectId}:${sandboxId}:${processId}`,
+          key,
+          body: null,
+        },
+        async (tx) => ({
+          status: 202,
+          body: await cancelProcess(tx, {
+            organizationId: principal.organizationId,
+            projectId: principal.projectId,
+            sandboxId,
+            processId,
+          }),
+        }),
+      );
+      return reply.status(result.status).send(result.body);
+    },
+  );
+
+  const filesystemRoutes = [
+    {
+      path: "read",
+      kind: "filesystem_read" as const,
+      schema: ReadFileRequestSchema,
+      idempotent: false,
+    },
+    {
+      path: "write",
+      kind: "filesystem_write" as const,
+      schema: WriteFileRequestSchema,
+      idempotent: true,
+    },
+    {
+      path: "list",
+      kind: "filesystem_list" as const,
+      schema: ListFilesRequestSchema,
+      idempotent: false,
+    },
+    {
+      path: "delete",
+      kind: "filesystem_delete" as const,
+      schema: DeleteFileRequestSchema,
+      idempotent: true,
+    },
+  ];
+  for (const route of filesystemRoutes) {
+    app.post(
+      `/${API_VERSION}/sandboxes/:sandbox_id/filesystem/${route.path}`,
+      async (request, reply) => {
+        const principal = await requireProjectScope(request);
+        const sandboxId = SandboxIdSchema.parse(
+          (request.params as { sandbox_id: string }).sandbox_id,
+        );
+        const parsed = route.schema.safeParse(request.body);
+        if (!parsed.success) {
+          throw new ApiError(422, "validation_error", "invalid filesystem payload", {
+            issues: parsed.error.issues,
+          });
+        }
+        const key = route.idempotent ? headerValue(request.headers["idempotency-key"]) : undefined;
+        const result = await executeIdempotent(
+          db.db,
+          {
+            principalId: principal.keyId,
+            operation: `${route.kind}:${principal.projectId}:${sandboxId}`,
+            key,
+            body: parsed.data,
+          },
+          async (tx) => ({
+            status: 202,
+            body: await createRuntimeOperation(tx, {
+              organizationId: principal.organizationId,
+              projectId: principal.projectId,
+              sandboxId,
+              kind: route.kind,
+              request: parsed.data,
+            }),
+          }),
+        );
+        reply.header(
+          "location",
+          `/${API_VERSION}/sandboxes/${sandboxId}/runtime-operations/${result.body.id}`,
+        );
+        return reply.status(result.status).send(result.body);
+      },
+    );
+  }
+
+  app.get(
+    `/${API_VERSION}/sandboxes/:sandbox_id/runtime-operations/:runtime_operation_id`,
+    async (request) => {
+      const principal = await requireProjectScope(request);
+      const params = request.params as { sandbox_id: string; runtime_operation_id: string };
+      return getRuntimeOperation(db.db, {
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+        sandboxId: SandboxIdSchema.parse(params.sandbox_id),
+        runtimeOperationId: RuntimeOperationIdSchema.parse(params.runtime_operation_id),
+      });
+    },
+  );
+
+  app.get(`/${API_VERSION}/sandboxes/:sandbox_id/endpoints`, async (request) => {
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    const parsed = ListSandboxEndpointsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid endpoint list query", {
+        issues: parsed.error.issues,
+      });
+    }
+    return listEndpoints(db.db, {
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+      sandboxId,
+      cursor: parsed.data.cursor,
+      limit: parsed.data.limit,
+    });
+  });
+
+  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/endpoints`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    const parsed = CreateSandboxEndpointRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid endpoint payload", {
+        issues: parsed.error.issues,
+      });
+    }
+    const key = headerValue(request.headers["idempotency-key"]);
+    if (!key) {
+      throw new ApiError(400, "idempotency_key_required", "Idempotency-Key is required");
+    }
+    try {
+      const result = await executeIdempotent(
+        db.db,
+        {
+          principalId: principal.keyId,
+          operation: `endpoints.create:${principal.projectId}:${sandboxId}`,
+          key,
+          body: parsed.data,
+        },
+        async (tx) => ({
+          status: 202,
+          body: await createEndpoint(tx, {
+            organizationId: principal.organizationId,
+            projectId: principal.projectId,
+            sandboxId,
+            request: parsed.data,
+          }),
+        }),
+      );
+      return reply.status(result.status).send(result.body);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ApiError(409, "endpoint_conflict", "an active endpoint already uses this port");
+      }
+      throw error;
+    }
+  });
+
+  app.delete(
+    `/${API_VERSION}/sandboxes/:sandbox_id/endpoints/:endpoint_id`,
+    async (request, reply) => {
+      const principal = await requireProjectScope(request);
+      const params = request.params as { sandbox_id: string; endpoint_id: string };
+      const endpoint = await revokeEndpoint(db.db, {
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+        sandboxId: SandboxIdSchema.parse(params.sandbox_id),
+        endpointId: SandboxEndpointIdSchema.parse(params.endpoint_id),
+      });
+      return reply.status(202).send(endpoint);
+    },
+  );
 
   app.get(`/${API_VERSION}/operations/:operation_id`, async (request) => {
     const principal = await requireApiKeyPrincipal(request);

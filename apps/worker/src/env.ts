@@ -75,6 +75,11 @@ export const WorkerEnvSchema = z.object({
     .int()
     .min(60_000)
     .default(5 * 60_000),
+  WORKER_PROCESS_EVENT_RETENTION_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(7 * 24 * 60 * 60_000),
   STRIPE_SECRET_KEY: z.string().min(1).optional(),
 });
 export type WorkerEnv = z.infer<typeof WorkerEnvSchema>;
@@ -144,6 +149,7 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     WORKER_MAX_ATTEMPTS: source.WORKER_MAX_ATTEMPTS,
     WORKER_BASE_BACKOFF_MS: source.WORKER_BASE_BACKOFF_MS,
     WORKER_COST_SWEEP_MS: source.WORKER_COST_SWEEP_MS,
+    WORKER_PROCESS_EVENT_RETENTION_MS: source.WORKER_PROCESS_EVENT_RETENTION_MS,
     STRIPE_SECRET_KEY: source.STRIPE_SECRET_KEY,
   });
 }

@@ -65,6 +65,195 @@ export type ProviderDestroyResult = {
   providerMetadata?: Record<string, unknown>;
 };
 
+export type ProviderRuntimeOperation = {
+  deadline?: Date;
+  signal?: AbortSignal;
+};
+
+export type ProviderExecInput = ProviderRuntimeOperation & {
+  providerResourceId: string;
+  command: readonly string[];
+  cwd?: string;
+  environment?: Readonly<Record<string, string>>;
+  stdin?: string | Uint8Array;
+  maxOutputBytes?: number;
+};
+
+export type ProviderExecOutputEvent = {
+  type: "stdout" | "stderr";
+  sequence: number;
+  data: Uint8Array;
+  truncated?: boolean;
+};
+
+export type ProviderExecExitEvent = {
+  type: "exit";
+  sequence: number;
+  exitCode: number | null;
+  signal: string | null;
+  cancelled: boolean;
+  outputTruncated: boolean;
+};
+
+export type ProviderExecEvent = ProviderExecOutputEvent | ProviderExecExitEvent;
+
+export type ProviderExecResult = {
+  executionId: string;
+  events: AsyncIterable<ProviderExecEvent>;
+};
+
+export type ProviderCancelExecInput = ProviderRuntimeOperation & {
+  providerResourceId: string;
+  executionId: string;
+};
+
+export type ProviderCancelExecResult = {
+  executionId: string;
+  cancelled: boolean;
+};
+
+export type ProviderFileEncoding = "binary" | "utf8";
+export type ProviderFileWriteMode = "create" | "overwrite" | "append";
+
+export type ProviderReadFileInput = ProviderRuntimeOperation & {
+  providerResourceId: string;
+  path: string;
+  encoding?: ProviderFileEncoding;
+  offsetBytes?: number;
+  maxBytes?: number;
+};
+
+export type ProviderReadFileResult = {
+  path: string;
+  encoding: ProviderFileEncoding;
+  data: Uint8Array | string;
+  offsetBytes: number;
+  byteLength: number;
+  sizeBytes: number;
+  eof: boolean;
+  truncated: boolean;
+};
+
+export type ProviderWriteFileInput = ProviderRuntimeOperation & {
+  providerResourceId: string;
+  path: string;
+  data: Uint8Array | string;
+  mode?: ProviderFileWriteMode;
+  createParents?: boolean;
+};
+
+export type ProviderWriteFileResult = {
+  path: string;
+  bytesWritten: number;
+  created: boolean;
+};
+
+export type ProviderListFilesInput = ProviderRuntimeOperation & {
+  providerResourceId: string;
+  path: string;
+  recursive?: boolean;
+  maxEntries?: number;
+};
+
+export type ProviderFileEntry = {
+  path: string;
+  type: "file" | "directory" | "symlink" | "other";
+  sizeBytes: number | null;
+  modifiedAt: Date | null;
+};
+
+export type ProviderListFilesResult = {
+  entries: ProviderFileEntry[];
+  truncated: boolean;
+};
+
+export type ProviderDeleteFileInput = ProviderRuntimeOperation & {
+  providerResourceId: string;
+  path: string;
+  recursive?: boolean;
+};
+
+export type ProviderDeleteFileResult = {
+  path: string;
+  deleted: boolean;
+};
+
+export type ProviderExposeHttpEndpointInput = ProviderRuntimeOperation & {
+  providerResourceId: string;
+  port: number;
+  path?: string;
+  leaseDurationSeconds: number;
+};
+
+export type ProviderHttpEndpointLease = {
+  leaseId: string;
+  url: string;
+  expiresAt: Date;
+};
+
+export type ProviderRevokeHttpEndpointInput = ProviderRuntimeOperation & {
+  providerResourceId: string;
+  leaseId: string;
+};
+
+export type ProviderRevokeHttpEndpointResult = {
+  leaseId: string;
+  revoked: boolean;
+};
+
+export type ProviderProcessCapabilities = {
+  exec: boolean;
+  streams: boolean;
+  cancel: boolean;
+  maxOutputBytes: number;
+};
+
+export type ProviderFileCapabilities = {
+  read: boolean;
+  write: boolean;
+  writeModes: readonly ProviderFileWriteMode[];
+  createParents: boolean;
+  list: boolean;
+  delete: boolean;
+  maxReadBytes: number;
+  maxWriteBytes: number;
+  maxListEntries: number;
+};
+
+export type ProviderHttpEndpointCapabilities = {
+  expose: boolean;
+  revoke: boolean;
+  maxLeaseDurationSeconds?: number;
+};
+
+export type ProviderRuntimeCapabilities = {
+  process?: ProviderProcessCapabilities;
+  files?: ProviderFileCapabilities;
+  httpEndpoints?: ProviderHttpEndpointCapabilities;
+};
+
+export interface ProviderProcessRuntime {
+  exec(input: ProviderExecInput): Promise<ProviderExecResult>;
+  cancelExec?(input: ProviderCancelExecInput): Promise<ProviderCancelExecResult>;
+}
+
+export interface ProviderFileRuntime {
+  readFile?(input: ProviderReadFileInput): Promise<ProviderReadFileResult>;
+  writeFile?(input: ProviderWriteFileInput): Promise<ProviderWriteFileResult>;
+  listFiles?(input: ProviderListFilesInput): Promise<ProviderListFilesResult>;
+  deleteFile?(input: ProviderDeleteFileInput): Promise<ProviderDeleteFileResult>;
+}
+
+export interface ProviderHttpEndpointRuntime {
+  exposeHttpEndpoint?(input: ProviderExposeHttpEndpointInput): Promise<ProviderHttpEndpointLease>;
+  revokeHttpEndpoint?(
+    input: ProviderRevokeHttpEndpointInput,
+  ): Promise<ProviderRevokeHttpEndpointResult>;
+}
+
+export interface SandboxRuntimeProvider
+  extends Partial<ProviderProcessRuntime>, ProviderFileRuntime, ProviderHttpEndpointRuntime {}
+
 export type SandboxProviderName =
   | "blaxel"
   | "cloudflare"
@@ -76,15 +265,18 @@ export type SandboxProviderName =
   | "runloop"
   | "vercel";
 
-export interface SandboxProvider {
+export type SandboxProviderCapabilities = {
+  pause: boolean;
+  cost: boolean;
+  resume?: boolean;
+  sizing?: "direct" | "tier" | "template" | "fixed";
+  sources?: ReadonlyArray<"environment" | "oci_image" | "provider_template">;
+  runtime?: ProviderRuntimeCapabilities;
+};
+
+export interface SandboxProvider extends SandboxRuntimeProvider {
   readonly name: SandboxProviderName;
-  readonly capabilities: {
-    pause: boolean;
-    cost: boolean;
-    resume?: boolean;
-    sizing?: "direct" | "tier" | "template" | "fixed";
-    sources?: ReadonlyArray<"environment" | "oci_image" | "provider_template">;
-  };
+  readonly capabilities: SandboxProviderCapabilities;
   create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox>;
   getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost | null>;
   pause(providerResourceId: string, signal?: AbortSignal): Promise<void>;

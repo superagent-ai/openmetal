@@ -297,6 +297,183 @@ export const operationEvents = metalSchema.table(
   ],
 );
 
+export const processStateEnum = metalSchema.enum("process_state", [
+  "queued",
+  "running",
+  "cancelling",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "timed_out",
+]);
+
+export const sandboxProcesses = metalSchema.table(
+  "sandbox_processes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    publicId: text("public_id")
+      .notNull()
+      .default(sql`'proc_' || replace(gen_random_uuid()::text, '-', '')`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    sandboxId: uuid("sandbox_id")
+      .notNull()
+      .references(() => sandboxes.id),
+    state: processStateEnum("state").notNull().default("queued"),
+    command: jsonb("command").$type<string[]>().notNull(),
+    cwd: text("cwd"),
+    environment: jsonb("environment").$type<Record<string, string>>().notNull().default({}),
+    timeoutSeconds: integer("timeout_seconds").notNull().default(300),
+    maxOutputBytes: integer("max_output_bytes").notNull().default(10_485_760),
+    outputBytes: integer("output_bytes").notNull().default(0),
+    outputTruncated: boolean("output_truncated").notNull().default(false),
+    exitCode: integer("exit_code"),
+    terminationSignal: text("termination_signal"),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    providerCapabilities: jsonb("provider_capabilities").$type<Record<string, unknown>>(),
+    providerExecutionId: text("provider_execution_id"),
+    operationToken: uuid("operation_token"),
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("sandbox_processes_public_id_key").on(table.publicId),
+    index("sandbox_processes_sandbox_created_idx").on(table.sandboxId, table.createdAt),
+    index("sandbox_processes_project_created_idx").on(table.projectId, table.createdAt),
+    index("sandbox_processes_terminal_completed_at_idx")
+      .on(table.completedAt)
+      .where(sql`${table.state} in ('succeeded', 'failed', 'cancelled', 'timed_out')`),
+  ],
+);
+
+export const processEvents = metalSchema.table(
+  "process_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    processId: uuid("process_id")
+      .notNull()
+      .references(() => sandboxProcesses.id, { onDelete: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    type: text("type").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("process_events_process_sequence_key").on(table.processId, table.sequence),
+  ],
+);
+
+export const runtimeOperationStateEnum = metalSchema.enum("runtime_operation_state", [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
+export const runtimeOperationKindEnum = metalSchema.enum("runtime_operation_kind", [
+  "filesystem_read",
+  "filesystem_write",
+  "filesystem_list",
+  "filesystem_delete",
+]);
+
+export const runtimeOperations = metalSchema.table(
+  "runtime_operations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    publicId: text("public_id")
+      .notNull()
+      .default(sql`'rop_' || replace(gen_random_uuid()::text, '-', '')`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    sandboxId: uuid("sandbox_id")
+      .notNull()
+      .references(() => sandboxes.id),
+    kind: runtimeOperationKindEnum("kind").notNull(),
+    state: runtimeOperationStateEnum("state").notNull().default("queued"),
+    request: jsonb("request").$type<Record<string, unknown>>().notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    providerCapabilities: jsonb("provider_capabilities").$type<Record<string, unknown>>(),
+    operationToken: uuid("operation_token"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("runtime_operations_public_id_key").on(table.publicId),
+    index("runtime_operations_sandbox_created_idx").on(table.sandboxId, table.createdAt),
+    index("runtime_operations_project_created_idx").on(table.projectId, table.createdAt),
+  ],
+);
+
+export const sandboxEndpointStateEnum = metalSchema.enum("sandbox_endpoint_state", [
+  "provisioning",
+  "active",
+  "revoking",
+  "revoked",
+  "expired",
+  "failed",
+]);
+
+export const sandboxEndpoints = metalSchema.table(
+  "sandbox_endpoints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    publicId: text("public_id")
+      .notNull()
+      .default(sql`'ep_' || replace(gen_random_uuid()::text, '-', '')`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    sandboxId: uuid("sandbox_id")
+      .notNull()
+      .references(() => sandboxes.id),
+    port: integer("port").notNull(),
+    protocol: text("protocol").notNull().default("http"),
+    state: sandboxEndpointStateEnum("state").notNull().default("provisioning"),
+    url: text("url"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .default(sql`now() + interval '1 hour'`),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    providerMetadata: jsonb("provider_metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    providerCapabilities: jsonb("provider_capabilities").$type<Record<string, unknown>>(),
+    operationToken: uuid("operation_token"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("sandbox_endpoints_public_id_key").on(table.publicId),
+    index("sandbox_endpoints_sandbox_created_idx").on(table.sandboxId, table.createdAt),
+    index("sandbox_endpoints_lease_expiry_idx")
+      .on(table.leaseExpiresAt)
+      .where(sql`${table.state} in ('provisioning', 'active', 'revoking')`),
+    uniqueIndex("sandbox_endpoints_active_port_key")
+      .on(table.sandboxId, table.port)
+      .where(sql`${table.state} in ('provisioning', 'active', 'revoking')`),
+  ],
+);
+
 export const providerAttempts = metalSchema.table(
   "provider_attempts",
   {
@@ -412,6 +589,7 @@ export const outboxJobs = metalSchema.table(
       .defaultNow(),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, mode: "date" }),
+    leaseToken: uuid("lease_token"),
     lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
@@ -686,6 +864,10 @@ export const schema = {
   sandboxes,
   operations,
   operationEvents,
+  sandboxProcesses,
+  processEvents,
+  runtimeOperations,
+  sandboxEndpoints,
   providerAttempts,
   providerCostSnapshots,
   domainEvents,

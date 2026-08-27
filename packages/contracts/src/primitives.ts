@@ -9,9 +9,15 @@ export type OpaqueId = z.infer<typeof OpaqueIdSchema>;
 export const ProjectIdSchema = z.string().regex(/^prj_[A-Za-z0-9]+$/);
 export const SandboxIdSchema = z.string().regex(/^sbx_[A-Za-z0-9]+$/);
 export const OperationIdSchema = z.string().regex(/^op_[A-Za-z0-9]+$/);
+export const ProcessIdSchema = z.string().regex(/^proc_[A-Za-z0-9]+$/);
+export const RuntimeOperationIdSchema = z.string().regex(/^rop_[A-Za-z0-9]+$/);
+export const SandboxEndpointIdSchema = z.string().regex(/^ep_[A-Za-z0-9]+$/);
 export type ProjectId = z.infer<typeof ProjectIdSchema>;
 export type SandboxId = z.infer<typeof SandboxIdSchema>;
 export type OperationId = z.infer<typeof OperationIdSchema>;
+export type ProcessId = z.infer<typeof ProcessIdSchema>;
+export type RuntimeOperationId = z.infer<typeof RuntimeOperationIdSchema>;
+export type SandboxEndpointId = z.infer<typeof SandboxEndpointIdSchema>;
 
 export const IsoDateTimeSchema = z.iso.datetime();
 export type IsoDateTime = z.infer<typeof IsoDateTimeSchema>;

@@ -15,7 +15,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --exclude 'test/**/*.integration.test.ts'",
-    "test:integration": "vitest run test/client.integration.test.ts",
+    "test:integration": "vitest run test/client.integration.test.ts test/runtime.integration.test.ts",
     "test:npm": "OPENMETAL_SDK_VERSION=0.0.0-test pnpm build:npm && vitest run test/npm-package.integration.test.ts"
   },
   "dependencies": {

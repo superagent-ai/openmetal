@@ -20,6 +20,43 @@ This matrix describes current adapters, not future vision documents. If reliable
 
 Managed routing skips providers without durable cost evidence. Modal therefore requires BYOK in current routing. Cloudflare managed eligibility requires both account identification and analytics cost access.
 
+## Runtime Capabilities
+
+The worker requires both process execution and ordered streaming. An adapter that can return buffered command output but advertises `streams: false` is not usable through the public process API.
+
+| Provider    | Public process API             | Filesystem API            | Leased HTTP endpoints |
+| ----------- | ------------------------------ | ------------------------- | --------------------- |
+| Blaxel      | No: adapter output is buffered | Read, write, list, delete | Create and revoke     |
+| Cloudflare  | Execute and stream; no cancel  | Read and write            | No                    |
+| CodeSandbox | No                             | No                        | No                    |
+| Daytona     | No: adapter output is buffered | Read, write, list, delete | No                    |
+| E2B         | Execute and stream; no cancel  | Read, write, list, delete | No                    |
+| Modal       | Execute and stream; no cancel  | Read, write, list, delete | No                    |
+| Northflank  | No                             | No                        | No                    |
+| Runloop     | No: adapter output is buffered | Read and write            | No                    |
+| Vercel      | Execute and stream; no cancel  | Read and write            | No                    |
+
+Global contract ceilings are 100 MiB process output, 10 MiB per file read/write, 10,000 list entries, and 86,400-second endpoint leases. Current adapter ceilings are:
+
+- Blaxel: 10 MiB output, 10 MiB file read/write, 10,000 list entries.
+- Cloudflare: 10 MiB output and 10 MiB file read/write.
+- Daytona, E2B, and Modal: 100 MiB output, 10 MiB file read/write, 10,000 list entries.
+- Runloop and Vercel: 10 MiB output and 10 MiB file read/write.
+- Endpoint-capable adapters advertise at most 86,400 seconds.
+
+Provider-specific runtime limitations:
+
+- Blaxel, Daytona, and Runloop advertise process execution but not ordered streaming, so the worker records `capability_unsupported` instead of starting a public process.
+- Cloudflare supports ordered process execution with an omitted or empty environment, but rejects non-empty environment overrides. It has no process cancellation.
+- E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Runloop supports provider-level cancellation, but its buffered output is not usable through the public process API.
+- Daytona, E2B, and Modal reject append writes. Runloop and Vercel also reject append; Runloop rejects `create_parents: true`.
+- Blaxel and Cloudflare implement append by reading and rewriting the whole file, so the resulting file must still fit their 10 MiB adapter limit.
+- Cloudflare file paths must be within `/workspace`; it does not implement list or delete. Runloop and Vercel do not implement list or delete and require a file path rather than `/`.
+- Vercel file writes are additionally constrained by USTAR path-component limits.
+- Only Blaxel exposes portable HTTP endpoints with a live-verified native expiry and revocation path. All other adapters keep the endpoint capability disabled when the upstream API cannot satisfy or live verification cannot prove the complete lease contract.
+
+Capability checks happen in the worker after the API accepts a process, filesystem operation, or endpoint. Always inspect the terminal resource and its `error`; HTTP 202 is not capability confirmation.
+
 ## Routing And Fallback
 
 With `provider: "auto"` or no provider:

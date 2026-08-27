@@ -1,18 +1,29 @@
 import { z } from "zod";
+import { gzipSync } from "node:zlib";
 import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
   ProviderDestroyResult,
+  ProviderExecEvent,
+  ProviderExecInput,
+  ProviderExecResult,
+  ProviderReadFileInput,
+  ProviderReadFileResult,
   ProviderSandbox,
   ProviderSandboxCost,
   ProviderSandboxCostInput,
+  ProviderWriteFileInput,
+  ProviderWriteFileResult,
   SandboxProvider,
 } from "@openmetal/provider-core";
+import { ProviderError } from "@openmetal/provider-core";
 
 const ACTIVE_CPU_USD_PER_HOUR = 0.128;
 const MEMORY_GIB_USD_PER_HOUR = 0.0212;
 const CREATION_USD = 0.0000006;
 const EGRESS_USD_PER_GB = 0.15;
+const MAX_RUNTIME_OUTPUT_BYTES = 10 * 1_024 * 1_024;
+const MAX_RUNTIME_FILE_BYTES = 10 * 1_024 * 1_024;
 
 const SessionSchema = z
   .object({
@@ -62,6 +73,20 @@ const StopResponseSchema = z
   })
   .passthrough();
 
+const CommandSchema = z
+  .object({
+    id: z.string().min(1),
+    exitCode: z.number().int().nullable(),
+  })
+  .passthrough();
+
+const CommandResponseSchema = z.object({ command: CommandSchema }).passthrough();
+
+const CommandLogSchema = z.object({
+  stream: z.enum(["stdout", "stderr", "error"]),
+  data: z.unknown(),
+});
+
 export type VercelSandboxProviderOptions = {
   token: string;
   projectId: string;
@@ -84,6 +109,25 @@ export class VercelSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "fixed",
     sources: ["environment", "oci_image"],
+    runtime: {
+      process: {
+        exec: true,
+        streams: true,
+        cancel: false,
+        maxOutputBytes: MAX_RUNTIME_OUTPUT_BYTES,
+      },
+      files: {
+        read: true,
+        write: true,
+        writeModes: ["create", "overwrite"],
+        createParents: true,
+        list: false,
+        delete: false,
+        maxReadBytes: MAX_RUNTIME_FILE_BYTES,
+        maxWriteBytes: MAX_RUNTIME_FILE_BYTES,
+        maxListEntries: 0,
+      },
+    },
   } as const;
   private readonly token: string;
   private readonly projectId: string;
@@ -91,6 +135,10 @@ export class VercelSandboxProvider implements SandboxProvider {
   private readonly apiUrl: string;
   private readonly requestTimeoutMs: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly executions = new Map<
+    string,
+    { providerResourceId: string; cancelRequested: boolean }
+  >();
 
   constructor(options: VercelSandboxProviderOptions) {
     this.token = options.token;
@@ -139,6 +187,123 @@ export class VercelSandboxProvider implements SandboxProvider {
     };
   }
 
+  async exec(input: ProviderExecInput): Promise<ProviderExecResult> {
+    if (input.command.length === 0) {
+      throw new ProviderError("command must not be empty", "invalid_request", false);
+    }
+    if (input.stdin !== undefined) {
+      throw new ProviderError(
+        "Vercel Sandbox REST execution does not accept stdin",
+        "unsupported",
+        false,
+      );
+    }
+    const maxOutputBytes = boundedInteger(
+      input.maxOutputBytes ?? MAX_RUNTIME_OUTPUT_BYTES,
+      0,
+      MAX_RUNTIME_OUTPUT_BYTES,
+      "maxOutputBytes",
+    );
+    const signal = runtimeSignal(input);
+    const sessionId = await this.currentSessionId(input.providerResourceId, signal);
+    const timeout = input.deadline ? Math.max(1, input.deadline.getTime() - Date.now()) : undefined;
+    const response = CommandResponseSchema.parse(
+      await this.request(
+        `/v2/sandboxes/sessions/${encodeURIComponent(sessionId)}/cmd${this.query()}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            command: input.command[0],
+            args: input.command.slice(1),
+            ...(input.cwd ? { cwd: input.cwd } : {}),
+            ...(input.environment ? { env: input.environment } : {}),
+            ...(timeout ? { timeout: Math.min(timeout, 18_000_000) } : {}),
+          }),
+          signal,
+        },
+      ),
+    );
+    this.executions.set(response.command.id, {
+      providerResourceId: input.providerResourceId,
+      cancelRequested: false,
+    });
+    return {
+      executionId: response.command.id,
+      events: this.commandEvents(sessionId, response.command.id, maxOutputBytes, signal),
+    };
+  }
+
+  async readFile(input: ProviderReadFileInput): Promise<ProviderReadFileResult> {
+    const offsetBytes = boundedInteger(
+      input.offsetBytes ?? 0,
+      0,
+      Number.MAX_SAFE_INTEGER,
+      "offsetBytes",
+    );
+    const maxBytes = boundedInteger(
+      input.maxBytes ?? MAX_RUNTIME_FILE_BYTES,
+      0,
+      MAX_RUNTIME_FILE_BYTES,
+      "maxBytes",
+    );
+    const sessionId = await this.currentSessionId(input.providerResourceId, runtimeSignal(input));
+    const response = await this.requestRaw(
+      `/v2/sandboxes/sessions/${encodeURIComponent(sessionId)}/fs/read${this.query()}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ path: input.path }),
+        signal: runtimeSignal(input),
+        contentType: "application/json",
+      },
+    );
+    const { bytes, sizeBytes } = await readBoundedResponse(response, offsetBytes, maxBytes);
+    const encoding = input.encoding ?? "binary";
+    const eof = offsetBytes + bytes.byteLength >= sizeBytes;
+    return {
+      path: input.path,
+      encoding,
+      data: encoding === "utf8" ? new TextDecoder("utf-8", { fatal: true }).decode(bytes) : bytes,
+      offsetBytes,
+      byteLength: bytes.byteLength,
+      sizeBytes,
+      eof,
+      truncated: !eof,
+    };
+  }
+
+  async writeFile(input: ProviderWriteFileInput): Promise<ProviderWriteFileResult> {
+    const bytes =
+      typeof input.data === "string" ? new TextEncoder().encode(input.data) : input.data.slice();
+    if (bytes.byteLength > MAX_RUNTIME_FILE_BYTES) {
+      throw new ProviderError("file exceeds Vercel write limit", "invalid_request", false);
+    }
+    if (input.mode === "append") {
+      throw new ProviderError(
+        "Vercel Sandbox REST file uploads do not provide atomic append",
+        "unsupported",
+        false,
+      );
+    }
+    const signal = runtimeSignal(input);
+    const sessionId = await this.currentSessionId(input.providerResourceId, signal);
+    const existed = await this.vercelFileExists(sessionId, input.path, signal);
+    if (input.mode === "create" && existed) {
+      throw new ProviderError("file already exists", "invalid_request", false);
+    }
+    const archive = gzipSync(createTarEntry(input.path, bytes));
+    await this.request(
+      `/v2/sandboxes/sessions/${encodeURIComponent(sessionId)}/fs/write${this.query()}`,
+      {
+        method: "POST",
+        body: archive,
+        signal,
+        contentType: "application/gzip",
+        headers: { "x-cwd": "/" },
+      },
+    );
+    return { path: input.path, bytesWritten: bytes.byteLength, created: !existed };
+  }
+
   async pause(): Promise<void> {
     throw new Error("Vercel sandboxes do not support pause");
   }
@@ -148,7 +313,10 @@ export class VercelSandboxProvider implements SandboxProvider {
     if (!existing) {
       return {};
     }
-    let stopped = existing;
+    let stopped: {
+      sandbox: z.infer<typeof NamedSandboxSchema>;
+      session?: z.infer<typeof SessionSchema>;
+    } = existing;
     if (existing.sandbox.currentSessionId && existing.sandbox.status !== "stopped") {
       const stopResponse = StopResponseSchema.parse(
         await this.request(
@@ -240,6 +408,118 @@ export class VercelSandboxProvider implements SandboxProvider {
     }
   }
 
+  private async currentSessionId(name: string, signal?: AbortSignal): Promise<string> {
+    const sandbox = await this.getNamedSandbox(name, signal);
+    const sessionId = sandbox?.sandbox.currentSessionId ?? sandbox?.session?.id;
+    if (!sessionId || sandbox?.sandbox.status !== "running") {
+      throw new ProviderError("Vercel sandbox has no running session", "invalid_request", false);
+    }
+    return sessionId;
+  }
+
+  private async *commandEvents(
+    sessionId: string,
+    commandId: string,
+    maxOutputBytes: number,
+    signal?: AbortSignal,
+  ): AsyncIterable<ProviderExecEvent> {
+    let sequence = 0;
+    let emittedBytes = 0;
+    let outputTruncated = false;
+    try {
+      const response = await this.requestRaw(
+        `/v2/sandboxes/sessions/${encodeURIComponent(sessionId)}/cmd/${encodeURIComponent(
+          commandId,
+        )}/logs${this.query()}`,
+        { method: "GET", signal, accept: "application/x-ndjson" },
+      );
+      for await (const value of ndjsonStream(response)) {
+        const event = CommandLogSchema.parse(value);
+        if (event.stream === "error") {
+          throw new ProviderError("Vercel command log stream failed", "unavailable", true);
+        }
+        if (typeof event.data !== "string") continue;
+        const bytes = new TextEncoder().encode(event.data);
+        const available = Math.max(0, maxOutputBytes - emittedBytes);
+        const data = bytes.slice(0, available);
+        const truncated = data.byteLength < bytes.byteLength;
+        outputTruncated ||= truncated;
+        emittedBytes += data.byteLength;
+        if (data.byteLength > 0) {
+          yield {
+            type: event.stream,
+            sequence: sequence++,
+            data,
+            ...(truncated ? { truncated } : {}),
+          };
+        }
+      }
+      const completed = CommandResponseSchema.parse(
+        await this.request(
+          `/v2/sandboxes/sessions/${encodeURIComponent(sessionId)}/cmd/${encodeURIComponent(
+            commandId,
+          )}${this.query({ wait: "true" })}`,
+          { method: "GET", signal },
+        ),
+      );
+      yield {
+        type: "exit",
+        sequence,
+        exitCode: completed.command.exitCode,
+        signal: null,
+        cancelled: this.executions.get(commandId)?.cancelRequested ?? false,
+        outputTruncated,
+      };
+    } catch (error) {
+      if (signal?.aborted) {
+        const recoverySignal = AbortSignal.timeout(this.requestTimeoutMs);
+        await this.sendKillCommand(sessionId, commandId, recoverySignal).catch(() => undefined);
+        const tracked = this.executions.get(commandId);
+        if (tracked) tracked.cancelRequested = true;
+      }
+      throw error;
+    } finally {
+      this.executions.delete(commandId);
+    }
+  }
+
+  private async sendKillCommand(
+    sessionId: string,
+    commandId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.request(
+      `/v2/sandboxes/sessions/${encodeURIComponent(sessionId)}/cmd/${encodeURIComponent(
+        commandId,
+      )}/kill${this.query()}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ signal: 9 }),
+        signal,
+      },
+    );
+  }
+
+  private async vercelFileExists(
+    sessionId: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const response = await this.requestRaw(
+      `/v2/sandboxes/sessions/${encodeURIComponent(sessionId)}/fs/read${this.query()}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ path }),
+        signal,
+        contentType: "application/json",
+        allowNotFound: true,
+      },
+    );
+    if (response.status === 404) return false;
+    await response.body?.cancel();
+    return true;
+  }
+
   private query(extra: Record<string, string> = {}): string {
     const query = new URLSearchParams(extra);
     if (this.teamId) {
@@ -252,12 +532,33 @@ export class VercelSandboxProvider implements SandboxProvider {
   private async request(
     path: string,
     options: {
-      method: "DELETE" | "GET" | "POST";
-      body?: string;
+      method: "DELETE" | "GET" | "PATCH" | "POST";
+      body?: string | Uint8Array;
       signal?: AbortSignal;
       allowNotFound?: boolean;
+      accept?: string;
+      contentType?: string;
+      headers?: Record<string, string>;
     },
   ): Promise<unknown> {
+    const response = await this.requestRaw(path, options);
+    if (options.allowNotFound && response.status === 404) return {};
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
+  }
+
+  private async requestRaw(
+    path: string,
+    options: {
+      method: "DELETE" | "GET" | "PATCH" | "POST";
+      body?: string | Uint8Array;
+      signal?: AbortSignal;
+      allowNotFound?: boolean;
+      accept?: string;
+      contentType?: string;
+      headers?: Record<string, string>;
+    },
+  ): Promise<Response> {
     const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs);
     const signal = options.signal
       ? AbortSignal.any([options.signal, timeoutSignal])
@@ -266,19 +567,160 @@ export class VercelSandboxProvider implements SandboxProvider {
       method: options.method,
       headers: {
         authorization: `Bearer ${this.token}`,
-        accept: "application/json",
-        ...(options.body ? { "content-type": "application/json" } : {}),
+        accept: options.accept ?? "application/json",
+        ...(options.contentType
+          ? { "content-type": options.contentType }
+          : typeof options.body === "string"
+            ? { "content-type": "application/json" }
+            : {}),
+        ...options.headers,
       },
       body: options.body,
       signal,
     });
     if (options.allowNotFound && response.status === 404) {
-      return {};
+      return response;
     }
     if (!response.ok) {
       throw new VercelRequestError(response.status);
     }
-    const text = await response.text();
-    return text ? JSON.parse(text) : {};
+    return response;
   }
+}
+
+function boundedInteger(value: number, minimum: number, maximum: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new ProviderError(
+      `${name} must be an integer between ${minimum} and ${maximum}`,
+      "invalid_request",
+      false,
+    );
+  }
+  return value;
+}
+
+function runtimeSignal(operation: {
+  deadline?: Date;
+  signal?: AbortSignal;
+}): AbortSignal | undefined {
+  operation.signal?.throwIfAborted();
+  if (!operation.deadline) return operation.signal;
+  const remaining = operation.deadline.getTime() - Date.now();
+  if (remaining <= 0) {
+    throw new ProviderError("runtime operation deadline exceeded", "timeout_absent", false);
+  }
+  const deadlineSignal = AbortSignal.timeout(remaining);
+  return operation.signal ? AbortSignal.any([operation.signal, deadlineSignal]) : deadlineSignal;
+}
+
+async function readBoundedResponse(
+  response: Response,
+  offsetBytes: number,
+  maxBytes: number,
+): Promise<{ bytes: Uint8Array; sizeBytes: number }> {
+  const declaredLength = response.headers.get("content-length");
+  const contentLength =
+    declaredLength !== null && /^\d+$/.test(declaredLength) ? Number(declaredLength) : undefined;
+  const reader = response.body?.getReader();
+  if (!reader) return { bytes: new Uint8Array(), sizeBytes: contentLength ?? 0 };
+  const end = offsetBytes + maxBytes;
+  const selected: number[] = [];
+  let position = 0;
+  let reachedEof = false;
+  while (position <= end) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      reachedEof = true;
+      break;
+    }
+    for (const byte of chunk.value) {
+      if (position >= offsetBytes && position < end) selected.push(byte);
+      position += 1;
+      if (position > end) break;
+    }
+  }
+  if (!reachedEof) await reader.cancel();
+  if (contentLength === undefined && !reachedEof) {
+    throw new ProviderError(
+      "provider omitted Content-Length for a truncated file response",
+      "unsupported",
+      false,
+    );
+  }
+  return { bytes: Uint8Array.from(selected), sizeBytes: contentLength ?? position };
+}
+
+async function* ndjsonStream(response: Response): AsyncIterable<unknown> {
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const result = await reader.read();
+    buffer += decoder.decode(result.value, { stream: !result.done });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.trim()) yield JSON.parse(line);
+    }
+    if (result.done) break;
+  }
+  if (buffer.trim()) yield JSON.parse(buffer);
+}
+
+function createTarEntry(path: string, bytes: Uint8Array): Uint8Array {
+  if (!path.startsWith("/") || path === "/" || path.includes("\0")) {
+    throw new ProviderError(
+      "Vercel file path must identify an absolute file",
+      "invalid_request",
+      false,
+    );
+  }
+  const archivePath = path.slice(1);
+  const encoder = new TextEncoder();
+  let name = archivePath;
+  let prefix = "";
+  if (encoder.encode(name).byteLength > 100) {
+    const segments = archivePath.split("/");
+    while (segments.length > 1 && encoder.encode(segments.join("/")).byteLength > 100) {
+      prefix = prefix ? `${prefix}/${segments.shift()}` : (segments.shift() ?? "");
+    }
+    name = segments.join("/");
+  }
+  const nameBytes = encoder.encode(name);
+  const prefixBytes = encoder.encode(prefix);
+  if (nameBytes.byteLength > 100 || prefixBytes.byteLength > 155) {
+    throw new ProviderError("Vercel REST tar path exceeds the USTAR limit", "unsupported", false);
+  }
+  const header = new Uint8Array(512);
+  header.set(nameBytes, 0);
+  writeTarOctal(header, 100, 8, 0o644);
+  writeTarOctal(header, 108, 8, 0);
+  writeTarOctal(header, 116, 8, 0);
+  writeTarOctal(header, 124, 12, bytes.byteLength);
+  writeTarOctal(header, 136, 12, Math.floor(Date.now() / 1_000));
+  header.fill(0x20, 148, 156);
+  header[156] = "0".charCodeAt(0);
+  header.set(encoder.encode("ustar\0"), 257);
+  header.set(encoder.encode("00"), 263);
+  header.set(prefixBytes, 345);
+  writeTarOctal(
+    header,
+    148,
+    8,
+    header.reduce((sum, byte) => sum + byte, 0),
+  );
+  const paddedLength = Math.ceil(bytes.byteLength / 512) * 512;
+  const tar = new Uint8Array(512 + paddedLength + 1_024);
+  tar.set(header, 0);
+  tar.set(bytes, 512);
+  return tar;
+}
+
+function writeTarOctal(target: Uint8Array, offset: number, length: number, value: number): void {
+  const encoded = value.toString(8).padStart(length - 1, "0");
+  if (encoded.length >= length) {
+    throw new ProviderError("tar field exceeds portable limit", "invalid_request", false);
+  }
+  target.set(new TextEncoder().encode(`${encoded}\0`), offset);
 }

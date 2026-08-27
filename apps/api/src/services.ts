@@ -556,6 +556,11 @@ export async function requestSandboxDeletion(
       .onConflictDoUpdate({
         target: outboxJobs.dedupeKey,
         set: {
+          payload: {
+            job_type: "sandbox.destroy",
+            sandbox_id: sandbox.id,
+            operation_id: operation.id,
+          },
           status: "pending",
           attemptCount: 0,
           availableAt: new Date(),

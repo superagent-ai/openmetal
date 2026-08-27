@@ -165,7 +165,58 @@ openmetal --json --no-input --yes sandbox delete <sandbox-id> --async
 
 Do not automatically resubmit pause, resume, or delete after a lost response. The API does not currently enforce their idempotency headers, and duplicate in-flight requests can create operations that never complete. Retain the original operation ID and inspect sandbox state before taking further action.
 
-Current server builds can serialize resolved resource fields in a shape rejected by the SDK used inside the CLI. Reads of a ready sandbox and lifecycle mutation responses can fail with `internal_error: malformed metal api response` even when the server-side action succeeded. Always create with `--async` so the initial IDs are emitted. Do not retry a lifecycle mutation after this parsing error; upgrade or fix the server before relying on unattended lifecycle automation.
+## Processes
+
+Run an argv-based process:
+
+```bash
+openmetal sandbox exec <sandbox-id> \
+  --cwd /workspace \
+  --env NODE_ENV=production \
+  --timeout 300 \
+  --max-output-bytes 10485760 \
+  -- node app.js --port 8080
+```
+
+Arguments after `--` are sent as argv and are not evaluated by a local shell. `--timeout` is the remote process timeout: 1 through 3,600 seconds, default 300. Captured stdout plus stderr defaults to 10 MiB and permits at most 100 MiB before lower provider limits. The command generates a stable idempotency key before creating the process, consumes ordered SSE events, and exits with the remote code. If streaming fails after acceptance, stderr reports `process_id` and `idempotency_key` for inspection or an identical replay.
+
+Plain mode decodes `stdout` and `stderr` event bytes to the matching local streams. A nonzero remote exit adds no synthetic stderr and returns the remote code. `--json` buffers events and emits one `{ process, events }` document instead. Process output in JSON remains base64.
+
+```bash
+openmetal process get <sandbox-id> <process-id>
+openmetal process events <sandbox-id> <process-id> --after 0
+openmetal process cancel <sandbox-id> <process-id> --yes
+```
+
+`process events` reconnects finite SSE batches until a terminal event. Use `--after` with the last handled positive sequence when resuming. After an empty batch the SDK checks process status and returns if terminal, including when `--after` is at or beyond the terminal sequence; otherwise it waits before reconnecting. Cancellation is provider-dependent. There is no interactive PTY/terminal, streaming stdin, SSH, WebSocket, or general connection command.
+
+## Filesystem
+
+```bash
+openmetal file upload <sandbox-id> ./input.bin /workspace/input.bin \
+  --mode overwrite --create-parents --timeout 180
+openmetal file upload <sandbox-id> - /workspace/stdin.bin
+openmetal file download <sandbox-id> /workspace/input.bin ./input.bin \
+  --offset 0 --chunk-size 1048576 --timeout 180
+openmetal file list <sandbox-id> /workspace --recursive --max-entries 1000
+openmetal file delete <sandbox-id> /workspace/input.bin --yes
+```
+
+`file upload` has alias `file write`; `file download` has alias `file read`. Upload accepts a local path or `-` for stdin and generates one stable idempotency key when omitted. If its accepted operation later fails or times out, stderr reports `runtime_operation_id` and `idempotency_key`; replay identical append input only with that key. Download writes a local path, raw stdout when omitted or `-`, or `data_base64` under `--json`. It reads from the requested offset through EOF; `--chunk-size` is per request, not a total limit, and inconsistent path/offset or zero-progress results fail before local output is written.
+
+All four commands submit a runtime operation and wait up to `--timeout` seconds, default 180. Remote paths must be absolute and traversal-free. Uploads are at most 10 MiB; download chunks are at most 10 MiB; lists permit at most 10,000 entries. Provider support for list/delete, append, and parent creation differs.
+
+## Leased HTTP Endpoints
+
+```bash
+openmetal endpoint expose <sandbox-id> --port 8080 --lease-seconds 3600
+openmetal endpoint list <sandbox-id> --cursor <endpoint-id> --limit 50
+openmetal endpoint revoke <sandbox-id> <endpoint-id> --yes
+```
+
+`endpoint expose` generates an idempotency key but returns the initial `provisioning` endpoint without waiting. Poll `endpoint list` for `active` with a URL or `failed`. Only HTTP is supported. Contract ports are 1 through 65,535, lease duration is 60 through 86,400 seconds, and list size is 1 through 100; provider restrictions can be narrower.
+
+Read [runtime.md](runtime.md) for exact API and SDK names and [providers-and-billing.md](providers-and-billing.md) for current capability coverage.
 
 ## BYOK Credentials
 
@@ -192,6 +243,7 @@ Credential files contain secrets. Keep them outside source control, restrict the
 - `2`: request validation error.
 - `3`: API authentication or authorization error.
 - `4`: SDK request timeout.
+- `sandbox exec`: the remote process exit code when available; otherwise `1`.
 - Commander argument parsing may return its own nonzero exit code.
 
 CLI errors are written to stderr as plain text even when `--json` is selected. Do not parse stderr as a JSON error envelope.

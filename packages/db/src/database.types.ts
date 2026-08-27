@@ -9,6 +9,199 @@ export type Json =
 export type Database = {
   metal: {
     Tables: {
+      auto_topup_attempts: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          credit_microusd: number
+          error_code: string | null
+          error_message: string | null
+          fee_microusd: number
+          id: string
+          organization_id: string
+          purchase_id: string
+          status: Database["metal"]["Enums"]["auto_topup_attempt_status"]
+          stripe_payment_intent_id: string | null
+          total_microusd: number
+          window_start: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          credit_microusd: number
+          error_code?: string | null
+          error_message?: string | null
+          fee_microusd: number
+          id?: string
+          organization_id: string
+          purchase_id: string
+          status?: Database["metal"]["Enums"]["auto_topup_attempt_status"]
+          stripe_payment_intent_id?: string | null
+          total_microusd: number
+          window_start: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          credit_microusd?: number
+          error_code?: string | null
+          error_message?: string | null
+          fee_microusd?: number
+          id?: string
+          organization_id?: string
+          purchase_id?: string
+          status?: Database["metal"]["Enums"]["auto_topup_attempt_status"]
+          stripe_payment_intent_id?: string | null
+          total_microusd?: number
+          window_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "auto_topup_attempts_purchase_id_fkey"
+            columns: ["purchase_id"]
+            isOneToOne: false
+            referencedRelation: "credit_purchases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      auto_topup_policies: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          monthly_cap_microusd: number
+          organization_id: string
+          paused_reason: string | null
+          refill_microusd: number
+          status: Database["metal"]["Enums"]["auto_topup_status"]
+          threshold_microusd: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          monthly_cap_microusd?: number
+          organization_id: string
+          paused_reason?: string | null
+          refill_microusd?: number
+          status?: Database["metal"]["Enums"]["auto_topup_status"]
+          threshold_microusd?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          monthly_cap_microusd?: number
+          organization_id?: string
+          paused_reason?: string | null
+          refill_microusd?: number
+          status?: Database["metal"]["Enums"]["auto_topup_status"]
+          threshold_microusd?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      billing_accounts: {
+        Row: {
+          balance_microusd: number
+          created_at: string
+          organization_id: string
+          payment_method_brand: string | null
+          payment_method_last4: string | null
+          stripe_customer_id: string | null
+          stripe_payment_method_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          balance_microusd?: number
+          created_at?: string
+          organization_id: string
+          payment_method_brand?: string | null
+          payment_method_last4?: string | null
+          stripe_customer_id?: string | null
+          stripe_payment_method_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          balance_microusd?: number
+          created_at?: string
+          organization_id?: string
+          payment_method_brand?: string | null
+          payment_method_last4?: string | null
+          stripe_customer_id?: string | null
+          stripe_payment_method_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      credit_purchases: {
+        Row: {
+          actor_id: string
+          created_at: string
+          credit_microusd: number
+          fee_microusd: number
+          id: string
+          organization_id: string
+          paid_at: string | null
+          pricing_version_id: string
+          source: Database["metal"]["Enums"]["credit_purchase_source"]
+          status: Database["metal"]["Enums"]["credit_purchase_status"]
+          stripe_checkout_session_id: string | null
+          stripe_customer_id: string | null
+          stripe_invoice_url: string | null
+          stripe_payment_intent_id: string | null
+          stripe_receipt_url: string | null
+          total_microusd: number
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string
+          credit_microusd: number
+          fee_microusd: number
+          id?: string
+          organization_id: string
+          paid_at?: string | null
+          pricing_version_id: string
+          source: Database["metal"]["Enums"]["credit_purchase_source"]
+          status?: Database["metal"]["Enums"]["credit_purchase_status"]
+          stripe_checkout_session_id?: string | null
+          stripe_customer_id?: string | null
+          stripe_invoice_url?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_receipt_url?: string | null
+          total_microusd: number
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string
+          credit_microusd?: number
+          fee_microusd?: number
+          id?: string
+          organization_id?: string
+          paid_at?: string | null
+          pricing_version_id?: string
+          source?: Database["metal"]["Enums"]["credit_purchase_source"]
+          status?: Database["metal"]["Enums"]["credit_purchase_status"]
+          stripe_checkout_session_id?: string | null
+          stripe_customer_id?: string | null
+          stripe_invoice_url?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_receipt_url?: string | null
+          total_microusd?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_purchases_pricing_version_id_fkey"
+            columns: ["pricing_version_id"]
+            isOneToOne: false
+            referencedRelation: "pricing_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       domain_events: {
         Row: {
           actor_id: string
@@ -78,6 +271,74 @@ export type Database = {
           request_fingerprint?: string
           response_body?: Json | null
           response_status?: number | null
+        }
+        Relationships: []
+      }
+      ledger_entries: {
+        Row: {
+          account: Database["metal"]["Enums"]["ledger_account"]
+          amount_microusd: number
+          created_at: string
+          id: string
+          organization_id: string
+          transaction_id: string
+        }
+        Insert: {
+          account: Database["metal"]["Enums"]["ledger_account"]
+          amount_microusd: number
+          created_at?: string
+          id?: string
+          organization_id: string
+          transaction_id: string
+        }
+        Update: {
+          account?: Database["metal"]["Enums"]["ledger_account"]
+          amount_microusd?: number
+          created_at?: string
+          id?: string
+          organization_id?: string
+          transaction_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ledger_entries_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "ledger_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ledger_transactions: {
+        Row: {
+          actor_id: string
+          created_at: string
+          description: string
+          id: string
+          kind: Database["metal"]["Enums"]["ledger_transaction_kind"]
+          organization_id: string
+          reference_id: string
+          reference_type: string
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string
+          description: string
+          id?: string
+          kind: Database["metal"]["Enums"]["ledger_transaction_kind"]
+          organization_id: string
+          reference_id: string
+          reference_type: string
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string
+          description?: string
+          id?: string
+          kind?: Database["metal"]["Enums"]["ledger_transaction_kind"]
+          organization_id?: string
+          reference_id?: string
+          reference_type?: string
         }
         Relationships: []
       }
@@ -214,6 +475,7 @@ export type Database = {
           last_error: string | null
           lease_expires_at: string | null
           lease_owner: string | null
+          lease_token: string | null
           payload: Json
           status: Database["metal"]["Enums"]["outbox_job_status"]
           updated_at: string
@@ -229,6 +491,7 @@ export type Database = {
           last_error?: string | null
           lease_expires_at?: string | null
           lease_owner?: string | null
+          lease_token?: string | null
           payload: Json
           status?: Database["metal"]["Enums"]["outbox_job_status"]
           updated_at?: string
@@ -244,11 +507,77 @@ export type Database = {
           last_error?: string | null
           lease_expires_at?: string | null
           lease_owner?: string | null
+          lease_token?: string | null
           payload?: Json
           status?: Database["metal"]["Enums"]["outbox_job_status"]
           updated_at?: string
         }
         Relationships: []
+      }
+      pricing_versions: {
+        Row: {
+          code: string
+          created_at: string
+          effective_from: string
+          fee_per_mille: number
+          id: string
+          kind: Database["metal"]["Enums"]["pricing_kind"]
+          min_fee_microusd: number
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          effective_from?: string
+          fee_per_mille?: number
+          id?: string
+          kind: Database["metal"]["Enums"]["pricing_kind"]
+          min_fee_microusd?: number
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          effective_from?: string
+          fee_per_mille?: number
+          id?: string
+          kind?: Database["metal"]["Enums"]["pricing_kind"]
+          min_fee_microusd?: number
+        }
+        Relationships: []
+      }
+      process_events: {
+        Row: {
+          data: Json
+          id: string
+          occurred_at: string
+          process_id: string
+          sequence: number
+          type: string
+        }
+        Insert: {
+          data?: Json
+          id?: string
+          occurred_at?: string
+          process_id: string
+          sequence: number
+          type: string
+        }
+        Update: {
+          data?: Json
+          id?: string
+          occurred_at?: string
+          process_id?: string
+          sequence?: number
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "process_events_process_id_fkey"
+            columns: ["process_id"]
+            isOneToOne: false
+            referencedRelation: "sandbox_processes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       project_api_keys: {
         Row: {
@@ -421,11 +750,228 @@ export type Database = {
           },
         ]
       }
+      runtime_operations: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error: Json | null
+          id: string
+          kind: Database["metal"]["Enums"]["runtime_operation_kind"]
+          operation_token: string | null
+          organization_id: string
+          project_id: string
+          provider_capabilities: Json | null
+          public_id: string
+          request: Json
+          result: Json | null
+          sandbox_id: string
+          started_at: string | null
+          state: Database["metal"]["Enums"]["runtime_operation_state"]
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error?: Json | null
+          id?: string
+          kind: Database["metal"]["Enums"]["runtime_operation_kind"]
+          operation_token?: string | null
+          organization_id: string
+          project_id: string
+          provider_capabilities?: Json | null
+          public_id?: string
+          request: Json
+          result?: Json | null
+          sandbox_id: string
+          started_at?: string | null
+          state?: Database["metal"]["Enums"]["runtime_operation_state"]
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error?: Json | null
+          id?: string
+          kind?: Database["metal"]["Enums"]["runtime_operation_kind"]
+          operation_token?: string | null
+          organization_id?: string
+          project_id?: string
+          provider_capabilities?: Json | null
+          public_id?: string
+          request?: Json
+          result?: Json | null
+          sandbox_id?: string
+          started_at?: string | null
+          state?: Database["metal"]["Enums"]["runtime_operation_state"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "runtime_operations_sandbox_id_fkey"
+            columns: ["sandbox_id"]
+            isOneToOne: false
+            referencedRelation: "sandboxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sandbox_endpoints: {
+        Row: {
+          created_at: string
+          error: Json | null
+          id: string
+          lease_expires_at: string
+          operation_token: string | null
+          organization_id: string
+          port: number
+          project_id: string
+          protocol: string
+          provider_capabilities: Json | null
+          provider_metadata: Json
+          public_id: string
+          revoked_at: string | null
+          sandbox_id: string
+          state: Database["metal"]["Enums"]["sandbox_endpoint_state"]
+          updated_at: string
+          url: string | null
+        }
+        Insert: {
+          created_at?: string
+          error?: Json | null
+          id?: string
+          lease_expires_at?: string
+          operation_token?: string | null
+          organization_id: string
+          port: number
+          project_id: string
+          protocol?: string
+          provider_capabilities?: Json | null
+          provider_metadata?: Json
+          public_id?: string
+          revoked_at?: string | null
+          sandbox_id: string
+          state?: Database["metal"]["Enums"]["sandbox_endpoint_state"]
+          updated_at?: string
+          url?: string | null
+        }
+        Update: {
+          created_at?: string
+          error?: Json | null
+          id?: string
+          lease_expires_at?: string
+          operation_token?: string | null
+          organization_id?: string
+          port?: number
+          project_id?: string
+          protocol?: string
+          provider_capabilities?: Json | null
+          provider_metadata?: Json
+          public_id?: string
+          revoked_at?: string | null
+          sandbox_id?: string
+          state?: Database["metal"]["Enums"]["sandbox_endpoint_state"]
+          updated_at?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sandbox_endpoints_sandbox_id_fkey"
+            columns: ["sandbox_id"]
+            isOneToOne: false
+            referencedRelation: "sandboxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sandbox_processes: {
+        Row: {
+          cancel_requested_at: string | null
+          command: Json
+          completed_at: string | null
+          created_at: string
+          cwd: string | null
+          environment: Json
+          error: Json | null
+          exit_code: number | null
+          id: string
+          max_output_bytes: number
+          operation_token: string | null
+          organization_id: string
+          output_bytes: number
+          output_truncated: boolean
+          project_id: string
+          provider_capabilities: Json | null
+          provider_execution_id: string | null
+          public_id: string
+          sandbox_id: string
+          started_at: string | null
+          state: Database["metal"]["Enums"]["process_state"]
+          termination_signal: string | null
+          timeout_seconds: number
+        }
+        Insert: {
+          cancel_requested_at?: string | null
+          command: Json
+          completed_at?: string | null
+          created_at?: string
+          cwd?: string | null
+          environment?: Json
+          error?: Json | null
+          exit_code?: number | null
+          id?: string
+          max_output_bytes?: number
+          operation_token?: string | null
+          organization_id: string
+          output_bytes?: number
+          output_truncated?: boolean
+          project_id: string
+          provider_capabilities?: Json | null
+          provider_execution_id?: string | null
+          public_id?: string
+          sandbox_id: string
+          started_at?: string | null
+          state?: Database["metal"]["Enums"]["process_state"]
+          termination_signal?: string | null
+          timeout_seconds?: number
+        }
+        Update: {
+          cancel_requested_at?: string | null
+          command?: Json
+          completed_at?: string | null
+          created_at?: string
+          cwd?: string | null
+          environment?: Json
+          error?: Json | null
+          exit_code?: number | null
+          id?: string
+          max_output_bytes?: number
+          operation_token?: string | null
+          organization_id?: string
+          output_bytes?: number
+          output_truncated?: boolean
+          project_id?: string
+          provider_capabilities?: Json | null
+          provider_execution_id?: string | null
+          public_id?: string
+          sandbox_id?: string
+          started_at?: string | null
+          state?: Database["metal"]["Enums"]["process_state"]
+          termination_signal?: string | null
+          timeout_seconds?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sandbox_processes_sandbox_id_fkey"
+            columns: ["sandbox_id"]
+            isOneToOne: false
+            referencedRelation: "sandboxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sandboxes: {
         Row: {
           billing_mode: string
           created_at: string
           created_by: string
+          customer_charged_microusd: number
           deleted_at: string | null
           environment: Json
           error_code: string | null
@@ -446,7 +992,6 @@ export type Database = {
           provider_cost_measured_through: string | null
           provider_cost_microusd: number | null
           provider_cost_updated_at: string | null
-          customer_charged_microusd: number
           provider_credential_id: string | null
           provider_metadata: Json
           provider_options: Json
@@ -467,6 +1012,7 @@ export type Database = {
           billing_mode?: string
           created_at?: string
           created_by: string
+          customer_charged_microusd?: number
           deleted_at?: string | null
           environment: Json
           error_code?: string | null
@@ -487,7 +1033,6 @@ export type Database = {
           provider_cost_measured_through?: string | null
           provider_cost_microusd?: number | null
           provider_cost_updated_at?: string | null
-          customer_charged_microusd?: number
           provider_credential_id?: string | null
           provider_metadata?: Json
           provider_options: Json
@@ -508,6 +1053,7 @@ export type Database = {
           billing_mode?: string
           created_at?: string
           created_by?: string
+          customer_charged_microusd?: number
           deleted_at?: string | null
           environment?: Json
           error_code?: string | null
@@ -528,7 +1074,6 @@ export type Database = {
           provider_cost_measured_through?: string | null
           provider_cost_microusd?: number | null
           provider_cost_updated_at?: string | null
-          customer_charged_microusd?: number
           provider_credential_id?: string | null
           provider_metadata?: Json
           provider_options?: Json
@@ -555,38 +1100,100 @@ export type Database = {
           },
         ]
       }
-      billing_accounts: {
+      stripe_events: {
         Row: {
-          balance_microusd: number
-          created_at: string
-          organization_id: string
-          payment_method_brand: string | null
-          payment_method_last4: string | null
-          stripe_customer_id: string | null
-          stripe_payment_method_id: string | null
-          updated_at: string
+          event_id: string
+          payload: Json
+          processed_at: string
+          type: string
         }
         Insert: {
-          balance_microusd?: number
-          created_at?: string
-          organization_id: string
-          payment_method_brand?: string | null
-          payment_method_last4?: string | null
-          stripe_customer_id?: string | null
-          stripe_payment_method_id?: string | null
-          updated_at?: string
+          event_id: string
+          payload?: Json
+          processed_at?: string
+          type: string
         }
         Update: {
-          balance_microusd?: number
-          created_at?: string
-          organization_id?: string
-          payment_method_brand?: string | null
-          payment_method_last4?: string | null
-          stripe_customer_id?: string | null
-          stripe_payment_method_id?: string | null
-          updated_at?: string
+          event_id?: string
+          payload?: Json
+          processed_at?: string
+          type?: string
         }
         Relationships: []
+      }
+      usage_charges: {
+        Row: {
+          created_at: string
+          customer_charge_microusd: number
+          id: string
+          ledger_transaction_id: string
+          measured_from: string | null
+          measured_through: string
+          organization_id: string
+          pricing_version_id: string
+          project_id: string
+          provider_cost_delta_microusd: number
+          sandbox_id: string
+          snapshot_id: string
+        }
+        Insert: {
+          created_at?: string
+          customer_charge_microusd: number
+          id?: string
+          ledger_transaction_id: string
+          measured_from?: string | null
+          measured_through: string
+          organization_id: string
+          pricing_version_id: string
+          project_id: string
+          provider_cost_delta_microusd: number
+          sandbox_id: string
+          snapshot_id: string
+        }
+        Update: {
+          created_at?: string
+          customer_charge_microusd?: number
+          id?: string
+          ledger_transaction_id?: string
+          measured_from?: string | null
+          measured_through?: string
+          organization_id?: string
+          pricing_version_id?: string
+          project_id?: string
+          provider_cost_delta_microusd?: number
+          sandbox_id?: string
+          snapshot_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usage_charges_ledger_transaction_id_fkey"
+            columns: ["ledger_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "ledger_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "usage_charges_pricing_version_id_fkey"
+            columns: ["pricing_version_id"]
+            isOneToOne: false
+            referencedRelation: "pricing_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "usage_charges_sandbox_id_fkey"
+            columns: ["sandbox_id"]
+            isOneToOne: false
+            referencedRelation: "sandboxes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "usage_charges_snapshot_id_fkey"
+            columns: ["snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "provider_cost_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
@@ -612,7 +1219,53 @@ export type Database = {
       project_topic_id: { Args: { p_topic: string }; Returns: string }
     }
     Enums: {
+      auto_topup_attempt_status:
+        | "pending"
+        | "succeeded"
+        | "failed"
+        | "requires_action"
+      auto_topup_status: "disabled" | "active" | "paused"
+      credit_purchase_source: "checkout" | "auto_topup" | "admin_grant"
+      credit_purchase_status:
+        | "pending"
+        | "paid"
+        | "failed"
+        | "canceled"
+        | "requires_action"
+      ledger_account: "customer_credits" | "platform_clearing"
+      ledger_transaction_kind:
+        | "deposit"
+        | "usage_charge"
+        | "usage_correction"
+        | "adjustment"
       outbox_job_status: "pending" | "leased" | "succeeded" | "failed"
+      pricing_kind: "purchase_fee" | "usage"
+      process_state:
+        | "queued"
+        | "running"
+        | "cancelling"
+        | "succeeded"
+        | "failed"
+        | "cancelled"
+        | "timed_out"
+      runtime_operation_kind:
+        | "filesystem_read"
+        | "filesystem_write"
+        | "filesystem_list"
+        | "filesystem_delete"
+      runtime_operation_state:
+        | "queued"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "cancelled"
+      sandbox_endpoint_state:
+        | "provisioning"
+        | "active"
+        | "revoking"
+        | "revoked"
+        | "expired"
+        | "failed"
       sandbox_status:
         | "requested"
         | "provisioning"
@@ -911,7 +1564,60 @@ export type CompositeTypes<
 export const Constants = {
   metal: {
     Enums: {
+      auto_topup_attempt_status: [
+        "pending",
+        "succeeded",
+        "failed",
+        "requires_action",
+      ],
+      auto_topup_status: ["disabled", "active", "paused"],
+      credit_purchase_source: ["checkout", "auto_topup", "admin_grant"],
+      credit_purchase_status: [
+        "pending",
+        "paid",
+        "failed",
+        "canceled",
+        "requires_action",
+      ],
+      ledger_account: ["customer_credits", "platform_clearing"],
+      ledger_transaction_kind: [
+        "deposit",
+        "usage_charge",
+        "usage_correction",
+        "adjustment",
+      ],
       outbox_job_status: ["pending", "leased", "succeeded", "failed"],
+      pricing_kind: ["purchase_fee", "usage"],
+      process_state: [
+        "queued",
+        "running",
+        "cancelling",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "timed_out",
+      ],
+      runtime_operation_kind: [
+        "filesystem_read",
+        "filesystem_write",
+        "filesystem_list",
+        "filesystem_delete",
+      ],
+      runtime_operation_state: [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+      ],
+      sandbox_endpoint_state: [
+        "provisioning",
+        "active",
+        "revoking",
+        "revoked",
+        "expired",
+        "failed",
+      ],
       sandbox_status: [
         "requested",
         "provisioning",

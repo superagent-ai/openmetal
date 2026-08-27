@@ -45,6 +45,19 @@ import {
   SandboxSchema,
 } from "./sandboxes.js";
 import {
+  CreateProcessRequestSchema,
+  CreateSandboxEndpointRequestSchema,
+  DeleteFileRequestSchema,
+  ListFilesRequestSchema,
+  ProcessEventSchema,
+  ProcessSchema,
+  ReadFileRequestSchema,
+  RuntimeOperationSchema,
+  SandboxEndpointListResponseSchema,
+  SandboxEndpointSchema,
+  WriteFileRequestSchema,
+} from "./runtime.js";
+import {
   BillingCheckoutResponseSchema,
   BillingQuoteSchema,
   BillingSetupResponseSchema,
@@ -148,6 +161,17 @@ export function buildOpenApiDocument(): OpenApiObject {
         SandboxListResponse: json(SandboxListResponseSchema),
         Operation: json(OperationSchema),
         OperationEvent: json(OperationEventSchema),
+        CreateProcessRequest: json(CreateProcessRequestSchema),
+        Process: json(ProcessSchema),
+        ProcessEvent: json(ProcessEventSchema),
+        ReadFileRequest: json(ReadFileRequestSchema),
+        WriteFileRequest: json(WriteFileRequestSchema),
+        ListFilesRequest: json(ListFilesRequestSchema),
+        DeleteFileRequest: json(DeleteFileRequestSchema),
+        RuntimeOperation: json(RuntimeOperationSchema),
+        CreateSandboxEndpointRequest: json(CreateSandboxEndpointRequestSchema),
+        SandboxEndpoint: json(SandboxEndpointSchema),
+        SandboxEndpointListResponse: json(SandboxEndpointListResponseSchema),
         CursorEventPage: json(CursorEventPageSchema),
         BillingQuote: json(BillingQuoteSchema),
         CreateBillingCheckoutRequest: json(CreateBillingCheckoutRequestSchema),
@@ -163,6 +187,18 @@ export function buildOpenApiDocument(): OpenApiObject {
         OperationId: {
           type: "string",
           pattern: "^op_[A-Za-z0-9]+$",
+        },
+        ProcessId: {
+          type: "string",
+          pattern: "^proc_[A-Za-z0-9]+$",
+        },
+        RuntimeOperationId: {
+          type: "string",
+          pattern: "^rop_[A-Za-z0-9]+$",
+        },
+        SandboxEndpointId: {
+          type: "string",
+          pattern: "^ep_[A-Za-z0-9]+$",
         },
         Cursor: { type: "string", minLength: 1, maxLength: 512 },
       },
@@ -228,6 +264,24 @@ export function buildOpenApiDocument(): OpenApiObject {
           required: true,
           schema: ref("OperationId"),
         },
+        ProcessIdPath: {
+          name: "process_id",
+          in: "path",
+          required: true,
+          schema: ref("ProcessId"),
+        },
+        RuntimeOperationIdPath: {
+          name: "runtime_operation_id",
+          in: "path",
+          required: true,
+          schema: ref("RuntimeOperationId"),
+        },
+        SandboxEndpointIdPath: {
+          name: "endpoint_id",
+          in: "path",
+          required: true,
+          schema: ref("SandboxEndpointId"),
+        },
         ProjectScopeHeader: {
           name: "X-Metal-Project-ID",
           in: "header",
@@ -252,6 +306,13 @@ export function buildOpenApiDocument(): OpenApiObject {
           in: "header",
           required: false,
           description: "Resume after the last received operation event sequence.",
+          schema: { type: "integer", minimum: 0 },
+        },
+        LastProcessEventIdHeader: {
+          name: "Last-Event-ID",
+          in: "header",
+          required: false,
+          description: "Resume after the last received process event sequence.",
           schema: { type: "integer", minimum: 0 },
         },
         CursorQuery: {
@@ -867,6 +928,237 @@ export function buildOpenApiDocument(): OpenApiObject {
             "403": errorResponse("Access denied"),
             "404": errorResponse("Sandbox not found"),
             "409": errorResponse("Sandbox cannot be resumed"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/processes": {
+        parameters: [parameterRef("SandboxIdPath"), parameterRef("ProjectScopeHeader")],
+        post: {
+          operationId: "createSandboxProcess",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("IdempotencyKeyHeader")],
+          requestBody: {
+            required: true,
+            content: jsonContent("CreateProcessRequest"),
+          },
+          responses: {
+            "202": response("Process execution accepted", "Process"),
+            "400": errorResponse("Idempotency-Key is required"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
+            "409": errorResponse("Idempotency conflict or sandbox unavailable"),
+            "422": errorResponse("Invalid process request"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/processes/{process_id}": {
+        parameters: [
+          parameterRef("SandboxIdPath"),
+          parameterRef("ProcessIdPath"),
+          parameterRef("ProjectScopeHeader"),
+        ],
+        get: {
+          operationId: "getSandboxProcess",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Process status", "Process"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Process not found"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/processes/{process_id}/events": {
+        parameters: [
+          parameterRef("SandboxIdPath"),
+          parameterRef("ProcessIdPath"),
+          parameterRef("ProjectScopeHeader"),
+          parameterRef("LastProcessEventIdHeader"),
+        ],
+        get: {
+          operationId: "streamSandboxProcessEvents",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": {
+              description:
+                "Finite SSE batch of stdout, stderr, and lifecycle events in process sequence order.",
+              content: {
+                "text/event-stream": {
+                  schema: {
+                    type: "string",
+                    examples: [
+                      'id: 3\nevent: stdout\ndata: {"sequence":3,"process_id":"proc_example","type":"stdout","occurred_at":"2026-08-27T08:00:00.000Z","data":{"data_base64":"aGVsbG8K","byte_length":6,"stream_offset_bytes":0}}\n\n',
+                    ],
+                  },
+                },
+              },
+            },
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Process not found"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/processes/{process_id}/actions/cancel": {
+        parameters: [
+          parameterRef("SandboxIdPath"),
+          parameterRef("ProcessIdPath"),
+          parameterRef("ProjectScopeHeader"),
+        ],
+        post: {
+          operationId: "cancelSandboxProcess",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("OptionalIdempotencyKeyHeader")],
+          responses: {
+            "202": response("Process cancellation accepted", "Process"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Process not found"),
+            "409": errorResponse("Process is already terminal"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/filesystem/read": {
+        parameters: [parameterRef("SandboxIdPath"), parameterRef("ProjectScopeHeader")],
+        post: {
+          operationId: "readSandboxFile",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          requestBody: { required: true, content: jsonContent("ReadFileRequest") },
+          responses: {
+            "202": response("Filesystem read accepted", "RuntimeOperation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox or file not found"),
+            "422": errorResponse("Invalid filesystem request"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/filesystem/write": {
+        parameters: [parameterRef("SandboxIdPath"), parameterRef("ProjectScopeHeader")],
+        post: {
+          operationId: "writeSandboxFile",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("OptionalIdempotencyKeyHeader")],
+          requestBody: { required: true, content: jsonContent("WriteFileRequest") },
+          responses: {
+            "202": response("Filesystem write accepted", "RuntimeOperation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
+            "409": errorResponse("Idempotency or file conflict"),
+            "422": errorResponse("Invalid filesystem request"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/filesystem/list": {
+        parameters: [parameterRef("SandboxIdPath"), parameterRef("ProjectScopeHeader")],
+        post: {
+          operationId: "listSandboxFiles",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          requestBody: { required: true, content: jsonContent("ListFilesRequest") },
+          responses: {
+            "202": response("Filesystem list accepted", "RuntimeOperation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox or path not found"),
+            "422": errorResponse("Invalid filesystem request"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/filesystem/delete": {
+        parameters: [parameterRef("SandboxIdPath"), parameterRef("ProjectScopeHeader")],
+        post: {
+          operationId: "deleteSandboxFile",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("OptionalIdempotencyKeyHeader")],
+          requestBody: { required: true, content: jsonContent("DeleteFileRequest") },
+          responses: {
+            "202": response("Filesystem delete accepted", "RuntimeOperation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox or path not found"),
+            "409": errorResponse("Idempotency conflict"),
+            "422": errorResponse("Invalid filesystem request"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/runtime-operations/{runtime_operation_id}": {
+        parameters: [
+          parameterRef("SandboxIdPath"),
+          parameterRef("RuntimeOperationIdPath"),
+          parameterRef("ProjectScopeHeader"),
+        ],
+        get: {
+          operationId: "getSandboxRuntimeOperation",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Runtime operation status and result", "RuntimeOperation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Runtime operation not found"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/endpoints": {
+        parameters: [parameterRef("SandboxIdPath"), parameterRef("ProjectScopeHeader")],
+        get: {
+          operationId: "listSandboxEndpoints",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("CursorQuery"), parameterRef("LimitQuery")],
+          responses: {
+            "200": response("Leased HTTP endpoint page", "SandboxEndpointListResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
+            "422": errorResponse("Invalid cursor"),
+          },
+        },
+        post: {
+          operationId: "createSandboxEndpoint",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("IdempotencyKeyHeader")],
+          requestBody: {
+            required: true,
+            content: jsonContent("CreateSandboxEndpointRequest"),
+          },
+          responses: {
+            "202": response("HTTP endpoint lease accepted", "SandboxEndpoint"),
+            "400": errorResponse("Idempotency-Key is required"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Sandbox not found"),
+            "409": errorResponse("Idempotency or endpoint conflict"),
+            "422": errorResponse("Invalid endpoint request"),
+          },
+        },
+      },
+      "/v1/sandboxes/{sandbox_id}/endpoints/{endpoint_id}": {
+        parameters: [
+          parameterRef("SandboxIdPath"),
+          parameterRef("SandboxEndpointIdPath"),
+          parameterRef("ProjectScopeHeader"),
+        ],
+        delete: {
+          operationId: "revokeSandboxEndpoint",
+          tags: ["runtime"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "202": response("HTTP endpoint revocation accepted", "SandboxEndpoint"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Endpoint not found"),
           },
         },
       },

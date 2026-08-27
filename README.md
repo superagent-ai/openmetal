@@ -49,14 +49,14 @@ pnpm install --frozen-lockfile
 
 ## OpenMetal CLI
 
-The private `@openmetal/cli` workspace builds the standalone `openmetal` binary. It supports browser login for control-plane administration, project API keys for sandbox operations, human-readable terminal output, and `--json`/`--no-input` automation.
+The private `@openmetal/cli` workspace builds the standalone `openmetal` binary. It supports browser login for control-plane administration; project API keys for sandbox lifecycle, argv-based processes, binary filesystem operations, and leased HTTP endpoints; streamed process output; and `--json`/`--no-input` automation. Interactive PTY/terminal sessions and general SSH, WebSocket, or connection APIs remain outside the public surface.
 
 ```bash
 pnpm --filter @openmetal/cli build
 apps/cli/dist/openmetal --help
 ```
 
-Tagged `cli-v*` releases publish checksum-verified binaries for macOS, Linux, and Windows plus a bundled Node.js package at `@openmetal/cli`. See [docs/cli.md](docs/cli.md) for installation, authentication, command examples, profiles, npm bootstrap, and CI usage.
+Tagged `cli-v*` releases publish checksum-verified binaries for macOS, Linux, and Windows plus a bundled Node.js package at `@openmetal/cli`. See [docs/cli.md](docs/cli.md) for installation, authentication, command examples, profiles, npm bootstrap, and CI usage, and [docs/runtime.md](docs/runtime.md) for the process, filesystem, and endpoint HTTP contracts.
 
 ## OpenMetal Agent Skill
 
@@ -172,7 +172,7 @@ await metal.projects.create(organizationId, { name: "Alpha", slug: "alpha" });
 await metal.events.list({ projectId, after: cursor });
 ```
 
-The workspace package remains private, while `pnpm --filter @openmetal/sdk build:npm` produces the self-contained public npm artifact. See [packages/sdk-typescript/README.md](packages/sdk-typescript/README.md) for SDK usage and publishing details.
+The SDK also exposes `processes`, `filesystem`, `runtimeOperations`, and `endpoints` namespaces for ready sandboxes. The workspace package remains private, while `pnpm --filter @openmetal/sdk build:npm` produces the self-contained public npm artifact. See [packages/sdk-typescript/README.md](packages/sdk-typescript/README.md) for SDK usage and publishing details.
 
 ## Realtime delivery and cursor recovery
 

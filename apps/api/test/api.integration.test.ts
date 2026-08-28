@@ -1326,6 +1326,27 @@ describe("metal api integration", () => {
     expect(usage.summary.byok_cost.current.usd).toBe("3.00");
     expect(usage.by_provider.map((item) => item.provider).sort()).toEqual(["e2b", "runloop"]);
     expect(usage.top_sandboxes).toHaveLength(2);
+
+    const rolling = await ownerClient.usage.get(organization.id, {
+      from: "2026-08-02T12:00:00.000Z",
+      through: "2026-08-04T12:00:00.000Z",
+    });
+    expect(rolling.summary.total_cost.current.usd).toBe("3.00");
+    expect(rolling.summary.managed_cost.current.usd).toBe("0.00");
+
+    await database.sql`
+      update metal.sandboxes
+      set status = 'deleted', deleted_at = '2026-08-03T01:00:00Z'
+      where id = ${byokId}
+    `;
+    const stopped = await ownerClient.usage.get(organization.id, {
+      from: "2026-08-01T00:00:00.000Z",
+      through: "2026-08-08T00:00:00.000Z",
+      status: "stopped",
+    });
+    expect(stopped.summary.total_cost.current.usd).toBe("3.00");
+    expect(stopped.top_sandboxes[0]?.status).toBe("stopped");
+
     await expect(
       outsiderClient.usage.get(organization.id, {
         from: "2026-08-01T00:00:00.000Z",

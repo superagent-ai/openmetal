@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { projects, providerCostSnapshots, sandboxes, type MetalDb } from "@openmetal/db";
 import { toMicrousd } from "./money.js";
 
@@ -106,6 +106,7 @@ type UsageQuery = {
 
 type AggregateRow = {
   date: string;
+  period: string;
   sandboxId: string;
   projectId: string;
   projectName: string;
@@ -159,6 +160,16 @@ function publicStatus(value: string): string {
   return value === "deleting" ? "stopping" : value === "deleted" ? "stopped" : value;
 }
 
+function statusCondition(status: SandboxStatus) {
+  if (status === "stopped") {
+    return inArray(sandboxes.status, ["stopped", "deleted"]);
+  }
+  if (status === "stopping") {
+    return inArray(sandboxes.status, ["stopping", "deleting"]);
+  }
+  return eq(sandboxes.status, status);
+}
+
 function utcDateKey(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
@@ -202,15 +213,25 @@ export async function getOrganizationUsageAnalytics(
   if (query.billingMode && query.billingMode !== "all") {
     filters.push(eq(providerCostSnapshots.billingMode, query.billingMode));
   }
-  if (query.status) filters.push(eq(sandboxes.status, query.status));
+  if (query.status) filters.push(statusCondition(query.status));
   if (query.costProvenance) {
     filters.push(eq(providerCostSnapshots.costProvenance, query.costProvenance));
   }
   if (query.sandboxId) filters.push(eq(sandboxes.publicId, query.sandboxId));
 
+  const periodBucket = sql<string>`case
+    when ${providerCostSnapshots.measuredThrough} >= ${from.toISOString()}
+      and ${providerCostSnapshots.measuredThrough} < ${through.toISOString()}
+      then 'current'
+    when ${providerCostSnapshots.measuredThrough} >= ${comparisonFrom.toISOString()}
+      and ${providerCostSnapshots.measuredThrough} < ${comparisonThrough.toISOString()}
+      then 'previous'
+    else 'other'
+  end`;
   const rows = (await db
     .select({
       date: sql<string>`(${providerCostSnapshots.measuredThrough} at time zone 'UTC')::date::text`,
+      period: periodBucket,
       sandboxId: sandboxes.publicId,
       projectId: projects.publicId,
       projectName: projects.name,
@@ -228,7 +249,8 @@ export async function getOrganizationUsageAnalytics(
     .innerJoin(projects, eq(projects.id, providerCostSnapshots.projectId))
     .where(and(...filters))
     .groupBy(
-      sql`(${providerCostSnapshots.measuredThrough} at time zone 'UTC')::date`,
+      sql`1`,
+      sql`2`,
       sandboxes.publicId,
       projects.publicId,
       projects.name,
@@ -252,7 +274,7 @@ export async function getOrganizationUsageAnalytics(
   if (query.billingMode && query.billingMode !== "all") {
     unavailableFilters.push(eq(sandboxes.billingMode, query.billingMode));
   }
-  if (query.status) unavailableFilters.push(eq(sandboxes.status, query.status));
+  if (query.status) unavailableFilters.push(statusCondition(query.status));
   if (query.sandboxId) unavailableFilters.push(eq(sandboxes.publicId, query.sandboxId));
   const [{ value: unavailableSandboxCount = 0 } = { value: 0 }] = query.costProvenance
     ? [{ value: 0 }]
@@ -272,7 +294,7 @@ export async function getOrganizationUsageAnalytics(
   if (query.billingMode && query.billingMode !== "all") {
     activityFilters.push(eq(providerCostSnapshots.billingMode, query.billingMode));
   }
-  if (query.status) activityFilters.push(eq(sandboxes.status, query.status));
+  if (query.status) activityFilters.push(statusCondition(query.status));
   if (query.costProvenance) {
     activityFilters.push(eq(providerCostSnapshots.costProvenance, query.costProvenance));
   }
@@ -302,8 +324,8 @@ export async function getOrganizationUsageAnalytics(
     .orderBy(desc(providerCostSnapshots.measuredThrough), desc(providerCostSnapshots.capturedAt))
     .limit(query.limit ?? 100);
 
-  const currentRows = rows.filter((row) => inPeriod(row.date, from, through));
-  const previousRows = rows.filter((row) => inPeriod(row.date, comparisonFrom, comparisonThrough));
+  const currentRows = rows.filter((row) => row.period === "current");
+  const previousRows = rows.filter((row) => row.period === "previous");
   const currentTotal = currentRows.reduce((total, row) => total + toMicrousd(row.costMicrousd), 0n);
   const previousTotal = previousRows.reduce(
     (total, row) => total + toMicrousd(row.costMicrousd),

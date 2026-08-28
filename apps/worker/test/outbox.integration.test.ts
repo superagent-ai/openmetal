@@ -640,7 +640,7 @@ describe("worker outbox", () => {
     expect(Number(unchanged?.balance_microusd)).toBe(750_000);
   });
 
-  it("corrects decreased usage, skips BYOK, tops up, and stops managed sandboxes at zero", async () => {
+  it("observes BYOK cost without charging, corrects usage, tops up, and enforces spend", async () => {
     const user = await createConfirmedUser(env);
     users.push(user.user.id);
     const orgId = crypto.randomUUID();
@@ -777,6 +777,25 @@ describe("worker outbox", () => {
       (row) => row.status === "succeeded",
       { e2b: provider },
     );
+    const [byokUsage] = await database.sql`
+      select provider_cost_microusd
+      from metal.sandboxes
+      where id = ${byokId}
+    `;
+    expect(Number(byokUsage?.provider_cost_microusd)).toBe(300_000);
+    const [byokSnapshot] = await database.sql`
+      select billing_mode, cost_delta_microusd
+      from metal.provider_cost_snapshots
+      where sandbox_id = ${byokId}
+    `;
+    expect(byokSnapshot?.billing_mode).toBe("byok");
+    expect(Number(byokSnapshot?.cost_delta_microusd)).toBe(300_000);
+    const [byokCharge] = await database.sql`
+      select count(*)::int as count
+      from metal.usage_charges
+      where sandbox_id = ${byokId}
+    `;
+    expect(Number(byokCharge?.count)).toBe(0);
     const [afterCharge] = await database.sql`
       select balance_microusd from metal.billing_accounts where organization_id = ${orgId}
     `;

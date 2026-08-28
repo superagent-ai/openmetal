@@ -374,6 +374,10 @@ export class VercelSandboxProvider implements SandboxProvider {
       amountMicrousd,
       providerOrganizationId: this.teamId ?? this.projectId,
       measuredThrough: session.stoppedAt ? new Date(session.stoppedAt) : input.to,
+      provenance: "estimated_rate_card",
+      confidence: "medium",
+      source: "vercel-session-usage",
+      rateCardVersion: "2026-08-04",
       raw: {
         source: "vercel-session-usage",
         rateCardVersion: "2026-08-04",

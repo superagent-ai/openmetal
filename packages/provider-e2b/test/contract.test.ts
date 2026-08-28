@@ -165,6 +165,48 @@ it("accepts the current E2B lifecycle envelope and snake-case event fields", asy
 
   expect(cost?.amountMicrousd).toBe(16n);
   expect(cost?.measuredThrough).toEqual(new Date("2026-08-27T10:00:02.000Z"));
+  expect(cost).toMatchObject({
+    provenance: "provider_metered",
+    confidence: "medium",
+    source: "e2b-lifecycle-events",
+    rateCardVersion: "2026-08-21",
+  });
+});
+
+it("marks the active E2B runtime fallback as rate-card estimated", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.includes("/events/sandboxes/sandbox-1")) {
+      return Response.json({ events: [] });
+    }
+    if (url.endsWith("/sandboxes/sandbox-1")) {
+      return Response.json({
+        sandboxID: "sandbox-1",
+        clientID: "client-1",
+        templateID: "base",
+        state: "running",
+        startedAt: "2026-08-27T10:00:00.000Z",
+        cpuCount: 1,
+        memoryMB: 1_024,
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new E2BSandboxProvider({ apiKey: "test", fetchImpl });
+
+  const cost = await provider.getCost({
+    providerResourceId: "sandbox-1",
+    from: new Date("2026-08-27T10:00:00.000Z"),
+    to: new Date("2026-08-27T10:00:01.000Z"),
+  });
+
+  expect(cost).toMatchObject({
+    amountMicrousd: 19n,
+    provenance: "estimated_rate_card",
+    confidence: "low",
+    source: "e2b-running-sandbox-estimate",
+    rateCardVersion: "2026-08-21",
+  });
 });
 
 it("returns no E2B cost while lifecycle events are not yet available", async () => {

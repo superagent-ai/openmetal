@@ -42,6 +42,22 @@ Metal charges the saved payment method off session. A declined payment or requir
 
 Managed sandbox creation requires a balance greater than zero. There is no estimated hold, so delayed provider metering can produce a temporary negative balance. When a durable charge leaves the balance at zero or below and automatic top up cannot run, Metal stops managed sandboxes. BYOK sandboxes are not charged and are not stopped by this path.
 
+## Usage analytics
+
+The organization Usage view reports compute cost by day, provider, project, sandbox, and billing
+mode. Managed cost is the amount deducted from Metal credits. BYOK cost is observational only and
+never affects the Metal balance.
+
+Every cost snapshot records its source:
+
+- Provider reported means the provider returned a monetary cost.
+- Provider metered means the provider returned usage quantities and Metal applied a versioned rate.
+- Rate estimate means Metal calculated cost from runtime evidence and a published rate card.
+
+Provider reported values can still lag or differ from a final invoice because of discounts, taxes,
+or delayed billing. Unsupported providers remain marked unavailable instead of receiving a
+fabricated estimate.
+
 ## Provider eligibility
 
 Managed routing skips providers that do not expose durable cost evidence. BYOK continues to use those providers because the customer pays the provider directly.

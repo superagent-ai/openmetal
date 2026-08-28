@@ -37,3 +37,23 @@ it("declares the CodeSandbox provider contract", () => {
   expect(provider.exposeHttpEndpoint).toBeUndefined();
   expect(provider.revokeHttpEndpoint).toBeUndefined();
 });
+
+it("marks CodeSandbox runtime calculations as rate-card estimated", async () => {
+  const provider = new CodeSandboxProvider({ apiKey: "test" });
+  const startedAt = "2026-08-27T10:00:00.000Z";
+
+  const cost = await provider.getCost({
+    providerResourceId: "sandbox-1",
+    providerMetadata: { startedAt },
+    from: new Date(startedAt),
+    to: new Date("2026-08-27T10:01:00.000Z"),
+  });
+
+  expect(cost).toMatchObject({
+    amountMicrousd: 2_477n,
+    provenance: "estimated_rate_card",
+    confidence: "low",
+    source: "codesandbox-vm-runtime-published-credit-rate",
+    raw: { startedAt },
+  });
+});

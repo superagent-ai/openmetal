@@ -19,6 +19,33 @@ it("declares the Blaxel provider contract", () => {
   });
 });
 
+it("marks Blaxel billing totals as provider reported", async () => {
+  const metrics = {
+    summary: { totalCost: 1.25 },
+    data: [{ resourceName: "sbx" }],
+  };
+  const provider = new BlaxelSandboxProvider({
+    apiKey: "test",
+    workspace: "workspace",
+    accountId: "account-1",
+    fetchImpl: vi.fn().mockResolvedValue(json(metrics)),
+  });
+
+  const cost = await provider.getCost({
+    providerResourceId: "sbx",
+    from: new Date("2026-08-27T10:00:00.000Z"),
+    to: new Date("2026-08-27T11:00:00.000Z"),
+  });
+
+  expect(cost).toMatchObject({
+    amountMicrousd: 1_250_000n,
+    provenance: "provider_reported",
+    confidence: "high",
+    source: "blaxel-billing-explorer",
+    raw: { metrics },
+  });
+});
+
 it("normalizes Blaxel runtime process, file, and preview responses", async () => {
   let deleted = false;
   const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {

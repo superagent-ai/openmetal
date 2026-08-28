@@ -584,6 +584,9 @@ export class BlaxelSandboxProvider implements SandboxProvider {
       amountMicrousd: BigInt(Math.round(metrics.summary.totalCost * 1_000_000)),
       providerOrganizationId: accountId,
       measuredThrough: input.to,
+      provenance: "provider_reported",
+      confidence: "high",
+      source: "blaxel-billing-explorer",
       raw: {
         source: "blaxel-billing-explorer",
         metrics,

@@ -65,6 +65,7 @@ import {
   OrganizationBillingSchema,
   UpdateAutoTopupRequestSchema,
 } from "./billing.js";
+import { OrganizationUsageSchema } from "./usage.js";
 
 type OpenApiObject = Record<string, unknown>;
 
@@ -123,6 +124,7 @@ export function buildOpenApiDocument(): OpenApiObject {
       { name: "organizations", description: "Organization lifecycle and access." },
       { name: "members", description: "Organization members and invitations." },
       { name: "billing", description: "Credits, checkout, and automatic top ups." },
+      { name: "usage", description: "Organization compute cost analytics." },
       { name: "projects", description: "Organization projects." },
       {
         name: "provider credentials",
@@ -195,6 +197,7 @@ export function buildOpenApiDocument(): OpenApiObject {
         UpdateAutoTopupRequest: json(UpdateAutoTopupRequestSchema),
         OrganizationBilling: json(OrganizationBillingSchema),
         BillingSetupResponse: json(BillingSetupResponseSchema),
+        OrganizationUsage: json(OrganizationUsageSchema),
         ProjectId: json(ProjectIdSchema),
         SandboxId: {
           type: "string",
@@ -539,6 +542,83 @@ export function buildOpenApiDocument(): OpenApiObject {
             "200": response("Organization billing summary", "OrganizationBilling"),
             "401": errorResponse("Authentication required"),
             "403": errorResponse("Access denied"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/usage": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        get: {
+          operationId: "getOrganizationUsage",
+          tags: ["usage"],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "from",
+              in: "query",
+              schema: { type: "string", format: "date-time" },
+            },
+            {
+              name: "through",
+              in: "query",
+              schema: { type: "string", format: "date-time" },
+            },
+            {
+              name: "project_id",
+              in: "query",
+              schema: ref("ProjectId"),
+            },
+            {
+              name: "provider",
+              in: "query",
+              schema: {
+                type: "string",
+                enum: [
+                  "blaxel",
+                  "cloudflare",
+                  "codesandbox",
+                  "daytona",
+                  "e2b",
+                  "modal",
+                  "northflank",
+                  "runloop",
+                  "vercel",
+                ],
+              },
+            },
+            {
+              name: "billing_mode",
+              in: "query",
+              schema: { type: "string", enum: ["all", "managed", "byok"], default: "all" },
+            },
+            {
+              name: "status",
+              in: "query",
+              schema: { type: "string" },
+            },
+            {
+              name: "cost_provenance",
+              in: "query",
+              schema: {
+                type: "string",
+                enum: ["provider_reported", "provider_metered", "estimated_rate_card", "unknown"],
+              },
+            },
+            {
+              name: "sandbox_id",
+              in: "query",
+              schema: ref("SandboxId"),
+            },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+            },
+          ],
+          responses: {
+            "200": response("Organization compute usage", "OrganizationUsage"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "422": errorResponse("Invalid request"),
           },
         },
       },

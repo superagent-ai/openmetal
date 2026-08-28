@@ -473,11 +473,7 @@ async function provisionSandbox(
           .returning();
         if (updated) {
           await recordSandboxEvent(tx, updated, "sandbox.ready", { provider: providerName });
-          if (
-            !providerCredentialId &&
-            provider.capabilities.cost &&
-            provider.name !== "northflank"
-          ) {
+          if (provider.capabilities.cost && provider.name !== "northflank") {
             await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
           }
           await tx
@@ -618,7 +614,7 @@ async function destroySandbox(
       await recordSandboxEvent(tx, updated, "sandbox.deleted", {
         provider: provider.name,
       });
-      if (sandbox.billingMode === "managed" && provider.capabilities.cost) {
+      if (provider.capabilities.cost) {
         const availableAt =
           provider.name === "codesandbox" ||
           provider.name === "e2b" ||
@@ -674,7 +670,7 @@ async function pauseSandbox(
       await recordSandboxEvent(tx, updated, "sandbox.paused", {
         provider: provider.name,
       });
-      if (sandbox.billingMode === "managed" && provider.capabilities.cost) {
+      if (provider.capabilities.cost) {
         const final = provider.name === "codesandbox" || provider.name === "northflank";
         await scheduleCostSync(
           tx,
@@ -726,6 +722,9 @@ async function resumeSandbox(
       await recordSandboxEvent(tx, updated, "sandbox.resumed", {
         provider: provider.name,
       });
+      if (provider.capabilities.cost && provider.name !== "northflank") {
+        await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
+      }
     }
   });
   await setOperationState(db, operationId, "succeeded");
@@ -742,7 +741,7 @@ async function syncSandboxCost(
     .from(sandboxes)
     .where(eq(sandboxes.id, sandboxId))
     .then((rows) => rows[0]);
-  if (!sandbox?.providerResourceId || sandbox.billingMode === "byok") {
+  if (!sandbox?.providerResourceId) {
     return;
   }
   const measuredAt = new Date();
@@ -756,7 +755,7 @@ async function syncSandboxCost(
         ? sandbox.pausedAt
         : (sandbox.deletedAt ?? sandbox.pausedAt ?? measuredAt),
   });
-  if (!cost && final) {
+  if (!cost && final && sandbox.billingMode === "managed") {
     throw new Error("final provider cost is not available yet");
   }
   await withTransaction(db, async (tx) => {
@@ -769,8 +768,15 @@ async function syncSandboxCost(
           projectId: sandbox.projectId,
           provider: provider.name,
           providerResourceId: sandbox.providerResourceId!,
+          billingMode: sandbox.billingMode,
           amountMicrousd: cost.amountMicrousd,
+          costDeltaMicrousd: cost.amountMicrousd - (sandbox.providerCostMicrousd ?? 0n),
+          measuredFrom: sandbox.providerCostMeasuredThrough,
           measuredThrough: cost.measuredThrough,
+          costProvenance: cost.provenance,
+          costConfidence: cost.confidence,
+          costSource: cost.source,
+          rateCardVersion: cost.rateCardVersion,
           rawPayload: cost.raw,
         })
         .onConflictDoNothing();
@@ -803,7 +809,7 @@ async function syncSandboxCost(
           cost_updated_at: measuredAt.toISOString(),
         });
       }
-      if (snapshot) {
+      if (snapshot && sandbox.billingMode === "managed") {
         await chargeUsageDelta(tx, {
           organizationId: sandbox.organizationId,
           projectId: sandbox.projectId,
@@ -2322,6 +2328,7 @@ async function scheduleMissingSandboxCosts(db: MetalDb, providers: SandboxProvid
       ),
     );
   const activeSandboxIds = new Set<string>();
+  const credentialProviders = new Map<string, SandboxProvider>();
   for (const job of activeJobs) {
     const parsed = OutboxJobPayloadSchema.safeParse(job.payload);
     if (parsed.success && parsed.data.job_type === "sandbox.cost.sync") {
@@ -2334,13 +2341,13 @@ async function scheduleMissingSandboxCosts(db: MetalDb, providers: SandboxProvid
       id: sandboxes.id,
       status: sandboxes.status,
       provider: sandboxes.provider,
+      providerCredentialId: sandboxes.providerCredentialId,
       pausedAt: sandboxes.pausedAt,
       deletedAt: sandboxes.deletedAt,
     })
     .from(sandboxes)
     .where(
       and(
-        eq(sandboxes.billingMode, "managed"),
         isNotNull(sandboxes.providerResourceId),
         sql`(
           ${sandboxes.providerCostUpdatedAt} is null
@@ -2367,7 +2374,14 @@ async function scheduleMissingSandboxCosts(db: MetalDb, providers: SandboxProvid
     if (activeSandboxIds.has(sandbox.id)) {
       continue;
     }
-    const provider = providers[sandbox.provider as SandboxProviderName];
+    let provider = providers[sandbox.provider as SandboxProviderName];
+    if (sandbox.providerCredentialId) {
+      provider = credentialProviders.get(sandbox.providerCredentialId);
+      if (!provider) {
+        provider = await getByokProviderByCredentialId(db, sandbox.providerCredentialId);
+        credentialProviders.set(sandbox.providerCredentialId, provider);
+      }
+    }
     if (!provider?.capabilities.cost) {
       continue;
     }

@@ -87,6 +87,7 @@ import {
   startOrganizationCheckout,
   startPaymentMethodSetup,
 } from "./billing.js";
+import { readOrganizationUsage } from "./usage.js";
 import {
   cancelProcess,
   createEndpoint,
@@ -517,6 +518,18 @@ export async function buildApp(
       (request.params as { organization_id: string }).organization_id,
     );
     return readOrganizationBilling(db.db, stripe, { userId: principal.userId, organizationId });
+  });
+
+  app.get(`/${API_VERSION}/organizations/:organization_id/usage`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    return readOrganizationUsage(db.db, {
+      userId: principal.userId,
+      organizationId,
+      query: request.query,
+    });
   });
 
   app.get(`/${API_VERSION}/organizations/:organization_id/billing/quote`, async (request) => {

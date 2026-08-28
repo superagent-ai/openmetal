@@ -68,9 +68,15 @@ export async function chargeUsageDelta(
     return { charged: false, balanceMicrousd: await organizationBalance(tx, input.organizationId) };
   }
   const [sandbox] = await tx
-    .select({ customerChargedMicrousd: sandboxes.customerChargedMicrousd })
+    .select({
+      billingMode: sandboxes.billingMode,
+      customerChargedMicrousd: sandboxes.customerChargedMicrousd,
+    })
     .from(sandboxes)
     .where(eq(sandboxes.id, input.sandboxId));
+  if (sandbox?.billingMode === "byok") {
+    return { charged: false, balanceMicrousd: await organizationBalance(tx, input.organizationId) };
+  }
   const previousChargedMicrousd = toMicrousd(sandbox?.customerChargedMicrousd);
   const delta = toMicrousd(input.currentCostMicrousd) - previousChargedMicrousd;
   if (delta === 0n) {

@@ -12,4 +12,5 @@ export * from "./sandboxes.js";
 export * from "./operations.js";
 export * from "./runtime.js";
 export * from "./billing.js";
+export * from "./usage.js";
 export { buildOpenApiDocument } from "./openapi.js";

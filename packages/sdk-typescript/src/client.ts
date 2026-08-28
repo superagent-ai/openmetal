@@ -10,6 +10,7 @@ import {
   DeleteFileRequestSchema,
   ListFilesRequestSchema,
   OrganizationBillingSchema,
+  OrganizationUsageSchema,
   OrganizationInvitationRevokeResponseSchema,
   OrganizationInvitationSchema,
   OrganizationMemberDeleteResponseSchema,
@@ -33,6 +34,7 @@ import {
   WriteFileRequestSchema,
   type CreateSandboxRequest,
   type InvitationRole,
+  type OrganizationUsageQuery,
   type Operation,
   type Process,
   type ProcessEvent,
@@ -378,6 +380,26 @@ export class MetalClient {
         method: "POST",
         path: `/v1/organizations/${organizationId}/billing/payment-method`,
         schema: BillingSetupResponseSchema,
+      }),
+  };
+
+  readonly usage = {
+    get: (organizationId: string, query: OrganizationUsageQuery = {}) =>
+      this.request({
+        method: "GET",
+        path: `/v1/organizations/${organizationId}/usage`,
+        query: {
+          from: query.from,
+          through: query.through,
+          project_id: query.project_id,
+          provider: query.provider,
+          billing_mode: query.billing_mode,
+          status: query.status,
+          cost_provenance: query.cost_provenance,
+          sandbox_id: query.sandbox_id,
+          limit: typeof query.limit === "number" ? query.limit : undefined,
+        },
+        schema: OrganizationUsageSchema,
       }),
   };
 

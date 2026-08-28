@@ -32,8 +32,10 @@ accidentally use Metal's managed account.
 - Removing a credential disables it for new routing and hides it from organization configuration
   lists. The encrypted value remains available only for lifecycle operations on existing BYOK
   sandboxes. Reconfiguring the provider reactivates the same credential record.
-- BYOK sandboxes do not create Metal provider cost snapshots or provider cost synchronization
-  jobs. The upstream provider bills the organization directly.
+- BYOK sandboxes create observational provider cost snapshots when the provider exposes cost or
+  usage evidence. These snapshots power organization usage analytics but never create Metal ledger
+  charges, trigger automatic top ups, or participate in spend limit enforcement. The upstream
+  provider bills the organization directly.
 - Managed credentials and Metal credits remain the default when an organization has not configured
   that provider.
 - Credential configuration and rotation create append only organization domain events containing
@@ -65,8 +67,8 @@ submitted credential.
   are reported when a sandbox operation first uses it.
 - Removing credentials stops BYOK routing for new sandboxes but retains encrypted lifecycle access
   for existing sandboxes.
-- Provider account charges and quotas remain outside Metal. Metal does not ingest upstream cost for
-  BYOK sandboxes.
+- Provider account charges and quotas remain outside Metal. Observational BYOK cost can lag or
+  differ from the final provider invoice, and unsupported providers remain explicitly unavailable.
 - BYOK is optional. It does not change managed routing or billing for providers without an
   organization credential.
 

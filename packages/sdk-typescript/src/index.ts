@@ -16,6 +16,8 @@ export type {
   InvitationRole,
   ListFilesRequest,
   OrganizationBilling,
+  OrganizationUsage,
+  OrganizationUsageQuery,
   OrganizationInvitation,
   OrganizationMember,
   OrganizationMembersResponse,

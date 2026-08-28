@@ -237,6 +237,7 @@ export const sandboxes = metalSchema.table(
   },
   (table) => [
     index("sandboxes_project_created_idx").on(table.projectId, table.createdAt),
+    index("sandboxes_organization_created_idx").on(table.organizationId, table.createdAt),
     uniqueIndex("sandboxes_public_id_key").on(table.publicId),
     uniqueIndex("sandboxes_provider_resource_key")
       .on(table.provider, table.providerResourceId)
@@ -524,11 +525,21 @@ export const providerCostSnapshots = metalSchema.table(
       .references(() => projects.id),
     provider: text("provider").notNull(),
     providerResourceId: text("provider_resource_id").notNull(),
+    billingMode: text("billing_mode").notNull().default("managed"),
     amountMicrousd: bigint("amount_microusd", { mode: "bigint" }).notNull(),
+    costDeltaMicrousd: bigint("cost_delta_microusd", { mode: "bigint" }).notNull(),
+    measuredFrom: timestamp("measured_from", {
+      withTimezone: true,
+      mode: "date",
+    }),
     measuredThrough: timestamp("measured_through", {
       withTimezone: true,
       mode: "date",
     }).notNull(),
+    costProvenance: text("cost_provenance").notNull().default("unknown"),
+    costConfidence: text("cost_confidence").notNull().default("unknown"),
+    costSource: text("cost_source"),
+    rateCardVersion: text("rate_card_version"),
     rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull(),
     capturedAt: timestamp("captured_at", { withTimezone: true, mode: "date" })
       .notNull()
@@ -536,6 +547,10 @@ export const providerCostSnapshots = metalSchema.table(
   },
   (table) => [
     index("provider_cost_snapshots_sandbox_captured_idx").on(table.sandboxId, table.capturedAt),
+    index("provider_cost_snapshots_organization_measured_idx").on(
+      table.organizationId,
+      table.measuredThrough,
+    ),
     uniqueIndex("provider_cost_snapshots_unique_measurement").on(
       table.sandboxId,
       table.amountMicrousd,
@@ -851,6 +866,7 @@ export const usageCharges = metalSchema.table(
   (table) => [
     uniqueIndex("usage_charges_snapshot_id_key").on(table.snapshotId),
     index("usage_charges_sandbox_created_idx").on(table.sandboxId, table.createdAt),
+    index("usage_charges_organization_created_idx").on(table.organizationId, table.createdAt),
   ],
 );
 

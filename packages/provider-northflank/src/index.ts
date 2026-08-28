@@ -320,6 +320,9 @@ export class NorthflankSandboxProvider implements SandboxProvider {
       amountMicrousd: BigInt(Math.round(totalCents * 10_000)),
       providerOrganizationId: this.teamId ?? this.projectId,
       measuredThrough: input.to,
+      provenance: "provider_reported",
+      confidence: delayedAt ? "medium" : "high",
+      source: "northflank-hourly-billing-usage",
       raw: {
         source: "northflank-hourly-billing-usage",
         projectId: this.projectId,

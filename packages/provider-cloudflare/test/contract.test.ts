@@ -22,6 +22,58 @@ it("declares the Cloudflare provider contract", () => {
   expect(provider.capabilities.runtime?.httpEndpoints).toBeUndefined();
 });
 
+it.each([
+  {
+    channel: "usage",
+    provenance: "provider_metered",
+    confidence: "medium",
+    source: "cloudflare-containers-usage",
+  },
+  {
+    channel: "metrics",
+    provenance: "estimated_rate_card",
+    confidence: "low",
+    source: "cloudflare-containers-metrics-estimate",
+  },
+] as const)(
+  "maps Cloudflare $channel cost provenance",
+  async ({ channel, provenance, confidence, source }) => {
+    const row = {
+      dimensions: { instanceId: "instance-1", region: "nam" },
+      sum: { cpuTimeSec: 10, allocatedMemory: 0, allocatedDisk: 0, txBytes: 0 },
+    };
+    const provider = new CloudflareSandboxProvider({
+      apiKey: "test",
+      apiUrl: "https://bridge.example.com",
+      accountId: "account-1",
+      analyticsToken: "analytics-token",
+      fetchImpl: vi.fn().mockResolvedValue(
+        Response.json({
+          data: {
+            viewer: {
+              accounts: [{ usage: channel === "usage" ? [row] : [], metrics: [row] }],
+            },
+          },
+        }),
+      ),
+    });
+
+    const cost = await provider.getCost({
+      providerResourceId: "sandbox-1",
+      from: new Date("2026-08-27T10:00:00.000Z"),
+      to: new Date("2026-08-27T11:00:00.000Z"),
+    });
+
+    expect(cost).toMatchObject({
+      provenance,
+      confidence,
+      source,
+      rateCardVersion: "2026-04-21",
+      raw: { rows: [row] },
+    });
+  },
+);
+
 it("normalizes the supported Cloudflare bridge exec and file routes", async () => {
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {

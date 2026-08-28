@@ -8,6 +8,7 @@ import {
   HealthResponseSchema,
   ListEventsQuerySchema,
   OpaqueIdSchema,
+  OrganizationUsageQuerySchema,
   ProviderCredentialInputSchema,
   ReadinessResponseSchema,
   UpdateAutoTopupRequestSchema,
@@ -222,6 +223,26 @@ describe("contract parsing", () => {
     ).toBe("createBillingCheckout");
     expect(document.paths["/v1/webhooks/stripe"]?.post?.operationId).toBe("stripeWebhook");
     expect(document.paths["/v1/sandboxes"]?.post?.responses?.["402"]).toBeTruthy();
+    expect(document.paths["/v1/organizations/{organization_id}/usage"]?.get?.operationId).toBe(
+      "getOrganizationUsage",
+    );
+  });
+
+  it("validates organization usage filters", () => {
+    expect(
+      OrganizationUsageQuerySchema.parse({
+        from: "2026-08-01T00:00:00.000Z",
+        through: "2026-08-27T00:00:00.000Z",
+        provider: "e2b",
+        billing_mode: "byok",
+      }),
+    ).toMatchObject({ provider: "e2b", billing_mode: "byok" });
+    expect(() =>
+      OrganizationUsageQuerySchema.parse({
+        from: "2026-08-28T00:00:00.000Z",
+        through: "2026-08-27T00:00:00.000Z",
+      }),
+    ).toThrow();
   });
 
   it("accepts automatic top up settings", () => {

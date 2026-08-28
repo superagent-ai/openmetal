@@ -4,6 +4,10 @@ import { SandboxProviderSchema } from "./sandboxes.js";
 
 const SecretSchema = z.string().min(1).max(16_384);
 const AccountValueSchema = z.string().trim().min(1).max(500);
+const RateUsdSchema = z
+  .string()
+  .trim()
+  .regex(/^\d+(?:\.\d{1,6})?$/);
 
 export const ProviderCredentialInputSchema = z.discriminatedUnion("provider", [
   z.object({
@@ -23,6 +27,8 @@ export const ProviderCredentialInputSchema = z.discriminatedUnion("provider", [
     provider: z.literal("codesandbox"),
     api_key: SecretSchema,
     workspace_id: AccountValueSchema.optional(),
+    vm_tier: z.enum(["Pico", "Nano", "Micro", "Small", "Medium", "Large", "XLarge"]).optional(),
+    credit_rate_usd: RateUsdSchema.optional(),
   }),
   z.object({
     provider: z.literal("daytona"),
@@ -49,6 +55,12 @@ export const ProviderCredentialInputSchema = z.discriminatedUnion("provider", [
   z.object({
     provider: z.literal("runloop"),
     api_key: SecretSchema,
+    resource_size: z
+      .enum(["X_SMALL", "SMALL", "MEDIUM", "LARGE", "X_LARGE", "XX_LARGE"])
+      .optional(),
+    vcpu_hour_rate_usd: RateUsdSchema.optional(),
+    memory_gb_hour_rate_usd: RateUsdSchema.optional(),
+    disk_gb_hour_rate_usd: RateUsdSchema.optional(),
   }),
   z.object({
     provider: z.literal("vercel"),

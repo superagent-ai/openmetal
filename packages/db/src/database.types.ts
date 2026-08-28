@@ -706,37 +706,58 @@ export type Database = {
       provider_cost_snapshots: {
         Row: {
           amount_microusd: number
+          billing_mode: string
           captured_at: string
+          cost_confidence: string
+          cost_delta_microusd: number
+          cost_provenance: string
+          cost_source: string | null
           id: string
+          measured_from: string | null
           measured_through: string
           organization_id: string
           project_id: string
           provider: string
           provider_resource_id: string
+          rate_card_version: string | null
           raw_payload: Json
           sandbox_id: string
         }
         Insert: {
           amount_microusd: number
+          billing_mode?: string
           captured_at?: string
+          cost_confidence?: string
+          cost_delta_microusd: number
+          cost_provenance?: string
+          cost_source?: string | null
           id?: string
+          measured_from?: string | null
           measured_through: string
           organization_id: string
           project_id: string
           provider: string
           provider_resource_id: string
+          rate_card_version?: string | null
           raw_payload: Json
           sandbox_id: string
         }
         Update: {
           amount_microusd?: number
+          billing_mode?: string
           captured_at?: string
+          cost_confidence?: string
+          cost_delta_microusd?: number
+          cost_provenance?: string
+          cost_source?: string | null
           id?: string
+          measured_from?: string | null
           measured_through?: string
           organization_id?: string
           project_id?: string
           provider?: string
           provider_resource_id?: string
+          rate_card_version?: string | null
           raw_payload?: Json
           sandbox_id?: string
         }

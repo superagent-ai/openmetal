@@ -763,7 +763,10 @@ export class E2BSandboxProvider implements SandboxProvider {
       }
     }
 
-    if (detail?.state === "running" && detail.startedAt && detail.cpuCount && detail.memoryMB) {
+    const usedRunningEstimate = Boolean(
+      detail?.state === "running" && detail.startedAt && detail.cpuCount && detail.memoryMB,
+    );
+    if (usedRunningEstimate && detail?.startedAt && detail.cpuCount && detail.memoryMB) {
       const startedAt = new Date(detail.startedAt);
       const seconds = Math.max(0, (input.to.getTime() - startedAt.getTime()) / 1_000);
       amount += this.executionCostMicrousd(seconds, detail.cpuCount, detail.memoryMB);
@@ -776,6 +779,10 @@ export class E2BSandboxProvider implements SandboxProvider {
       amountMicrousd: BigInt(Math.round(amount)),
       providerOrganizationId: input.providerOrganizationId ?? "e2b",
       measuredThrough,
+      provenance: usedRunningEstimate ? "estimated_rate_card" : "provider_metered",
+      confidence: usedRunningEstimate ? "low" : "medium",
+      source: usedRunningEstimate ? "e2b-running-sandbox-estimate" : "e2b-lifecycle-events",
+      rateCardVersion: "2026-08-21",
       raw: {
         source: "e2b-lifecycle-events",
         rateCardVersion: "2026-08-21",

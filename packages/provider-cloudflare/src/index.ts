@@ -369,6 +369,13 @@ export class CloudflareSandboxProvider implements SandboxProvider {
       amountMicrousd: BigInt(Math.round(amountMicrousd)),
       providerOrganizationId: this.accountId,
       measuredThrough: input.to,
+      provenance: usageRows.length > 0 ? "provider_metered" : "estimated_rate_card",
+      confidence: usageRows.length > 0 ? "medium" : "low",
+      source:
+        usageRows.length > 0
+          ? "cloudflare-containers-usage"
+          : "cloudflare-containers-metrics-estimate",
+      rateCardVersion: "2026-04-21",
       raw: {
         source:
           usageRows.length > 0

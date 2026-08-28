@@ -467,6 +467,9 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       amountMicrousd: BigInt(Math.round(row.totalPrice * 1_000_000)),
       providerOrganizationId: organizationId,
       measuredThrough: row.lastEnd ? new Date(row.lastEnd) : input.to,
+      provenance: "provider_reported",
+      confidence: "high",
+      source: "daytona-analytics-sandbox-usage",
       raw: row,
     };
   }

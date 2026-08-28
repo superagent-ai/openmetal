@@ -54,10 +54,19 @@ export type ProviderSandboxCostInput = {
   signal?: AbortSignal;
 };
 
+export type ProviderCostProvenance =
+  "provider_reported" | "provider_metered" | "estimated_rate_card";
+
+export type ProviderCostConfidence = "high" | "medium" | "low";
+
 export type ProviderSandboxCost = {
   amountMicrousd: bigint;
   providerOrganizationId: string;
   measuredThrough: Date;
+  provenance: ProviderCostProvenance;
+  confidence: ProviderCostConfidence;
+  source: string;
+  rateCardVersion?: string;
   raw: Record<string, unknown>;
 };
 

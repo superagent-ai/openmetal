@@ -31,6 +31,54 @@ it("declares the Runloop provider contract", () => {
   expect(provider.revokeHttpEndpoint).toBeUndefined();
 });
 
+it.each([
+  {
+    usageRatesMicrousd: { vcpuHour: 100n, memoryGbHour: 200n, diskGbHour: 300n },
+    provenance: "provider_metered",
+    confidence: "medium",
+    source: "runloop-resource-usage-oem-rate-card",
+  },
+  {
+    usageRatesMicrousd: undefined,
+    provenance: "estimated_rate_card",
+    confidence: "low",
+    source: "runloop-resource-usage-published-preset-rate",
+  },
+] as const)(
+  "maps Runloop $provenance cost provenance",
+  async ({ usageRatesMicrousd, provenance, confidence, source }) => {
+    const usage = {
+      id: "devbox-1",
+      total_active_seconds: 60,
+      total_elapsed_seconds: 60,
+      vcpu_seconds: 60,
+      memory_gb_seconds: 120,
+      disk_gb_seconds: 180,
+      start_time_ms: Date.parse("2026-08-27T10:00:00.000Z"),
+      end_time_ms: Date.parse("2026-08-27T10:01:00.000Z"),
+    };
+    const provider = new RunloopSandboxProvider({
+      apiKey: "test",
+      ...(usageRatesMicrousd ? { usageRatesMicrousd } : {}),
+      fetchImpl: vi.fn().mockResolvedValue(jsonResponse(usage)),
+    });
+
+    const cost = await provider.getCost({
+      providerResourceId: "devbox-1",
+      providerOrganizationId: "account-1",
+      from: new Date("2026-08-27T10:00:00.000Z"),
+      to: new Date("2026-08-27T10:01:00.000Z"),
+    });
+
+    expect(cost).toMatchObject({
+      provenance,
+      confidence,
+      source,
+      raw: { usage },
+    });
+  },
+);
+
 it("streams normalized command output and a terminal exit", async () => {
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

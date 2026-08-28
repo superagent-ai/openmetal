@@ -291,6 +291,9 @@ export class CodeSandboxProvider implements SandboxProvider {
       amountMicrousd: (BigInt(billedMinutes) * hourlyRate + 30n) / 60n,
       providerOrganizationId: input.providerOrganizationId ?? this.workspaceId,
       measuredThrough: input.to,
+      provenance: "estimated_rate_card",
+      confidence: "low",
+      source: "codesandbox-vm-runtime-published-credit-rate",
       raw: {
         source: "codesandbox-vm-runtime-published-credit-rate",
         vmTier: input.providerMetadata?.vmTier ?? this.vmTier,

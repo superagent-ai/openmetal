@@ -38,6 +38,13 @@ export {
   requirePositiveManagedBalance,
   scheduleAutoTopupEvaluation,
 } from "./usage.js";
+export {
+  getOrganizationUsageAnalytics,
+  type OrganizationUsageAnalytics,
+  type UsageBillingMode,
+  type UsageCostConfidence,
+  type UsageCostProvenance,
+} from "./analytics.js";
 export { evaluateAutoTopup, updateAutoTopupPolicy } from "./auto-topup.js";
 export { handleStripeWebhook } from "./webhooks.js";
 export { createStripeGateway, parseCheckoutSession, parsePaymentIntent } from "./stripe.js";

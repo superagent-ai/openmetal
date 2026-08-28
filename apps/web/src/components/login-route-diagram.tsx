@@ -162,11 +162,49 @@ export function LoginRouteDiagram() {
       aria-label="Claude Code, Cursor, Codex, Copilot and Pi all route through OpenMetal to reach E2B, Daytona, Modal, CodeSandbox, Runloop and Northflank"
     >
       <defs>
+        <pattern
+          id="loginRouteIsoGrid"
+          width="34"
+          height="20"
+          patternUnits="userSpaceOnUse"
+          patternTransform="translate(300 212)"
+        >
+          <path
+            d="M0 10 L17 0 L34 10 L17 20 Z"
+            fill="none"
+            stroke="var(--route-grid)"
+            strokeWidth="1"
+          />
+        </pattern>
         <radialGradient id="loginRouteHubGlow">
           <stop offset="0%" stopColor="var(--route-hub-glow)" stopOpacity="0.14" />
           <stop offset="100%" stopColor="var(--route-hub-glow)" stopOpacity="0" />
         </radialGradient>
+        <radialGradient id="loginRouteGridFade">
+          <stop offset="0%" stopColor="#fff" stopOpacity="1" />
+          <stop offset="42%" stopColor="#fff" stopOpacity="0.92" />
+          <stop offset="64%" stopColor="#fff" stopOpacity="0.55" />
+          <stop offset="82%" stopColor="#fff" stopOpacity="0.2" />
+          <stop offset="100%" stopColor="#fff" stopOpacity="0" />
+        </radialGradient>
+        <filter id="loginRouteGridSoften" x="-25%" y="-25%" width="150%" height="150%">
+          <feGaussianBlur stdDeviation="10" />
+        </filter>
+        <mask id="loginRouteGridMask">
+          <ellipse
+            cx="312"
+            cy="206"
+            rx="330"
+            ry="228"
+            fill="url(#loginRouteGridFade)"
+            filter="url(#loginRouteGridSoften)"
+          />
+        </mask>
       </defs>
+
+      <g mask="url(#loginRouteGridMask)">
+        <rect x="18" y="0" width="600" height="406" fill="url(#loginRouteIsoGrid)" />
+      </g>
 
       <path
         d="M361 27 L 414 58 L 250 153"

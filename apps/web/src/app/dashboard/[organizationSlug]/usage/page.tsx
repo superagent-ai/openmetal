@@ -1,33 +1,31 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { UsageView } from "@/components/usage-view";
 import { requireOrganizationBySlug } from "@/lib/dashboard-organizations";
+import { requireMetalSession } from "@/lib/metal-server";
+import { parseUsageFilters, usageQueryForFilters } from "@/lib/usage-filters";
 
 export default async function OrganizationUsagePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ organizationSlug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { organizationSlug } = await params;
+  const query = await searchParams;
   const organization = await requireOrganizationBySlug(organizationSlug);
+  const filters = parseUsageFilters(query);
+  const { metal } = await requireMetalSession();
+  const [usage, projectResponse] = await Promise.all([
+    metal.usage.get(organization.id, usageQueryForFilters(filters)),
+    metal.projects.list(organization.id),
+  ]);
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Usage</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Review compute usage and provider costs for {organization.name}.
-        </p>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Organization usage</CardTitle>
-          <CardDescription>Consolidated usage across projects will appear here.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Current resource costs are available from each project&apos;s Resources table.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+    <UsageView
+      organizationSlug={organization.slug}
+      usage={usage}
+      projects={projectResponse.projects}
+      filters={filters}
+    />
   );
 }

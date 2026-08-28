@@ -42,6 +42,33 @@ it("reconciles a missing Daytona sandbox as absent", async () => {
   await expect(provider.reconcileCreate("sbx_missing")).resolves.toBeNull();
 });
 
+it("marks Daytona analytics prices as provider reported", async () => {
+  const row = {
+    sandboxId: "sandbox-1",
+    totalPrice: 0.75,
+    lastEnd: "2026-08-27T11:00:00.000Z",
+  };
+  const provider = new DaytonaSandboxProvider({
+    apiKey: "test",
+    organizationId: "org-1",
+    fetchImpl: vi.fn().mockResolvedValue(Response.json([row])),
+  });
+
+  const cost = await provider.getCost({
+    providerResourceId: "sandbox-1",
+    from: new Date("2026-08-27T10:00:00.000Z"),
+    to: new Date("2026-08-27T11:00:00.000Z"),
+  });
+
+  expect(cost).toMatchObject({
+    amountMicrousd: 750_000n,
+    provenance: "provider_reported",
+    confidence: "high",
+    source: "daytona-analytics-sandbox-usage",
+    raw: row,
+  });
+});
+
 it("executes through a Daytona session with separate buffered stdout and stderr", async () => {
   const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
     const url = String(input);

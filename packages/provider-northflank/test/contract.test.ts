@@ -21,6 +21,32 @@ it("declares the Northflank provider contract", () => {
   expect(provider.revokeHttpEndpoint).toBeUndefined();
 });
 
+it("marks Northflank hourly billing totals as provider reported", async () => {
+  const hourlyPayload = {
+    resources: [{ id: "service-1", price: { total: 2.5 } }],
+    pagination: { hasNextPage: false },
+  };
+  const provider = new NorthflankSandboxProvider({
+    apiToken: "test",
+    projectId: "project-1",
+    fetchImpl: vi.fn().mockResolvedValue(json(hourlyPayload)),
+  });
+
+  const cost = await provider.getCost({
+    providerResourceId: "service-1",
+    from: new Date("2026-08-27T10:00:00.000Z"),
+    to: new Date("2026-08-27T10:00:00.000Z"),
+  });
+
+  expect(cost).toMatchObject({
+    amountMicrousd: 25_000n,
+    provenance: "provider_reported",
+    confidence: "high",
+    source: "northflank-hourly-billing-usage",
+    raw: { hours: [hourlyPayload] },
+  });
+});
+
 it("starts a requested command for endpoint-only sandboxes", async () => {
   let createBody: Record<string, unknown> | undefined;
   const ready = {

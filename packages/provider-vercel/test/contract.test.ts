@@ -33,6 +33,32 @@ it("declares the Vercel provider contract", () => {
   expect(provider.cancelExec).toBeUndefined();
 });
 
+it("marks Vercel session calculations as rate-card estimated", async () => {
+  const evidence = sandboxResponse();
+  const session = {
+    ...evidence.session,
+    duration: 60_000,
+    activeCpuDurationMs: 30_000,
+    stoppedAt: Date.parse("2026-08-27T10:01:00.000Z"),
+  };
+  const provider = new VercelSandboxProvider({ token: "test", projectId: "project-1" });
+
+  const cost = await provider.getCost({
+    providerResourceId: "sandbox-1",
+    providerMetadata: { vercel: { sandbox: evidence.sandbox, session } },
+    from: new Date("2026-08-27T10:00:00.000Z"),
+    to: new Date("2026-08-27T10:01:00.000Z"),
+  });
+
+  expect(cost).toMatchObject({
+    provenance: "estimated_rate_card",
+    confidence: "medium",
+    source: "vercel-session-usage",
+    rateCardVersion: "2026-08-04",
+    raw: { session },
+  });
+});
+
 it("uses Vercel command, log, and status REST endpoints", async () => {
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

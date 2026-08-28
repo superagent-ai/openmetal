@@ -495,6 +495,11 @@ export class RunloopSandboxProvider implements SandboxProvider {
       providerOrganizationId:
         input.providerOrganizationId ?? (await this.resolveAccountId(input.signal)),
       measuredThrough: usage.end_time_ms ? new Date(usage.end_time_ms) : input.to,
+      provenance: usageRates ? "provider_metered" : "estimated_rate_card",
+      confidence: usageRates ? "medium" : "low",
+      source: usageRates
+        ? "runloop-resource-usage-oem-rate-card"
+        : "runloop-resource-usage-published-preset-rate",
       raw: {
         source: usageRates
           ? "runloop-resource-usage-oem-rate-card"

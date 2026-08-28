@@ -136,6 +136,16 @@ const providers: ProviderDefinition[] = [
         required: true,
       },
       { name: "workspace_id", label: "Workspace ID", placeholder: "Optional workspace ID" },
+      {
+        name: "vm_tier",
+        label: "VM tier",
+        placeholder: "Optional, for example Nano",
+      },
+      {
+        name: "credit_rate_usd",
+        label: "Credit rate in USD",
+        placeholder: "Optional, for example 0.01486",
+      },
     ],
   },
   {
@@ -227,6 +237,26 @@ const providers: ProviderDefinition[] = [
         placeholder: "Enter your API key",
         type: "password",
         required: true,
+      },
+      {
+        name: "resource_size",
+        label: "Resource size",
+        placeholder: "Optional, for example X_SMALL",
+      },
+      {
+        name: "vcpu_hour_rate_usd",
+        label: "vCPU hourly rate in USD",
+        placeholder: "Optional",
+      },
+      {
+        name: "memory_gb_hour_rate_usd",
+        label: "Memory GB hourly rate in USD",
+        placeholder: "Optional",
+      },
+      {
+        name: "disk_gb_hour_rate_usd",
+        label: "Disk GB hourly rate in USD",
+        placeholder: "Optional",
       },
     ],
   },

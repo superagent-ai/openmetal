@@ -185,6 +185,9 @@ export class FakeSandboxProvider implements SandboxProvider {
         this.costMicrousd ?? BigInt(Math.max(0, input.to.getTime() - input.from.getTime())),
       providerOrganizationId: input.providerOrganizationId ?? "fake-account",
       measuredThrough: input.to,
+      provenance: "provider_metered",
+      confidence: "high",
+      source: "fake-provider",
       raw: { fake: true },
     };
   }

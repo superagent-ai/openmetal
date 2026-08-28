@@ -11,6 +11,12 @@ import type { ProviderCredentialInput } from "@openmetal/contracts";
 import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
 import type { WorkerEnv } from "./env.js";
 
+function usdRateToMicrousd(value: string | undefined): bigint | undefined {
+  if (!value) return undefined;
+  const [dollars = "0", decimals = ""] = value.split(".");
+  return BigInt(dollars) * 1_000_000n + BigInt(decimals.padEnd(6, "0"));
+}
+
 export function buildSandboxProviders(
   env: WorkerEnv,
 ): Partial<Record<SandboxProviderName, SandboxProvider>> {
@@ -134,6 +140,8 @@ export function buildByokSandboxProvider(credential: ProviderCredentialInput): S
       return new CodeSandboxProvider({
         apiKey: credential.api_key,
         workspaceId: credential.workspace_id,
+        vmTier: credential.vm_tier,
+        creditRateMicrousd: usdRateToMicrousd(credential.credit_rate_usd),
       });
     case "daytona":
       return new DaytonaSandboxProvider({
@@ -156,7 +164,20 @@ export function buildByokSandboxProvider(credential: ProviderCredentialInput): S
         teamId: credential.team_id,
       });
     case "runloop":
-      return new RunloopSandboxProvider({ apiKey: credential.api_key });
+      return new RunloopSandboxProvider({
+        apiKey: credential.api_key,
+        resourceSize: credential.resource_size,
+        usageRatesMicrousd:
+          credential.vcpu_hour_rate_usd &&
+          credential.memory_gb_hour_rate_usd &&
+          credential.disk_gb_hour_rate_usd
+            ? {
+                vcpuHour: usdRateToMicrousd(credential.vcpu_hour_rate_usd)!,
+                memoryGbHour: usdRateToMicrousd(credential.memory_gb_hour_rate_usd)!,
+                diskGbHour: usdRateToMicrousd(credential.disk_gb_hour_rate_usd)!,
+              }
+            : undefined,
+      });
     case "vercel":
       return new VercelSandboxProvider({
         token: credential.token,

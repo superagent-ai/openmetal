@@ -1240,6 +1240,121 @@ describe("metal api integration", () => {
     ).rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
   });
 
+  it("reports organization usage with managed and BYOK cost separated", async () => {
+    const owner = await createConfirmedUser(env);
+    const outsider = await createConfirmedUser(env);
+    users.push(owner.user.id, outsider.user.id);
+    const ownerClient = clientFor(owner.accessToken);
+    const outsiderClient = clientFor(outsider.accessToken);
+    const organization = await ownerClient.organizations.create({
+      name: "Usage Analytics Org",
+      slug: `usage-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const project = await ownerClient.projects.create(organization.id, {
+      name: "Agent runtime",
+      slug: `runtime-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const managedId = crypto.randomUUID();
+    const byokId = crypto.randomUUID();
+    await database.sql`
+      insert into metal.sandboxes (
+        id, public_id, organization_id, project_id, provider, primary_provider,
+        billing_mode, status, source, resource_requirements, lifecycle, fallback,
+        provider_options, environment, secret_refs, metadata, created_by,
+        provider_resource_id, provider_cost_microusd, ready_at
+      )
+      values
+      (
+        ${managedId}, ${`sbx_${managedId.replaceAll("-", "")}`}, ${organization.id},
+        (select id from public.projects where public_id = ${project.id}),
+        'e2b', 'e2b', 'managed', 'ready',
+        ${JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" })}::jsonb,
+        ${JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" })}::jsonb,
+        ${JSON.stringify({ runtime_timeout_seconds: 300 })}::jsonb,
+        ${JSON.stringify({ providers: [] })}::jsonb,
+        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+        ${owner.user.id}, ${`remote-${managedId}`}, 3000000, '2026-07-20T00:00:00Z'
+      ),
+      (
+        ${byokId}, ${`sbx_${byokId.replaceAll("-", "")}`}, ${organization.id},
+        (select id from public.projects where public_id = ${project.id}),
+        'runloop', 'runloop', 'byok', 'ready',
+        ${JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" })}::jsonb,
+        ${JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" })}::jsonb,
+        ${JSON.stringify({ runtime_timeout_seconds: 300 })}::jsonb,
+        ${JSON.stringify({ providers: [] })}::jsonb,
+        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+        ${owner.user.id}, ${`remote-${byokId}`}, 3000000, '2026-07-20T00:00:00Z'
+      )
+    `;
+    await database.sql`
+      insert into metal.provider_cost_snapshots (
+        sandbox_id, organization_id, project_id, provider, provider_resource_id,
+        billing_mode, amount_microusd, cost_delta_microusd, measured_from,
+        measured_through, cost_provenance, cost_confidence, cost_source, raw_payload
+      )
+      values
+      (
+        ${managedId}, ${organization.id},
+        (select id from public.projects where public_id = ${project.id}),
+        'e2b', ${`remote-${managedId}`}, 'managed', 1000000, 1000000,
+        '2026-07-24T00:00:00Z', '2026-07-25T00:00:00Z',
+        'provider_metered', 'medium', 'e2b-lifecycle-events', '{}'::jsonb
+      ),
+      (
+        ${managedId}, ${organization.id},
+        (select id from public.projects where public_id = ${project.id}),
+        'e2b', ${`remote-${managedId}`}, 'managed', 3000000, 2000000,
+        '2026-08-01T00:00:00Z', '2026-08-02T00:00:00Z',
+        'provider_metered', 'medium', 'e2b-lifecycle-events', '{}'::jsonb
+      ),
+      (
+        ${byokId}, ${organization.id},
+        (select id from public.projects where public_id = ${project.id}),
+        'runloop', ${`remote-${byokId}`}, 'byok', 3000000, 3000000,
+        '2026-08-02T00:00:00Z', '2026-08-03T00:00:00Z',
+        'estimated_rate_card', 'low', 'runloop-published-rate', '{}'::jsonb
+      )
+    `;
+
+    const usage = await ownerClient.usage.get(organization.id, {
+      from: "2026-08-01T00:00:00.000Z",
+      through: "2026-08-08T00:00:00.000Z",
+    });
+    expect(usage.summary.total_cost.current.usd).toBe("5.00");
+    expect(usage.summary.managed_cost.current.usd).toBe("2.00");
+    expect(usage.summary.byok_cost.current.usd).toBe("3.00");
+    expect(usage.by_provider.map((item) => item.provider).sort()).toEqual(["e2b", "runloop"]);
+    expect(usage.top_sandboxes).toHaveLength(2);
+
+    const rolling = await ownerClient.usage.get(organization.id, {
+      from: "2026-08-02T12:00:00.000Z",
+      through: "2026-08-04T12:00:00.000Z",
+    });
+    expect(rolling.summary.total_cost.current.usd).toBe("3.00");
+    expect(rolling.summary.managed_cost.current.usd).toBe("0.00");
+
+    await database.sql`
+      update metal.sandboxes
+      set status = 'deleted', deleted_at = '2026-08-03T01:00:00Z'
+      where id = ${byokId}
+    `;
+    const stopped = await ownerClient.usage.get(organization.id, {
+      from: "2026-08-01T00:00:00.000Z",
+      through: "2026-08-08T00:00:00.000Z",
+      status: "stopped",
+    });
+    expect(stopped.summary.total_cost.current.usd).toBe("3.00");
+    expect(stopped.top_sandboxes[0]?.status).toBe("stopped");
+
+    await expect(
+      outsiderClient.usage.get(organization.id, {
+        from: "2026-08-01T00:00:00.000Z",
+        through: "2026-08-08T00:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
   it("rejects invalid Stripe webhooks, mismatched payloads, and double credits", async () => {
     const owner = await createConfirmedUser(env);
     const member = await createConfirmedUser(env);

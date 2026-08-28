@@ -134,13 +134,6 @@ function chartMoney(value: number): string {
   return `$${value.toFixed(0)}`;
 }
 
-function provenanceLabel(value: string): string {
-  if (value === "provider_reported") return "Provider reported";
-  if (value === "provider_metered") return "Provider metered";
-  if (value === "estimated_rate_card") return "Rate estimate";
-  return "Unknown";
-}
-
 function ProviderName({ provider }: { provider: string }) {
   const logo = providerLogos[provider];
   return (
@@ -535,25 +528,27 @@ export function UsageView({
             <Table>
               <TableHeader className="bg-muted/50">
                 <TableRow>
+                  <TableHead>Date</TableHead>
                   <TableHead>Provider</TableHead>
                   <TableHead>Project</TableHead>
                   <TableHead>Billing</TableHead>
-                  <TableHead className="text-right">Total cost</TableHead>
-                  <TableHead>Cost source</TableHead>
+                  <TableHead>Total cost</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Date</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {usage.activity.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-40 text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="h-40 text-center text-muted-foreground">
                       No cost activity matches the selected range and filters.
                     </TableCell>
                   </TableRow>
                 ) : (
                   usage.activity.map((item) => (
                     <TableRow key={item.id}>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">
+                        {activityDate(item.measured_through)}
+                      </TableCell>
                       <TableCell>
                         <ProviderName provider={item.provider} />
                       </TableCell>
@@ -563,17 +558,9 @@ export function UsageView({
                           {item.billing_mode === "byok" ? "BYOK" : "Managed"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs tabular-nums">
-                        {money(item.cumulative_cost)}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                        {provenanceLabel(item.provenance)}
-                      </TableCell>
+                      <TableCell>{money(item.cumulative_cost)}</TableCell>
                       <TableCell className="capitalize">
                         {item.status.replaceAll("_", " ")}
-                      </TableCell>
-                      <TableCell className="text-right whitespace-nowrap text-xs text-muted-foreground">
-                        {activityDate(item.measured_through)}
                       </TableCell>
                     </TableRow>
                   ))

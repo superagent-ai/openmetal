@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { CircuitBoardIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { OpenMetalMark } from "@/components/openmetal-logo";
 
 const AGENTS = [
   { x: 361, y: 27, label: "Claude Code", mark: <AnthropicMark /> },
@@ -78,28 +77,7 @@ export function PiAgentMark() {
 }
 
 function MetalMark() {
-  return (
-    <>
-      <g transform="translate(1.5 1.5)" opacity="0.9">
-        <HugeiconsIcon
-          icon={CircuitBoardIcon}
-          strokeWidth={3.5}
-          width={30}
-          height={30}
-          aria-hidden="true"
-          className="text-background"
-        />
-      </g>
-      <HugeiconsIcon
-        icon={CircuitBoardIcon}
-        strokeWidth={2}
-        width={30}
-        height={30}
-        aria-hidden="true"
-        className="text-foreground"
-      />
-    </>
-  );
+  return <OpenMetalMark className="size-8 text-foreground" />;
 }
 
 function IsoTile({

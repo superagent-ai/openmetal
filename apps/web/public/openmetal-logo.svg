@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">OpenMetal original gateway mark</title>
+  <desc id="desc">A disc with a shallow rectangular opening, on transparency.</desc>
+  <defs>
+    <style>
+      .disc {
+        fill: #181818;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .disc {
+          fill: #f2f0e9;
+        }
+      }
+    </style>
+    <mask id="gateway-cut">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <rect x="574" y="448" width="450" height="144" fill="#000"/>
+    </mask>
+  </defs>
+  <circle class="disc" cx="512" cy="512" r="420" mask="url(#gateway-cut)"/>
+</svg>
+

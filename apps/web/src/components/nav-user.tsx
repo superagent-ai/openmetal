@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
+import { resolveInitials } from "@/lib/user-profile";
 
 export function NavUser({
   user,
@@ -41,7 +42,7 @@ export function NavUser({
   const { isMobile } = useSidebar();
   const { setTheme, theme } = useTheme();
   const router = useRouter();
-  const initials = user.name.slice(0, 2).toUpperCase();
+  const initials = resolveInitials(user.name);
 
   return (
     <SidebarMenu>
@@ -81,7 +82,7 @@ export function NavUser({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => router.push(`${settingsHref}#profile`)}>
+              <DropdownMenuItem onClick={() => router.push("/dashboard/profile")}>
                 <HugeiconsIcon icon={UserAccountIcon} strokeWidth={2} />
                 Profile
               </DropdownMenuItem>

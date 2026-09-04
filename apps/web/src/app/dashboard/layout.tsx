@@ -2,24 +2,21 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { getCurrentUser } from "@/lib/current-user";
 import { getPreferredOrganization } from "@/lib/dashboard-organizations";
 import { requireMetalSession } from "@/lib/metal-server";
-
-function displayName(email: string): string {
-  const local = email.split("@")[0] ?? "Account";
-  return local || "Account";
-}
+import { resolveDisplayName } from "@/lib/user-profile";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { claims, metal } = await requireMetalSession();
-  const email = typeof claims.email === "string" ? claims.email : "account@metal";
+  const [{ metal }, user] = await Promise.all([requireMetalSession(), getCurrentUser()]);
+  const email = user.email ?? "account@metal";
   const { organizations } = await metal.organizations.list();
   const preferredOrganization = await getPreferredOrganization(organizations);
 
   return (
     <SidebarProvider className="h-svh min-h-0 overflow-hidden">
       <AppSidebar
-        user={{ name: displayName(email), email }}
+        user={{ name: resolveDisplayName(email, user.user_metadata), email }}
         organizations={organizations}
         preferredOrganizationId={preferredOrganization?.id}
       />

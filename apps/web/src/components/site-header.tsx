@@ -55,6 +55,7 @@ export function SiteHeader({
     "api-keys": "API keys",
     billing: "Billing",
     members: "Members",
+    profile: "Profile",
     projects: "Projects",
     providers: "BYOK",
     settings: "Settings",
@@ -68,8 +69,10 @@ export function SiteHeader({
       : pathname.includes("/projects")
         ? "Projects"
         : (pageTitles[lastSegment] ?? "Overview");
-  const parentLabel = activeOrganization?.name ?? "Metal";
-  const parentHref = activeOrganization ? `/dashboard/${activeOrganization.slug}` : "/dashboard";
+  const isProfileRoute = pathname === "/dashboard/profile";
+  const parentLabel = isProfileRoute ? "Metal" : (activeOrganization?.name ?? "Metal");
+  const parentHref =
+    isProfileRoute || !activeOrganization ? "/dashboard" : `/dashboard/${activeOrganization.slug}`;
   const routeProjectSlug = pathname.split("/")[4];
   const isProjectDetail = Boolean(
     activeOrganization && pathname.includes("/projects/") && routeProjectSlug,

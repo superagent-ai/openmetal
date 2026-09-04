@@ -2,7 +2,8 @@
   <img src="apps/web/public/openmetal-logo.svg" alt="OpenMetal" width="96" height="96">
 </p>
 
-# Metal
+<h1 align="center">Superagent SDK</h1>
+
 
 Metal is the universal compute gateway for AI agents. This repository implements a hosted control plane that provisions CPU sandboxes, routes creation across supported compute providers, manages lifecycle operations, and bills managed usage.
 

@@ -4,7 +4,6 @@
 
 <h1 align="center">Metal</h1>
 
-
 Metal is the universal compute gateway for AI agents. This repository implements a hosted control plane that provisions CPU sandboxes, routes creation across supported compute providers, manages lifecycle operations, and bills managed usage.
 
 ## Product model

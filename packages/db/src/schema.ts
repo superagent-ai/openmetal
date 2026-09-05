@@ -17,13 +17,25 @@ import {
 
 export const organizationRoleEnum = pgEnum("organization_role", ["owner", "admin", "member"]);
 
-export const organizations = pgTable("organizations", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  slug: text("slug").notNull().unique(),
-  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
-});
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("organizations_slug_key")
+      .on(table.slug)
+      .where(sql`${table.deletedAt} is null`),
+    index("organizations_active_created_idx")
+      .on(table.createdAt)
+      .where(sql`${table.deletedAt} is null`),
+  ],
+);
 
 export const organizationMembers = pgTable(
   "organization_members",
@@ -636,6 +648,7 @@ export const creditPurchaseSourceEnum = metalSchema.enum("credit_purchase_source
   "checkout",
   "auto_topup",
   "admin_grant",
+  "welcome_grant",
 ]);
 export const creditPurchaseStatusEnum = metalSchema.enum("credit_purchase_status", [
   "pending",
@@ -751,6 +764,21 @@ export const creditPurchases = metalSchema.table(
       .where(sql`${table.stripePaymentIntentId} is not null`),
     index("credit_purchases_organization_created_idx").on(table.organizationId, table.createdAt),
   ],
+);
+
+export const userWelcomeCreditGrants = metalSchema.table(
+  "user_welcome_credit_grants",
+  {
+    userId: uuid("user_id").primaryKey(),
+    organizationId: uuid("organization_id").notNull(),
+    creditPurchaseId: uuid("credit_purchase_id").references(() => creditPurchases.id, {
+      onDelete: "set null",
+    }),
+    creditMicrousd: bigint("credit_microusd", { mode: "bigint" }).notNull().default(0n),
+    status: text("status").$type<"granted" | "ineligible_existing">().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [index("user_welcome_credit_grants_organization_id_idx").on(table.organizationId)],
 );
 
 export const autoTopupAttempts = metalSchema.table(
@@ -893,6 +921,7 @@ export const schema = {
   billingAccounts,
   autoTopupPolicies,
   creditPurchases,
+  userWelcomeCreditGrants,
   autoTopupAttempts,
   stripeEvents,
   ledgerTransactions,

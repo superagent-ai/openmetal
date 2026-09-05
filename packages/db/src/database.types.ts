@@ -1216,6 +1216,41 @@ export type Database = {
           },
         ]
       }
+      user_welcome_credit_grants: {
+        Row: {
+          created_at: string
+          credit_microusd: number
+          credit_purchase_id: string | null
+          organization_id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          credit_microusd?: number
+          credit_purchase_id?: string | null
+          organization_id: string
+          status: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          credit_microusd?: number
+          credit_purchase_id?: string | null
+          organization_id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_welcome_credit_grants_credit_purchase_id_fkey"
+            columns: ["credit_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "credit_purchases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -1246,7 +1281,11 @@ export type Database = {
         | "failed"
         | "requires_action"
       auto_topup_status: "disabled" | "active" | "paused"
-      credit_purchase_source: "checkout" | "auto_topup" | "admin_grant"
+      credit_purchase_source:
+        | "checkout"
+        | "auto_topup"
+        | "admin_grant"
+        | "welcome_grant"
       credit_purchase_status:
         | "pending"
         | "paid"
@@ -1387,6 +1426,7 @@ export type Database = {
       organizations: {
         Row: {
           created_at: string
+          deleted_at: string | null
           id: string
           name: string
           slug: string
@@ -1394,6 +1434,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          deleted_at?: string | null
           id?: string
           name: string
           slug: string
@@ -1401,6 +1442,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          deleted_at?: string | null
           id?: string
           name?: string
           slug?: string
@@ -1592,7 +1634,12 @@ export const Constants = {
         "requires_action",
       ],
       auto_topup_status: ["disabled", "active", "paused"],
-      credit_purchase_source: ["checkout", "auto_topup", "admin_grant"],
+      credit_purchase_source: [
+        "checkout",
+        "auto_topup",
+        "admin_grant",
+        "welcome_grant",
+      ],
       credit_purchase_status: [
         "pending",
         "paid",

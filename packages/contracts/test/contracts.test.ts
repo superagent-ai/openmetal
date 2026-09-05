@@ -130,12 +130,17 @@ describe("contract parsing", () => {
     ).toThrow();
   });
 
-  it("documents project updates on PATCH /v1/projects/{project_id}", () => {
+  it("documents organization and project lifecycle operations", () => {
     const document = buildOpenApiDocument() as {
       paths: Record<string, Record<string, { operationId?: string }>>;
     };
     expect(document.paths["/v1/projects/{project_id}"]?.patch?.operationId).toBe("updateProject");
-    expect(document.paths["/v1/organizations/{organization_id}"]?.patch).toBeUndefined();
+    expect(document.paths["/v1/organizations/{organization_id}"]?.patch?.operationId).toBe(
+      "updateOrganization",
+    );
+    expect(document.paths["/v1/organizations/{organization_id}"]?.delete?.operationId).toBe(
+      "deleteOrganization",
+    );
     expect(
       document.paths["/v1/organizations/{organization_id}/provider-credentials/{provider}"]?.put
         ?.operationId,

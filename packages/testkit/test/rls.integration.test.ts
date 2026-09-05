@@ -138,11 +138,12 @@ describe("rls isolation", () => {
         ('metal', 'outbox_jobs'),
         ('metal', 'idempotency_keys'),
         ('metal', 'billing_accounts'),
-        ('metal', 'ledger_entries')
+        ('metal', 'ledger_entries'),
+        ('metal', 'user_welcome_credit_grants')
       )
       order by n.nspname, c.relname
     `;
-    expect(rlsRows).toHaveLength(10);
+    expect(rlsRows).toHaveLength(11);
     expect(rlsRows.every((row) => row.enabled === true)).toBe(true);
 
     const unsafeGrants = await database.sql`
@@ -161,7 +162,8 @@ describe("rls isolation", () => {
           'outbox_jobs',
           'idempotency_keys',
           'billing_accounts',
-          'ledger_entries'
+          'ledger_entries',
+          'user_welcome_credit_grants'
         )
       )
     `;

@@ -21,8 +21,11 @@ import {
 } from "./members.js";
 import {
   CreateOrganizationRequestSchema,
+  DeleteOrganizationRequestSchema,
+  OrganizationDeleteResponseSchema,
   OrganizationListResponseSchema,
   OrganizationSchema,
+  UpdateOrganizationRequestSchema,
 } from "./organizations.js";
 import {
   ConfiguredProviderCredentialSchema,
@@ -151,6 +154,9 @@ export function buildOpenApiDocument(): OpenApiObject {
         Organization: json(OrganizationSchema),
         OrganizationListResponse: json(OrganizationListResponseSchema),
         CreateOrganizationRequest: json(CreateOrganizationRequestSchema),
+        UpdateOrganizationRequest: json(UpdateOrganizationRequestSchema),
+        DeleteOrganizationRequest: json(DeleteOrganizationRequestSchema),
+        OrganizationDeleteResponse: json(OrganizationDeleteResponseSchema),
         OrganizationMember: json(OrganizationMemberSchema),
         OrganizationInvitation: json(OrganizationInvitationSchema),
         OrganizationMembersResponse: json(OrganizationMembersResponseSchema),
@@ -418,6 +424,40 @@ export function buildOpenApiDocument(): OpenApiObject {
             "401": errorResponse("Authentication required"),
             "403": errorResponse("Access denied"),
             "404": errorResponse("Organization not found"),
+          },
+        },
+        patch: {
+          operationId: "updateOrganization",
+          tags: ["organizations"],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: jsonContent("UpdateOrganizationRequest"),
+          },
+          responses: {
+            "200": response("Organization updated", "Organization"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Organization not found"),
+            "409": errorResponse("Organization conflict"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+        delete: {
+          operationId: "deleteOrganization",
+          tags: ["organizations"],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: jsonContent("DeleteOrganizationRequest"),
+          },
+          responses: {
+            "200": response("Organization deleted", "OrganizationDeleteResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Organization not found"),
+            "409": errorResponse("Organization has active resources or billing"),
+            "422": errorResponse("Invalid request"),
           },
         },
       },

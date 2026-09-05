@@ -202,6 +202,51 @@ describe("MetalClient unit", () => {
     expect(captured).toBe("k-1");
   });
 
+  it("updates and deletes an organization", async () => {
+    const requests: Array<{ method?: string; body?: string }> = [];
+    const organizationId = "11111111-1111-4111-8111-111111111111";
+    const client = new MetalClient({
+      baseUrl: "http://localhost:4000",
+      accessToken: async () => "t",
+      fetch: async (_url, init) => {
+        requests.push({ method: init?.method, body: init?.body?.toString() });
+        if (init?.method === "PATCH") {
+          return jsonResponse(200, {
+            id: organizationId,
+            name: "Renamed",
+            slug: "renamed",
+            created_at: "2026-08-20T00:00:00.000Z",
+            updated_at: "2026-08-20T01:00:00.000Z",
+          });
+        }
+        return jsonResponse(200, { id: organizationId, deleted: true });
+      },
+    });
+
+    await expect(
+      client.organizations.update(organizationId, { name: "Renamed", slug: "renamed" }),
+    ).resolves.toMatchObject({ name: "Renamed", slug: "renamed" });
+    await expect(
+      client.organizations.delete(organizationId, {
+        confirm_name: "Renamed",
+        confirm_forfeit_balance: true,
+      }),
+    ).resolves.toEqual({ id: organizationId, deleted: true });
+    expect(requests).toEqual([
+      {
+        method: "PATCH",
+        body: JSON.stringify({ name: "Renamed", slug: "renamed" }),
+      },
+      {
+        method: "DELETE",
+        body: JSON.stringify({
+          confirm_name: "Renamed",
+          confirm_forfeit_balance: true,
+        }),
+      },
+    ]);
+  });
+
   it("updates a project with PATCH", async () => {
     let capturedMethod: string | undefined;
     let capturedBody: string | undefined;

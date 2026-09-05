@@ -77,6 +77,9 @@ Fallback is safe only when the failure establishes that another attempt will not
 
 ## Managed Billing
 
+Each new user receives a one-time USD 500.00 grant in the first organization they create. Additional
+organizations do not receive the grant. Welcome grants have no purchase fee.
+
 Managed sandbox creation requires the organization to have a credit balance greater than zero. There is no estimated hold, so delayed metering can temporarily make a balance negative. When a durable charge leaves the balance at or below zero and no automatic top-up is active, OpenMetal schedules managed sandboxes to stop. If automatic top-up is active but its infrastructure fails terminally, current code may not schedule spend-limit enforcement; do not treat the balance guard as an unconditional termination guarantee.
 
 Managed usage is charged from durable provider cost evidence. The purchase fee is 5.5 percent of the credit amount with a minimum fee of USD 0.80. Never calculate money with binary floating point in OpenMetal integrations.

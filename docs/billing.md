@@ -2,6 +2,12 @@
 
 Metal sells prepaid organization credits. Provider usage is deducted at cost. The platform fee is charged only when credits are purchased.
 
+## Welcome credits
+
+Each new user receives a one-time $500.00 credit grant in the first organization they create. The
+grant has no purchase fee and cannot be transferred to another organization. Creating additional
+organizations does not issue additional credits.
+
 ## Purchase fee
 
 Card and Stripe Checkout purchases add 5.5% of the credit amount, with a $0.80 minimum fee.

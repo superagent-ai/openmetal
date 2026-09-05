@@ -44,6 +44,7 @@ export async function grantCredits(
     creditMicrousd: bigint;
     actorId: string;
     description?: string;
+    source?: "admin_grant" | "welcome_grant";
   },
 ) {
   await ensureBillingAccount(tx, input.organizationId);
@@ -52,7 +53,7 @@ export async function grantCredits(
     .insert(creditPurchases)
     .values({
       organizationId: input.organizationId,
-      source: "admin_grant",
+      source: input.source ?? "admin_grant",
       status: "paid",
       creditMicrousd: input.creditMicrousd,
       feeMicrousd: 0n,

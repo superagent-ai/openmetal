@@ -57,6 +57,19 @@ function formatDate(value: string): string {
   return dateFormatter.format(new Date(value));
 }
 
+function purchaseSourceLabel(source: OrganizationBilling["purchases"][number]["source"]): string {
+  switch (source) {
+    case "welcome_grant":
+      return "Welcome credit";
+    case "admin_grant":
+      return "Admin credit";
+    case "auto_topup":
+      return "Automatic top up";
+    case "checkout":
+      return "Credit purchase";
+  }
+}
+
 function formatUsd(value: string): string {
   const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
   if (!match) return value;
@@ -402,6 +415,7 @@ export function BillingView({
             <TableHeader className="bg-muted">
               <TableRow>
                 <TableHead className="pl-4">Date</TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead className="pr-4 text-right">Actions</TableHead>
               </TableRow>
@@ -409,7 +423,7 @@ export function BillingView({
             <TableBody>
               {transactions.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={3} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
                     No transactions yet.
                   </TableCell>
                 </TableRow>
@@ -419,6 +433,7 @@ export function BillingView({
                     <TableCell className="pl-4 text-muted-foreground">
                       {formatDate(purchase.paid_at ?? purchase.created_at)}
                     </TableCell>
+                    <TableCell>{purchaseSourceLabel(purchase.source)}</TableCell>
                     <TableCell>${purchase.credit_usd}</TableCell>
                     <TableCell className="pr-4">
                       <div className="flex items-center justify-end gap-3">

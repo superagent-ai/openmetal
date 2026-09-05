@@ -1,9 +1,15 @@
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import {
+  autoTopupAttempts,
+  creditPurchases,
   domainEvents,
+  organizationInvitations,
   organizationMembers,
   organizationProviderCredentials,
   organizations,
+  runtimeOperations,
+  sandboxEndpoints,
+  sandboxProcesses,
   outboxJobs,
   projects,
   operations,
@@ -19,7 +25,12 @@ import {
   toPublicEvent,
 } from "@openmetal/events";
 import type { CreateSandboxRequest } from "@openmetal/contracts";
-import { ensureBillingAccount, requirePositiveManagedBalance } from "@openmetal/billing";
+import {
+  ensureBillingAccount,
+  maybeGrantWelcomeCredit,
+  prepareOrganizationBillingDeletion,
+  requirePositiveManagedBalance,
+} from "@openmetal/billing";
 import { ApiError } from "./errors.js";
 import { createOperation } from "./operation-service.js";
 
@@ -31,9 +42,16 @@ async function requireMembership(
   organizationId: string,
   roles?: Array<"owner" | "admin" | "member">,
 ) {
-  const membership = await db
-    .select()
+  const row = await db
+    .select({ membership: organizationMembers })
     .from(organizationMembers)
+    .innerJoin(
+      organizations,
+      and(
+        eq(organizations.id, organizationMembers.organizationId),
+        isNull(organizations.deletedAt),
+      ),
+    )
     .where(
       and(
         eq(organizationMembers.organizationId, organizationId),
@@ -41,9 +59,18 @@ async function requireMembership(
       ),
     )
     .then((rows) => rows[0]);
-  if (!membership) {
+  if (!row) {
+    const activeOrganization = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(and(eq(organizations.id, organizationId), isNull(organizations.deletedAt)))
+      .then((rows) => rows[0]);
+    if (!activeOrganization) {
+      throw new ApiError(404, "not_found", "organization not found");
+    }
     throw new ApiError(403, "forbidden", "not a member of this organization");
   }
+  const membership = row.membership;
   if (roles && !roles.includes(membership.role)) {
     throw new ApiError(403, "forbidden", "insufficient organization role");
   }
@@ -92,6 +119,8 @@ async function insertEventAndOutbox(
   input: {
     type:
       | "organization.created"
+      | "organization.updated"
+      | "organization.deleted"
       | "project.created"
       | "project.deleted"
       | "project.updated"
@@ -154,6 +183,10 @@ export async function createOrganization(
     role: "owner",
   });
   await ensureBillingAccount(tx, organization.id);
+  await maybeGrantWelcomeCredit(tx, {
+    userId: input.userId,
+    organizationId: organization.id,
+  });
   await insertEventAndOutbox(tx, {
     type: "organization.created",
     organizationId: organization.id,
@@ -175,7 +208,7 @@ export async function listOrganizations(db: MetalDb, userId: string) {
     })
     .from(organizations)
     .innerJoin(organizationMembers, eq(organizationMembers.organizationId, organizations.id))
-    .where(eq(organizationMembers.userId, userId))
+    .where(and(eq(organizationMembers.userId, userId), isNull(organizations.deletedAt)))
     .orderBy(asc(organizations.createdAt));
 }
 
@@ -184,12 +217,284 @@ export async function getOrganization(db: MetalDb, userId: string, organizationI
   const organization = await db
     .select()
     .from(organizations)
-    .where(eq(organizations.id, organizationId))
+    .where(and(eq(organizations.id, organizationId), isNull(organizations.deletedAt)))
     .then((rows) => rows[0]);
   if (!organization) {
     throw new ApiError(404, "not_found", "organization not found");
   }
   return organization;
+}
+
+export async function updateOrganization(
+  db: MetalDb,
+  input: { userId: string; organizationId: string; name: string; slug: string },
+) {
+  return withTransaction(db, async (tx) => {
+    await requireMembership(tx, input.userId, input.organizationId, ["owner", "admin"]);
+    const [organization] = await tx
+      .update(organizations)
+      .set({
+        name: input.name,
+        slug: input.slug,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(organizations.id, input.organizationId), isNull(organizations.deletedAt)))
+      .returning();
+    if (!organization) {
+      throw new ApiError(404, "not_found", "organization not found");
+    }
+
+    await insertEventAndOutbox(tx, {
+      type: "organization.updated",
+      organizationId: organization.id,
+      actorId: input.userId,
+      data: { name: organization.name, slug: organization.slug },
+      topic: organizationTopic(organization.id),
+    });
+    return organization;
+  });
+}
+
+async function requireOrganizationDeletionReady(tx: MetalDb, organizationId: string) {
+  const [blockingSandbox] = await tx
+    .select({ id: sandboxes.publicId, state: sandboxes.status })
+    .from(sandboxes)
+    .where(
+      and(
+        eq(sandboxes.organizationId, organizationId),
+        isNull(sandboxes.deletedAt),
+        notInArray(sandboxes.status, ["stopped", "failed"]),
+      ),
+    )
+    .limit(1);
+  if (blockingSandbox) {
+    throw new ApiError(
+      409,
+      "organization_has_active_resources",
+      "stop all sandboxes before deleting the organization",
+      { resource: "sandbox", id: blockingSandbox.id, state: blockingSandbox.state },
+    );
+  }
+
+  const [blockingOperation] = await tx
+    .select({ id: operations.publicId, state: operations.state })
+    .from(operations)
+    .where(
+      and(
+        eq(operations.organizationId, organizationId),
+        notInArray(operations.state, ["succeeded", "failed", "cancelled"]),
+      ),
+    )
+    .limit(1);
+  if (blockingOperation) {
+    throw new ApiError(
+      409,
+      "organization_has_active_resources",
+      "wait for organization operations to finish before deleting the organization",
+      { resource: "operation", id: blockingOperation.id, state: blockingOperation.state },
+    );
+  }
+
+  const [blockingProcess] = await tx
+    .select({ id: sandboxProcesses.publicId, state: sandboxProcesses.state })
+    .from(sandboxProcesses)
+    .where(
+      and(
+        eq(sandboxProcesses.organizationId, organizationId),
+        notInArray(sandboxProcesses.state, ["succeeded", "failed", "cancelled", "timed_out"]),
+      ),
+    )
+    .limit(1);
+  if (blockingProcess) {
+    throw new ApiError(
+      409,
+      "organization_has_active_resources",
+      "wait for organization processes to finish before deleting the organization",
+      { resource: "process", id: blockingProcess.id, state: blockingProcess.state },
+    );
+  }
+
+  const [blockingRuntimeOperation] = await tx
+    .select({ id: runtimeOperations.publicId, state: runtimeOperations.state })
+    .from(runtimeOperations)
+    .where(
+      and(
+        eq(runtimeOperations.organizationId, organizationId),
+        notInArray(runtimeOperations.state, ["succeeded", "failed", "cancelled"]),
+      ),
+    )
+    .limit(1);
+  if (blockingRuntimeOperation) {
+    throw new ApiError(
+      409,
+      "organization_has_active_resources",
+      "wait for runtime operations to finish before deleting the organization",
+      {
+        resource: "runtime_operation",
+        id: blockingRuntimeOperation.id,
+        state: blockingRuntimeOperation.state,
+      },
+    );
+  }
+
+  const [blockingEndpoint] = await tx
+    .select({ id: sandboxEndpoints.publicId, state: sandboxEndpoints.state })
+    .from(sandboxEndpoints)
+    .where(
+      and(
+        eq(sandboxEndpoints.organizationId, organizationId),
+        notInArray(sandboxEndpoints.state, ["revoked", "expired", "failed"]),
+      ),
+    )
+    .limit(1);
+  if (blockingEndpoint) {
+    throw new ApiError(
+      409,
+      "organization_has_active_resources",
+      "revoke all endpoints before deleting the organization",
+      { resource: "endpoint", id: blockingEndpoint.id, state: blockingEndpoint.state },
+    );
+  }
+
+  const [pendingPurchase] = await tx
+    .select({ id: creditPurchases.id, status: creditPurchases.status })
+    .from(creditPurchases)
+    .where(
+      and(
+        eq(creditPurchases.organizationId, organizationId),
+        inArray(creditPurchases.status, ["pending", "requires_action"]),
+      ),
+    )
+    .limit(1);
+  if (pendingPurchase) {
+    throw new ApiError(
+      409,
+      "organization_has_pending_billing",
+      "resolve pending billing before deleting the organization",
+      { purchase_id: pendingPurchase.id, status: pendingPurchase.status },
+    );
+  }
+
+  const [pendingTopup] = await tx
+    .select({ id: autoTopupAttempts.id, status: autoTopupAttempts.status })
+    .from(autoTopupAttempts)
+    .where(
+      and(
+        eq(autoTopupAttempts.organizationId, organizationId),
+        eq(autoTopupAttempts.status, "pending"),
+      ),
+    )
+    .limit(1);
+  if (pendingTopup) {
+    throw new ApiError(
+      409,
+      "organization_has_pending_billing",
+      "wait for automatic top up to finish before deleting the organization",
+      { auto_topup_attempt_id: pendingTopup.id, status: pendingTopup.status },
+    );
+  }
+}
+
+export async function deleteOrganization(
+  db: MetalDb,
+  input: {
+    userId: string;
+    organizationId: string;
+    confirmName: string;
+    confirmForfeitBalance: boolean;
+  },
+) {
+  return withTransaction(db, async (tx) => {
+    await requireMembership(tx, input.userId, input.organizationId, ["owner"]);
+    const organization = await tx
+      .select()
+      .from(organizations)
+      .where(and(eq(organizations.id, input.organizationId), isNull(organizations.deletedAt)))
+      .then((rows) => rows[0]);
+    if (!organization) {
+      throw new ApiError(404, "not_found", "organization not found");
+    }
+    if (input.confirmName !== organization.name) {
+      throw new ApiError(
+        422,
+        "confirmation_mismatch",
+        "organization name confirmation does not match",
+      );
+    }
+
+    await requireOrganizationDeletionReady(tx, organization.id);
+    const billing = await prepareOrganizationBillingDeletion(tx, {
+      organizationId: organization.id,
+      actorId: input.userId,
+      forfeitBalance: input.confirmForfeitBalance,
+    });
+    if (!billing.prepared) {
+      throw new ApiError(
+        409,
+        "organization_has_credit_balance",
+        "confirm credit forfeiture before deleting the organization",
+        { balance_microusd: billing.balanceMicrousd.toString() },
+      );
+    }
+
+    const now = new Date();
+    const deletedProjects = await tx
+      .update(projects)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(projects.organizationId, organization.id), isNull(projects.deletedAt)))
+      .returning();
+    for (const project of deletedProjects) {
+      await insertEventAndOutbox(tx, {
+        type: "project.deleted",
+        organizationId: organization.id,
+        projectId: project.id,
+        actorId: input.userId,
+        data: { name: project.name, slug: project.slug },
+        topic: projectTopic(project.publicId),
+      });
+    }
+
+    await tx
+      .update(organizationInvitations)
+      .set({ revokedAt: now })
+      .where(
+        and(
+          eq(organizationInvitations.organizationId, organization.id),
+          isNull(organizationInvitations.acceptedAt),
+          isNull(organizationInvitations.revokedAt),
+        ),
+      );
+
+    await insertEventAndOutbox(tx, {
+      type: "organization.deleted",
+      organizationId: organization.id,
+      actorId: input.userId,
+      data: { name: organization.name, slug: organization.slug },
+      topic: organizationTopic(organization.id),
+    });
+
+    await tx
+      .delete(organizationMembers)
+      .where(eq(organizationMembers.organizationId, organization.id));
+    const [deleted] = await tx
+      .update(organizations)
+      .set({
+        name: "Deleted organization",
+        slug: `deleted-${organization.id}`,
+        deletedAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(organizations.id, organization.id), isNull(organizations.deletedAt)))
+      .returning({ id: organizations.id });
+    if (!deleted) {
+      throw new ApiError(404, "not_found", "organization not found");
+    }
+
+    return {
+      id: deleted.id,
+      forfeitedMicrousd: billing.forfeitedMicrousd,
+    };
+  });
 }
 
 export async function createProject(

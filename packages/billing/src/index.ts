@@ -18,6 +18,8 @@ export {
 } from "./money.js";
 export { postLedgerTransaction, SYSTEM_ACTOR_ID } from "./ledger.js";
 export { ensureBillingAccount, getOrganizationName, getOrganizationSlug } from "./accounts.js";
+export { maybeGrantWelcomeCredit, WELCOME_CREDIT_MICROUSD } from "./welcome-credit.js";
+export { prepareOrganizationBillingDeletion } from "./organization-deletion.js";
 export {
   createCheckout,
   createPaymentMethodSetup,

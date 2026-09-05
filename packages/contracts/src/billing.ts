@@ -75,7 +75,7 @@ export type BillingLedgerEntry = z.infer<typeof BillingLedgerEntrySchema>;
 
 export const BillingPurchaseSchema = z.object({
   id: OpaqueIdSchema,
-  source: z.enum(["checkout", "auto_topup", "admin_grant"]),
+  source: z.enum(["checkout", "auto_topup", "admin_grant", "welcome_grant"]),
   status: z.enum(["pending", "paid", "failed", "canceled", "requires_action"]),
   credit_usd: z.string(),
   fee_usd: z.string(),

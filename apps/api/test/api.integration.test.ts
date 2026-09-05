@@ -373,6 +373,243 @@ describe("metal api integration", () => {
     expect(page.events.every((item) => item.event_id !== events.events[0]?.event_id)).toBe(true);
   });
 
+  it("grants $500 once per new user under concurrent organization creation", async () => {
+    const owner = await createConfirmedUser(env);
+    const existingOwner = await createConfirmedUser(env);
+    users.push(owner.user.id, existingOwner.user.id);
+    const ownerClient = clientFor(owner.accessToken);
+    const existingOwnerClient = clientFor(existingOwner.accessToken);
+
+    const [first, second] = await Promise.all([
+      ownerClient.organizations.create(
+        {
+          name: "First Welcome Org",
+          slug: `welcome-first-${crypto.randomUUID().slice(0, 8)}`,
+        },
+        { idempotencyKey: "welcome-first" },
+      ),
+      ownerClient.organizations.create(
+        {
+          name: "Second Welcome Org",
+          slug: `welcome-second-${crypto.randomUUID().slice(0, 8)}`,
+        },
+        { idempotencyKey: "welcome-second" },
+      ),
+    ]);
+    const balances = await Promise.all([
+      ownerClient.billing.get(first.id),
+      ownerClient.billing.get(second.id),
+    ]);
+    expect(balances.map((billing) => billing.balance_usd).sort()).toEqual(["0.00", "500.00"]);
+
+    const [grantCounts] = await database.sql`
+      select
+        (
+          select count(*)::int
+          from metal.user_welcome_credit_grants
+          where user_id = ${owner.user.id} and status = 'granted'
+        ) as claims,
+        (
+          select count(*)::int
+          from metal.credit_purchases
+          where actor_id = ${owner.user.id} and source = 'welcome_grant'
+        ) as purchases,
+        (
+          select count(*)::int
+          from metal.domain_events
+          where actor_id = ${owner.user.id} and type = 'billing.credits_granted'
+        ) as events
+    `;
+    expect(grantCounts).toMatchObject({ claims: 1, purchases: 1, events: 1 });
+
+    await database.sql`
+      insert into metal.user_welcome_credit_grants (
+        user_id,
+        organization_id,
+        credit_microusd,
+        status
+      )
+      values (
+        ${existingOwner.user.id},
+        ${crypto.randomUUID()},
+        0,
+        'ineligible_existing'
+      )
+    `;
+    const existingOwnerOrganization = await existingOwnerClient.organizations.create({
+      name: "Existing Owner Org",
+      slug: `existing-owner-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    expect((await existingOwnerClient.billing.get(existingOwnerOrganization.id)).balance_usd).toBe(
+      "0.00",
+    );
+  });
+
+  it("updates and safely tombstones organizations with owner confirmation", async () => {
+    const owner = await createConfirmedUser(env);
+    const admin = await createConfirmedUser(env);
+    const member = await createConfirmedUser(env);
+    users.push(owner.user.id, admin.user.id, member.user.id);
+    const ownerClient = clientFor(owner.accessToken);
+    const adminClient = clientFor(admin.accessToken);
+    const memberClient = clientFor(member.accessToken);
+
+    const organization = await ownerClient.organizations.create({
+      name: "Lifecycle Org",
+      slug: `lifecycle-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const otherOrganization = await ownerClient.organizations.create({
+      name: "Reserved Slug Org",
+      slug: `reserved-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values
+        (${organization.id}, ${admin.user.id}, 'admin'),
+        (${organization.id}, ${member.user.id}, 'member')
+    `;
+
+    const updated = await adminClient.organizations.update(organization.id, {
+      name: "Updated Lifecycle Org",
+      slug: `updated-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    expect(updated.name).toBe("Updated Lifecycle Org");
+    await expect(
+      memberClient.organizations.update(organization.id, {
+        name: "Member Edit",
+        slug: "member-edit",
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      adminClient.organizations.update(organization.id, {
+        name: "Duplicate",
+        slug: otherOrganization.slug,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      adminClient.organizations.delete(organization.id, {
+        confirm_name: updated.name,
+        confirm_forfeit_balance: true,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      ownerClient.organizations.delete(organization.id, {
+        confirm_name: "Wrong name",
+        confirm_forfeit_balance: true,
+      }),
+    ).rejects.toMatchObject({ status: 422, code: "confirmation_mismatch" });
+    await expect(
+      ownerClient.organizations.delete(organization.id, {
+        confirm_name: updated.name,
+      }),
+    ).rejects.toMatchObject({ status: 409, code: "organization_has_credit_balance" });
+
+    const project = await ownerClient.projects.create(organization.id, {
+      name: "Lifecycle Project",
+      slug: "lifecycle-project",
+    });
+    await database.sql`
+      update metal.auto_topup_policies
+      set enabled = true, status = 'active'
+      where organization_id = ${otherOrganization.id}
+    `;
+    const apiKey = await ownerClient.apiKeys.create(project.id, {
+      name: "lifecycle key",
+      expires_in: null,
+    });
+    await expect(
+      ownerClient.organizations.delete(organization.id, {
+        confirm_name: updated.name,
+        confirm_forfeit_balance: true,
+      }),
+    ).resolves.toEqual({ id: organization.id, deleted: true });
+
+    await expect(ownerClient.organizations.get(organization.id)).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(ownerClient.apiKeys.list(project.id)).rejects.toMatchObject({ status: 404 });
+    expect((await ownerClient.organizations.list()).organizations).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: organization.id })]),
+    );
+    const [deletedState] = await database.sql`
+      select
+        organization.deleted_at,
+        organization.name,
+        organization.slug,
+        billing.balance_microusd::text as balance_microusd,
+        (
+          select count(*)::int
+          from public.organization_members
+          where organization_id = ${organization.id}
+        ) as memberships,
+        (
+          select count(*)::int
+          from public.projects
+          where organization_id = ${organization.id} and deleted_at is null
+        ) as active_projects,
+        (
+          select count(*)::int
+          from metal.domain_events
+          where organization_id = ${organization.id} and type = 'organization.deleted'
+        ) as deletion_events
+      from public.organizations organization
+      join metal.billing_accounts billing on billing.organization_id = organization.id
+      where organization.id = ${organization.id}
+    `;
+    expect(deletedState).toMatchObject({
+      name: "Deleted organization",
+      balance_microusd: "0",
+      memberships: 0,
+      active_projects: 0,
+      deletion_events: 1,
+    });
+    expect(deletedState?.deleted_at).toBeTruthy();
+    expect(String(deletedState?.slug)).toBe(`deleted-${organization.id}`);
+    expect(apiKey.key).toMatch(/^metal_sk_/);
+    const [otherBillingPolicy] = await database.sql`
+      select enabled, status
+      from metal.auto_topup_policies
+      where organization_id = ${otherOrganization.id}
+    `;
+    expect(otherBillingPolicy).toMatchObject({ enabled: true, status: "active" });
+
+    const activeOwner = await createConfirmedUser(env);
+    users.push(activeOwner.user.id);
+    const activeOwnerClient = clientFor(activeOwner.accessToken);
+    const activeOrganization = await activeOwnerClient.organizations.create({
+      name: "Active Resource Org",
+      slug: `active-resource-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const activeProject = await activeOwnerClient.projects.create(activeOrganization.id, {
+      name: "Active Resource Project",
+      slug: "active-resource-project",
+    });
+    const activeKey = await activeOwnerClient.apiKeys.create(activeProject.id, {
+      name: "active resource key",
+      expires_in: null,
+    });
+    const projectClient = new MetalClient({
+      baseUrl: appUrl,
+      accessToken: () => activeKey.key,
+      projectId: activeProject.id,
+      retry: { attempts: 1 },
+    });
+    await projectClient.sandboxes.createAsync({
+      source: { kind: "environment", environment: "metal/node", version: "1" },
+      resources: { vcpu: 1, memory_mb: 1024, architecture: "any" },
+      lifecycle: { runtime_timeout_seconds: 600 },
+    });
+    await expect(
+      activeOwnerClient.organizations.delete(activeOrganization.id, {
+        confirm_name: activeOrganization.name,
+        confirm_forfeit_balance: true,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "organization_has_active_resources",
+    });
+  });
+
   it("encrypts organization BYOK credentials and enforces administrator access", async () => {
     const owner = await createConfirmedUser(env);
     const member = await createConfirmedUser(env);
@@ -1181,7 +1418,7 @@ describe("metal api integration", () => {
     });
     expect(replay.statusCode).toBe(200);
     const billed = await ownerClient.billing.get(organization.id);
-    expect(billed.balance_usd).toBe("100.00");
+    expect(billed.balance_usd).toBe("600.00");
     expect(billed.payment_method).toMatchObject({ last4: "4242" });
     expect(billed.purchases).toEqual(
       expect.arrayContaining([
@@ -1454,7 +1691,7 @@ describe("metal api integration", () => {
       }),
     });
     expect(unpaid.statusCode).toBe(200);
-    expect((await ownerClient.billing.get(organization.id)).balance_usd).toBe("0.00");
+    expect((await ownerClient.billing.get(organization.id)).balance_usd).toBe("500.00");
 
     const firstEvent = {
       id: `evt_${crypto.randomUUID()}`,
@@ -1488,7 +1725,7 @@ describe("metal api integration", () => {
     ]);
     expect([first.statusCode, second.statusCode].sort()).toEqual([200, 200]);
     const billed = await ownerClient.billing.get(organization.id);
-    expect(billed.balance_usd).toBe("25.00");
+    expect(billed.balance_usd).toBe("525.00");
     const [entrySum] = await database.sql`
       select coalesce(sum(amount_microusd), 0)::text as total
       from metal.ledger_entries

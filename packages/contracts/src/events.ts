@@ -10,6 +10,8 @@ import {
 
 export const EventTypeSchema = z.enum([
   "organization.created",
+  "organization.updated",
+  "organization.deleted",
   "project.created",
   "project.deleted",
   "project.updated",
@@ -23,6 +25,7 @@ export const EventTypeSchema = z.enum([
   "sandbox.failed",
   "sandbox.deleted",
   "billing.credits_purchased",
+  "billing.credits_granted",
   "billing.usage_charged",
   "billing.auto_topup_failed",
   "billing.spend_limit_reached",

@@ -10,6 +10,8 @@ import {
   DeleteFileRequestSchema,
   ListFilesRequestSchema,
   OrganizationBillingSchema,
+  OrganizationDeleteResponseSchema,
+  OrganizationSchema,
   OrganizationUsageSchema,
   OrganizationInvitationRevokeResponseSchema,
   OrganizationInvitationSchema,
@@ -324,13 +326,24 @@ export class MetalClient {
       this.request({
         method: "GET",
         path: `/v1/organizations/${organizationId}`,
-        schema: z.object({
-          id: z.string(),
-          name: z.string(),
-          slug: z.string(),
-          created_at: z.string(),
-          updated_at: z.string(),
-        }),
+        schema: OrganizationSchema,
+      }),
+    update: (organizationId: string, input: { name: string; slug: string }) =>
+      this.request({
+        method: "PATCH",
+        path: `/v1/organizations/${organizationId}`,
+        body: input,
+        schema: OrganizationSchema,
+      }),
+    delete: (
+      organizationId: string,
+      input: { confirm_name: string; confirm_forfeit_balance?: boolean },
+    ) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/organizations/${organizationId}`,
+        body: input,
+        schema: OrganizationDeleteResponseSchema,
       }),
   };
 

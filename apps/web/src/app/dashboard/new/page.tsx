@@ -9,7 +9,8 @@ export default function NewOrganizationPage() {
           <h1 className="text-2xl font-semibold">Create organization</h1>
         </CardTitle>
         <CardDescription>
-          Organizations hold members, projects, settings, and future billing configuration.
+          Organizations hold members, projects, settings, and credits. Your first organization
+          receives $500.00 in welcome credits.
         </CardDescription>
       </CardHeader>
       <CardContent>

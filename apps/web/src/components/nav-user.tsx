@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import {
   BookOpen02Icon,
   ComputerIcon,
-  CustomerSupportIcon,
   Logout01Icon,
   Moon02Icon,
   MoreHorizontalIcon,
@@ -86,18 +85,14 @@ export function NavUser({
                 <HugeiconsIcon icon={UserAccountIcon} strokeWidth={2} />
                 Profile
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push(`${settingsHref}#preferences`)}>
+              <DropdownMenuItem onClick={() => router.push(settingsHref)}>
                 <HugeiconsIcon icon={Settings04Icon} strokeWidth={2} />
-                Preferences
+                Organization settings
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => router.push(`${settingsHref}#support`)}>
-                <HugeiconsIcon icon={CustomerSupportIcon} strokeWidth={2} />
-                Help & Support
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push(`${settingsHref}#api-reference`)}>
+              <DropdownMenuItem onClick={() => router.push("/api-reference")}>
                 <HugeiconsIcon icon={BookOpen02Icon} strokeWidth={2} />
                 API Reference
               </DropdownMenuItem>

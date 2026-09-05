@@ -11,6 +11,7 @@ import {
   CreateProjectRequestSchema,
   CreateSandboxEndpointRequestSchema,
   CreateSandboxRequestSchema,
+  DeleteOrganizationRequestSchema,
   DeleteFileRequestSchema,
   ListEventsQuerySchema,
   ListFilesRequestSchema,
@@ -26,6 +27,7 @@ import {
   SandboxEndpointIdSchema,
   SandboxProviderSchema,
   SandboxIdSchema,
+  UpdateOrganizationRequestSchema,
   UpdateProjectRequestSchema,
   UpdateOrganizationRoleRequestSchema,
   WriteFileRequestSchema,
@@ -50,6 +52,7 @@ import {
   createOrganization,
   createProject,
   createSandbox,
+  deleteOrganization,
   deleteProject,
   getOrganization,
   getProject,
@@ -61,6 +64,7 @@ import {
   requestSandboxDeletion,
   requestSandboxPause,
   requestSandboxResume,
+  updateOrganization,
   updateProject,
 } from "./services.js";
 import {
@@ -510,6 +514,54 @@ export async function buildApp(
     );
     await acceptPendingInvitations(db.db, principal.userId);
     return serializeOrg(await getOrganization(db.db, principal.userId, organizationId));
+  });
+
+  app.patch(`/${API_VERSION}/organizations/:organization_id`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    const parsed = UpdateOrganizationRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid organization payload", {
+        issues: parsed.error.issues,
+      });
+    }
+    try {
+      return serializeOrg(
+        await updateOrganization(db.db, {
+          userId: principal.userId,
+          organizationId,
+          name: parsed.data.name,
+          slug: parsed.data.slug,
+        }),
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ApiError(409, "conflict", "organization slug already exists");
+      }
+      throw error;
+    }
+  });
+
+  app.delete(`/${API_VERSION}/organizations/:organization_id`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    const parsed = DeleteOrganizationRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid organization deletion payload", {
+        issues: parsed.error.issues,
+      });
+    }
+    const deleted = await deleteOrganization(db.db, {
+      userId: principal.userId,
+      organizationId,
+      confirmName: parsed.data.confirm_name,
+      confirmForfeitBalance: parsed.data.confirm_forfeit_balance,
+    });
+    return { id: deleted.id, deleted: true as const };
   });
 
   app.get(`/${API_VERSION}/organizations/:organization_id/billing`, async (request) => {
@@ -1430,10 +1482,13 @@ function headerValue(value: string | string[] | undefined): string | undefined {
 }
 
 function isUniqueViolation(error: unknown): boolean {
-  return Boolean(
-    error &&
-    typeof error === "object" &&
-    "code" in error &&
-    (error as { code?: string }).code === "23505",
-  );
+  let current = error;
+  for (let depth = 0; depth < 5; depth += 1) {
+    if (!current || typeof current !== "object") return false;
+    if ("code" in current && (current as { code?: string }).code === "23505") {
+      return true;
+    }
+    current = "cause" in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return false;
 }

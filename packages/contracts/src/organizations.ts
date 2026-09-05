@@ -24,6 +24,24 @@ export const CreateOrganizationRequestSchema = z.object({
 });
 export type CreateOrganizationRequest = z.infer<typeof CreateOrganizationRequestSchema>;
 
+export const UpdateOrganizationRequestSchema = z.object({
+  name: OrganizationNameSchema,
+  slug: ResourceSlugSchema,
+});
+export type UpdateOrganizationRequest = z.infer<typeof UpdateOrganizationRequestSchema>;
+
+export const DeleteOrganizationRequestSchema = z.object({
+  confirm_name: OrganizationNameSchema,
+  confirm_forfeit_balance: z.boolean().default(false),
+});
+export type DeleteOrganizationRequest = z.infer<typeof DeleteOrganizationRequestSchema>;
+
+export const OrganizationDeleteResponseSchema = z.object({
+  id: OpaqueIdSchema,
+  deleted: z.literal(true),
+});
+export type OrganizationDeleteResponse = z.infer<typeof OrganizationDeleteResponseSchema>;
+
 export const OrganizationListResponseSchema = z.object({
   organizations: z.array(OrganizationSchema),
 });

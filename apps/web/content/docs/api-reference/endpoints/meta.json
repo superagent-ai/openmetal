@@ -4,6 +4,7 @@
     "organizations",
     "members",
     "billing",
+    "usage",
     "projects",
     "provider-credentials",
     "api-keys",

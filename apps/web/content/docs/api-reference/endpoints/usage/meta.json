@@ -1,0 +1,5 @@
+{
+  "title": "Usage",
+  "description": "Organization compute cost analytics.",
+  "pages": ["getOrganizationUsage"]
+}

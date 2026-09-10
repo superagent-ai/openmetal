@@ -15,15 +15,15 @@
     "test:runtime-full-stack": "pnpm --filter @openmetal/worker... build && pnpm --filter @openmetal/cli... build && vitest run test/runtime-full-stack.integration.test.ts"
   },
   "dependencies": {
+    "@dotenvx/dotenvx": "2.23.0",
     "@fastify/cors": "11.3.0",
     "@fastify/helmet": "13.1.1",
-    "@openmetal/contracts": "workspace:*",
     "@openmetal/billing": "workspace:*",
+    "@openmetal/contracts": "workspace:*",
     "@openmetal/db": "workspace:*",
     "@openmetal/events": "workspace:*",
     "@openmetal/logger": "workspace:*",
     "@supabase/supabase-js": "2.112.3",
-    "dotenv": "17.4.2",
     "drizzle-orm": "0.45.2",
     "fastify": "5.12.1",
     "zod": "4.4.3"

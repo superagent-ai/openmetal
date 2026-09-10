@@ -1,11 +1,9 @@
-import { config as loadEnv } from "dotenv";
-
-loadEnv({ path: "../../.env" });
-loadEnv({ path: ".env" });
-
 import { createLogger } from "@openmetal/logger";
 import { buildApp } from "./app.js";
 import { loadApiEnv } from "./env.js";
+import { loadRootEnv } from "./load-root-env.js";
+
+loadRootEnv();
 
 const env = loadApiEnv();
 const log = createLogger({

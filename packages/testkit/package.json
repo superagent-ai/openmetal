@@ -18,13 +18,13 @@
     "test:realtime": "vitest run test/realtime.integration.test.ts"
   },
   "dependencies": {
+    "@dotenvx/dotenvx": "2.23.0",
     "@openmetal/contracts": "workspace:*",
     "@openmetal/db": "workspace:*",
     "@openmetal/events": "workspace:*",
     "@openmetal/provider-core": "workspace:*",
     "@openmetal/sdk": "workspace:*",
     "@supabase/supabase-js": "2.112.3",
-    "dotenv": "17.4.2",
     "postgres": "3.4.9",
     "zod": "4.4.3"
   },

@@ -1,11 +1,11 @@
-import { config as loadEnvFile } from "dotenv";
 import { afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDatabase, organizations } from "@openmetal/db";
 import type { SandboxProviderName } from "@openmetal/provider-core";
 import { listOrganizationByokProviders } from "../src/provider-credentials.js";
+import { loadRootEnv } from "../src/load-root-env.js";
 
-loadEnvFile({ path: "../../.env", override: true });
+loadRootEnv();
 
 const enabled = process.env.METAL_LIVE_TESTS === "1";
 const databaseUrl = process.env.DATABASE_URL;

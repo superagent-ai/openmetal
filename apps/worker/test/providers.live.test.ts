@@ -1,4 +1,3 @@
-import { config as loadEnvFile } from "dotenv";
 import { afterAll, describe, expect, it } from "vitest";
 import type {
   ProviderExecEvent,
@@ -7,9 +6,10 @@ import type {
   SandboxProviderName,
 } from "@openmetal/provider-core";
 import { loadWorkerEnv } from "../src/env.js";
+import { loadRootEnv } from "../src/load-root-env.js";
 import { buildSandboxProviders } from "../src/provider-registry.js";
 
-loadEnvFile({ path: "../../.env" });
+loadRootEnv();
 
 const providerNames = [
   "blaxel",

@@ -1,4 +1,5 @@
 export * from "./env.js";
+export * from "./load-root-env.js";
 export * from "./users.js";
 export * from "./boundaries.js";
 export * from "./fake-provider.js";

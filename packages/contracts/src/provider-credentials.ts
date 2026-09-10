@@ -41,6 +41,10 @@ export const ProviderCredentialInputSchema = z.discriminatedUnion("provider", [
     api_key: SecretSchema,
   }),
   z.object({
+    provider: z.literal("freestyle"),
+    api_key: SecretSchema,
+  }),
+  z.object({
     provider: z.literal("modal"),
     token_id: SecretSchema,
     token_secret: SecretSchema,

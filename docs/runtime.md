@@ -84,12 +84,13 @@ Delete returns `202` and moves an active lease toward `revoked`; repeated deleti
 | CodeSandbox | No                            | No                             | No             |
 | Daytona     | No ordered stream             | Read, write, list, delete      | No             |
 | E2B         | Execute and stream; no cancel | Read, write, list, delete      | No             |
+| Freestyle   | No ordered stream             | Read, write, list, delete      | No             |
 | Modal       | Execute and stream; no cancel | Read, write, list, delete      | No             |
 | Northflank  | No                            | No                             | No             |
 | Runloop     | No ordered stream             | Read and write                 | No             |
 | Vercel      | Execute and stream; no cancel | Read and write                 | No             |
 
-The worker requires ordered process streaming, so Blaxel, Daytona, and Runloop's buffered adapters are rejected. Cloudflare supports an omitted or empty environment but rejects non-empty environment overrides. E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Daytona, E2B, Modal, Runloop, and Vercel reject append writes; Runloop also rejects parent creation. Only Blaxel, Daytona, E2B, and Modal implement file list/delete.
+The worker requires ordered process streaming, so Blaxel, Daytona, Freestyle, and Runloop's buffered adapters are rejected. Cloudflare supports an omitted or empty environment but rejects non-empty environment overrides. E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Daytona, E2B, Freestyle, Modal, Runloop, and Vercel reject append writes; Freestyle supports only overwrite writes, and Runloop rejects parent creation. Blaxel, Daytona, E2B, Freestyle, and Modal implement file list/delete. Freestyle's native buffered exec is limited to 300 seconds.
 
 Only Blaxel exposes portable HTTP endpoints with a verified native expiry and revocation path. If an endpoint-create job is reclaimed after exposure may have started, the worker does not call the exposure method again: it records a failed resource with an unknown provider outcome and makes a best-effort revoke when a durable lease ID was stored. Native provider expiry bounds an orphan when the crash occurred before that identity became durable. Other adapters' endpoint capabilities are disabled when live verification cannot prove the complete lease contract. See the OpenMetal skill's [provider reference](../skills/openmetal/references/providers-and-billing.md) for adapter ceilings and additional details.
 

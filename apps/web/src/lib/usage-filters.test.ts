@@ -25,7 +25,7 @@ describe("usage filters", () => {
       parseUsageFilters({
         range: "7d",
         billing_mode: "byok",
-        provider: "runloop",
+        provider: "freestyle",
         project_id: "prj_abc123",
         status: "stopped",
         cost_provenance: "provider_reported",
@@ -33,7 +33,7 @@ describe("usage filters", () => {
     ).toEqual({
       range: "7d",
       billingMode: "byok",
-      provider: "runloop",
+      provider: "freestyle",
       projectId: "prj_abc123",
       status: "stopped",
       costProvenance: "provider_reported",

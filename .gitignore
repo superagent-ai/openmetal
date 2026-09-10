@@ -11,12 +11,15 @@ blob-report
 .playwright
 *.tsbuildinfo
 .DS_Store
-.env
 .env.local
 .env.*.local
+.env.keys
+!.env
 !.env.example
+!.env.local.example
 apps/web/.env
 apps/web/.env.local
+supabase/.env
 apps/web/AGENTS.md
 apps/web/CLAUDE.md
 apps/web/next-env.d.ts

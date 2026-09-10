@@ -11,6 +11,7 @@ Read this reference before choosing a provider, requiring pause/resume, configur
 | CodeSandbox | Environment, provider template | Yes                                             | Yes    | Yes                                      |
 | Daytona     | Environment, OCI image         | Attempted; capability reporting is inconsistent | No     | Yes                                      |
 | E2B         | Environment, provider template | Yes                                             | Yes    | Yes                                      |
+| Freestyle   | Environment, provider template | Yes                                             | Yes    | Estimated rate card (low confidence)     |
 | Modal       | Environment, OCI image         | No                                              | No     | No                                       |
 | Northflank  | Environment, OCI image         | Yes                                             | Yes    | Yes                                      |
 | Runloop     | Environment, provider template | Yes                                             | Yes    | Yes                                      |
@@ -31,6 +32,7 @@ The worker requires both process execution and ordered streaming. An adapter tha
 | CodeSandbox | No                             | No                        | No                    |
 | Daytona     | No: adapter output is buffered | Read, write, list, delete | No                    |
 | E2B         | Execute and stream; no cancel  | Read, write, list, delete | No                    |
+| Freestyle   | No: adapter output is buffered | Read, write, list, delete | No                    |
 | Modal       | Execute and stream; no cancel  | Read, write, list, delete | No                    |
 | Northflank  | No                             | No                        | No                    |
 | Runloop     | No: adapter output is buffered | Read and write            | No                    |
@@ -41,18 +43,20 @@ Global contract ceilings are 100 MiB process output, 10 MiB per file read/write,
 - Blaxel: 10 MiB output, 10 MiB file read/write, 10,000 list entries.
 - Cloudflare: 10 MiB output and 10 MiB file read/write.
 - Daytona, E2B, and Modal: 100 MiB output, 10 MiB file read/write, 10,000 list entries.
+- Freestyle: 10 MiB output, 10 MiB file read/write, 10,000 list entries.
 - Runloop and Vercel: 10 MiB output and 10 MiB file read/write.
 - Endpoint-capable adapters advertise at most 86,400 seconds.
 
 Provider-specific runtime limitations:
 
-- Blaxel, Daytona, and Runloop advertise process execution but not ordered streaming, so the worker records `capability_unsupported` instead of starting a public process.
+- Blaxel, Daytona, Freestyle, and Runloop advertise process execution but not ordered streaming, so the worker records `capability_unsupported` instead of starting a public process.
 - Cloudflare supports ordered process execution with an omitted or empty environment, but rejects non-empty environment overrides. It has no process cancellation.
 - E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Runloop supports provider-level cancellation, but its buffered output is not usable through the public process API.
 - Daytona, E2B, and Modal reject append writes. Runloop and Vercel also reject append; Runloop rejects `create_parents: true`.
 - Blaxel and Cloudflare implement append by reading and rewriting the whole file, so the resulting file must still fit their 10 MiB adapter limit.
 - Cloudflare file paths must be within `/workspace`; it does not implement list or delete. Runloop and Vercel do not implement list or delete and require a file path rather than `/`.
 - Vercel file writes are additionally constrained by USTAR path-component limits.
+- Freestyle uses buffered native execution with a 300-second provider timeout ceiling. It supports atomic overwrite writes but not portable create-only or append modes. Its managed cost is a low-confidence cumulative rate-card estimate from provider runtime counters and fixed resources; it excludes transfer, plan credits, discounts, and enterprise pricing.
 - Only Blaxel exposes portable HTTP endpoints with a live-verified native expiry and revocation path. All other adapters keep the endpoint capability disabled when the upstream API cannot satisfy or live verification cannot prove the complete lease contract.
 
 Capability checks happen in the worker after the API accepts a process, filesystem operation, or endpoint. Always inspect the terminal resource and its `error`; HTTP 202 is not capability confirmation.
@@ -152,6 +156,15 @@ E2B:
 ```json
 {
   "provider": "e2b",
+  "api_key": "<secret>"
+}
+```
+
+Freestyle:
+
+```json
+{
+  "provider": "freestyle",
   "api_key": "<secret>"
 }
 ```

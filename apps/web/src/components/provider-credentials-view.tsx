@@ -48,6 +48,7 @@ type ProviderName =
   | "codesandbox"
   | "daytona"
   | "e2b"
+  | "freestyle"
   | "modal"
   | "northflank"
   | "runloop"
@@ -173,6 +174,20 @@ const providers: ProviderDefinition[] = [
     label: "E2B",
     logo: "/providers/e2b.png",
     logoClassName: "dark:invert",
+    fields: [
+      {
+        name: "api_key",
+        label: "API key",
+        placeholder: "Enter your API key",
+        type: "password",
+        required: true,
+      },
+    ],
+  },
+  {
+    name: "freestyle",
+    label: "Freestyle",
+    logo: "/providers/freestyle.png",
     fields: [
       {
         name: "api_key",

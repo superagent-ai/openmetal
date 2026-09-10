@@ -1,14 +1,12 @@
-import { config as loadEnv } from "dotenv";
-
-loadEnv({ path: "../../.env" });
-loadEnv({ path: ".env" });
-
 import { createDatabase } from "@openmetal/db";
 import { createLogger } from "@openmetal/logger";
+import { loadRootEnv } from "./load-root-env.js";
 import { loadWorkerEnv } from "./env.js";
 import { buildSandboxProviders } from "./provider-registry.js";
 import { createRealtimePublisher } from "./publisher.js";
 import { runWorkerLoop } from "./processor.js";
+
+loadRootEnv();
 
 const env = loadWorkerEnv();
 const logger = createLogger({

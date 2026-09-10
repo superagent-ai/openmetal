@@ -1,8 +1,7 @@
-import { config as loadEnv } from "dotenv";
 import { z } from "zod";
+import { loadRootEnv } from "./load-root-env.js";
 
-loadEnv({ path: ".env" });
-loadEnv({ path: "../../.env" });
+loadRootEnv();
 
 export const TestEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),

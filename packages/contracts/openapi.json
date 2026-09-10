@@ -792,6 +792,25 @@
             "properties": {
               "provider": {
                 "type": "string",
+                "const": "freestyle"
+              },
+              "api_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              }
+            },
+            "required": [
+              "provider",
+              "api_key"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
                 "const": "modal"
               },
               "token_id": {
@@ -940,6 +959,7 @@
               "codesandbox",
               "daytona",
               "e2b",
+              "freestyle",
               "modal",
               "northflank",
               "runloop",
@@ -988,6 +1008,7 @@
                     "codesandbox",
                     "daytona",
                     "e2b",
+                    "freestyle",
                     "modal",
                     "northflank",
                     "runloop",
@@ -1030,6 +1051,7 @@
               "codesandbox",
               "daytona",
               "e2b",
+              "freestyle",
               "modal",
               "northflank",
               "runloop",
@@ -1542,6 +1564,7 @@
                   "codesandbox",
                   "daytona",
                   "e2b",
+                  "freestyle",
                   "modal",
                   "northflank",
                   "runloop",
@@ -1624,6 +1647,7 @@
                       "codesandbox",
                       "daytona",
                       "e2b",
+                      "freestyle",
                       "modal",
                       "northflank",
                       "runloop",
@@ -1789,7 +1813,7 @@
             "type": "object",
             "properties": {
               "providers": {
-                "maxItems": 8,
+                "maxItems": 9,
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -1799,6 +1823,7 @@
                     "codesandbox",
                     "daytona",
                     "e2b",
+                    "freestyle",
                     "modal",
                     "northflank",
                     "runloop",
@@ -1809,7 +1834,7 @@
               "max_attempts": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 9
+                "maximum": 10
               }
             },
             "required": [
@@ -1866,6 +1891,15 @@
                 "type": "object",
                 "properties": {
                   "template_id": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "freestyle": {
+                "type": "object",
+                "properties": {
+                  "snapshot_id": {
                     "type": "string"
                   }
                 },
@@ -2016,6 +2050,7 @@
                       "codesandbox",
                       "daytona",
                       "e2b",
+                      "freestyle",
                       "modal",
                       "northflank",
                       "runloop",
@@ -2098,6 +2133,7 @@
                           "codesandbox",
                           "daytona",
                           "e2b",
+                          "freestyle",
                           "modal",
                           "northflank",
                           "runloop",
@@ -2263,7 +2299,7 @@
                 "type": "object",
                 "properties": {
                   "providers": {
-                    "maxItems": 8,
+                    "maxItems": 9,
                     "type": "array",
                     "items": {
                       "type": "string",
@@ -2273,6 +2309,7 @@
                         "codesandbox",
                         "daytona",
                         "e2b",
+                        "freestyle",
                         "modal",
                         "northflank",
                         "runloop",
@@ -2283,7 +2320,7 @@
                   "max_attempts": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 9
+                    "maximum": 10
                   }
                 },
                 "required": [
@@ -2340,6 +2377,15 @@
                     "type": "object",
                     "properties": {
                       "template_id": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "freestyle": {
+                    "type": "object",
+                    "properties": {
+                      "snapshot_id": {
                         "type": "string"
                       }
                     },
@@ -2443,6 +2489,7 @@
                   "codesandbox",
                   "daytona",
                   "e2b",
+                  "freestyle",
                   "modal",
                   "northflank",
                   "runloop",
@@ -2672,6 +2719,7 @@
                           "codesandbox",
                           "daytona",
                           "e2b",
+                          "freestyle",
                           "modal",
                           "northflank",
                           "runloop",
@@ -2754,6 +2802,7 @@
                               "codesandbox",
                               "daytona",
                               "e2b",
+                              "freestyle",
                               "modal",
                               "northflank",
                               "runloop",
@@ -2919,7 +2968,7 @@
                     "type": "object",
                     "properties": {
                       "providers": {
-                        "maxItems": 8,
+                        "maxItems": 9,
                         "type": "array",
                         "items": {
                           "type": "string",
@@ -2929,6 +2978,7 @@
                             "codesandbox",
                             "daytona",
                             "e2b",
+                            "freestyle",
                             "modal",
                             "northflank",
                             "runloop",
@@ -2939,7 +2989,7 @@
                       "max_attempts": {
                         "type": "integer",
                         "minimum": 1,
-                        "maximum": 9
+                        "maximum": 10
                       }
                     },
                     "required": [
@@ -2996,6 +3046,15 @@
                         "type": "object",
                         "properties": {
                           "template_id": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "freestyle": {
+                        "type": "object",
+                        "properties": {
+                          "snapshot_id": {
                             "type": "string"
                           }
                         },
@@ -3099,6 +3158,7 @@
                       "codesandbox",
                       "daytona",
                       "e2b",
+                      "freestyle",
                       "modal",
                       "northflank",
                       "runloop",
@@ -3450,6 +3510,7 @@
                             "codesandbox",
                             "daytona",
                             "e2b",
+                            "freestyle",
                             "modal",
                             "northflank",
                             "runloop",
@@ -3532,6 +3593,7 @@
                                 "codesandbox",
                                 "daytona",
                                 "e2b",
+                                "freestyle",
                                 "modal",
                                 "northflank",
                                 "runloop",
@@ -3697,7 +3759,7 @@
                       "type": "object",
                       "properties": {
                         "providers": {
-                          "maxItems": 8,
+                          "maxItems": 9,
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -3707,6 +3769,7 @@
                               "codesandbox",
                               "daytona",
                               "e2b",
+                              "freestyle",
                               "modal",
                               "northflank",
                               "runloop",
@@ -3717,7 +3780,7 @@
                         "max_attempts": {
                           "type": "integer",
                           "minimum": 1,
-                          "maximum": 9
+                          "maximum": 10
                         }
                       },
                       "required": [
@@ -3774,6 +3837,15 @@
                           "type": "object",
                           "properties": {
                             "template_id": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "freestyle": {
+                          "type": "object",
+                          "properties": {
+                            "snapshot_id": {
                               "type": "string"
                             }
                           },
@@ -3877,6 +3949,7 @@
                         "codesandbox",
                         "daytona",
                         "e2b",
+                        "freestyle",
                         "modal",
                         "northflank",
                         "runloop",
@@ -4115,6 +4188,7 @@
                             "codesandbox",
                             "daytona",
                             "e2b",
+                            "freestyle",
                             "modal",
                             "northflank",
                             "runloop",
@@ -4197,6 +4271,7 @@
                                 "codesandbox",
                                 "daytona",
                                 "e2b",
+                                "freestyle",
                                 "modal",
                                 "northflank",
                                 "runloop",
@@ -4362,7 +4437,7 @@
                       "type": "object",
                       "properties": {
                         "providers": {
-                          "maxItems": 8,
+                          "maxItems": 9,
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4372,6 +4447,7 @@
                               "codesandbox",
                               "daytona",
                               "e2b",
+                              "freestyle",
                               "modal",
                               "northflank",
                               "runloop",
@@ -4382,7 +4458,7 @@
                         "max_attempts": {
                           "type": "integer",
                           "minimum": 1,
-                          "maximum": 9
+                          "maximum": 10
                         }
                       },
                       "required": [
@@ -4439,6 +4515,15 @@
                           "type": "object",
                           "properties": {
                             "template_id": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "freestyle": {
+                          "type": "object",
+                          "properties": {
+                            "snapshot_id": {
                               "type": "string"
                             }
                           },
@@ -4542,6 +4627,7 @@
                         "codesandbox",
                         "daytona",
                         "e2b",
+                        "freestyle",
                         "modal",
                         "northflank",
                         "runloop",
@@ -5113,6 +5199,7 @@
                   "codesandbox",
                   "daytona",
                   "e2b",
+                  "freestyle",
                   "modal",
                   "northflank",
                   "runloop",
@@ -6053,6 +6140,7 @@
                   "codesandbox",
                   "daytona",
                   "e2b",
+                  "freestyle",
                   "modal",
                   "northflank",
                   "runloop",
@@ -6335,6 +6423,7 @@
                   "codesandbox",
                   "daytona",
                   "e2b",
+                  "freestyle",
                   "modal",
                   "northflank",
                   "runloop",
@@ -6597,6 +6686,7 @@
                         "codesandbox",
                         "daytona",
                         "e2b",
+                        "freestyle",
                         "modal",
                         "northflank",
                         "runloop",
@@ -7685,6 +7775,7 @@
                     "codesandbox",
                     "daytona",
                     "e2b",
+                    "freestyle",
                     "modal",
                     "northflank",
                     "runloop",
@@ -7941,6 +8032,7 @@
                     "codesandbox",
                     "daytona",
                     "e2b",
+                    "freestyle",
                     "modal",
                     "northflank",
                     "runloop",
@@ -8101,6 +8193,7 @@
                     "codesandbox",
                     "daytona",
                     "e2b",
+                    "freestyle",
                     "modal",
                     "northflank",
                     "runloop",
@@ -8317,6 +8410,7 @@
             "codesandbox",
             "daytona",
             "e2b",
+            "freestyle",
             "modal",
             "northflank",
             "runloop",
@@ -9437,6 +9531,7 @@
                 "codesandbox",
                 "daytona",
                 "e2b",
+                "freestyle",
                 "modal",
                 "northflank",
                 "runloop",

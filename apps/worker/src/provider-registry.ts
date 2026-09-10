@@ -3,6 +3,7 @@ import { CloudflareSandboxProvider } from "@openmetal/provider-cloudflare";
 import { CodeSandboxProvider } from "@openmetal/provider-codesandbox";
 import { DaytonaSandboxProvider } from "@openmetal/provider-daytona";
 import { E2BSandboxProvider } from "@openmetal/provider-e2b";
+import { FreestyleSandboxProvider } from "@openmetal/provider-freestyle";
 import { ModalSandboxProvider } from "@openmetal/provider-modal";
 import { NorthflankSandboxProvider } from "@openmetal/provider-northflank";
 import { RunloopSandboxProvider } from "@openmetal/provider-runloop";
@@ -69,6 +70,13 @@ export function buildSandboxProviders(
       apiKey: env.E2B_API_KEY,
       apiUrl: env.E2B_API_URL,
       templateId: env.E2B_TEMPLATE_ID,
+    });
+  }
+  if (env.FREESTYLE_API_KEY) {
+    providers.freestyle = new FreestyleSandboxProvider({
+      apiKey: env.FREESTYLE_API_KEY,
+      apiUrl: env.FREESTYLE_API_URL,
+      snapshotId: env.FREESTYLE_SNAPSHOT_ID,
     });
   }
   if (env.MODAL_TOKEN_ID && env.MODAL_TOKEN_SECRET) {
@@ -151,6 +159,8 @@ export function buildByokSandboxProvider(credential: ProviderCredentialInput): S
       });
     case "e2b":
       return new E2BSandboxProvider({ apiKey: credential.api_key });
+    case "freestyle":
+      return new FreestyleSandboxProvider({ apiKey: credential.api_key });
     case "modal":
       return new ModalSandboxProvider({
         tokenId: credential.token_id,

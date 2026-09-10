@@ -1,4 +1,3 @@
-import { config as loadEnvFile } from "dotenv";
 import { afterAll, describe, expect, it } from "vitest";
 import type {
   ProviderExecEvent,
@@ -7,9 +6,10 @@ import type {
   SandboxProviderName,
 } from "@openmetal/provider-core";
 import { loadWorkerEnv } from "../src/env.js";
+import { loadRootEnv } from "../src/load-root-env.js";
 import { buildSandboxProviders } from "../src/provider-registry.js";
 
-loadEnvFile({ path: "../../.env" });
+loadRootEnv();
 
 const providerNames = [
   "blaxel",
@@ -17,6 +17,7 @@ const providerNames = [
   "codesandbox",
   "daytona",
   "e2b",
+  "freestyle",
   "modal",
   "northflank",
   "runloop",
@@ -671,6 +672,7 @@ function missingCredentialNames(
     codesandbox: [["CODESANDBOX_API_KEY"]],
     daytona: [["DAYTONA_API_KEY"]],
     e2b: [["E2B_API_KEY"]],
+    freestyle: [["FREESTYLE_API_KEY"]],
     modal: [["MODAL_TOKEN_ID"], ["MODAL_TOKEN_SECRET"]],
     northflank: [["NORTHFLANK_API_TOKEN"], ["NORTHFLANK_PROJECT_ID"]],
     runloop: [["RUNLOOP_API_KEY"]],

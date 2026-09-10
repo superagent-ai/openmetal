@@ -31,6 +31,7 @@ const providers = [
   "codesandbox",
   "daytona",
   "e2b",
+  "freestyle",
   "modal",
   "northflank",
   "runloop",

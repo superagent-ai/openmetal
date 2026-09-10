@@ -1,8 +1,16 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { config as loadEnv } from "dotenv";
+import { config as loadEnv } from "@dotenvx/dotenvx";
 import { createDatabase } from "@openmetal/db";
 
-loadEnv({ path: "../../.env", override: true });
+const root = resolve(import.meta.dirname, "../../..");
+loadEnv({
+  path: [".env.local", ".env"]
+    .map((name) => resolve(root, name))
+    .filter((file) => existsSync(file)),
+  quiet: true,
+});
 
 const env = {
   DATABASE_URL: process.env.DATABASE_URL ?? "",

@@ -17,7 +17,7 @@ Metal is OpenRouter for cloud sandboxes and GPUs:
 - Customers pay Metal; Metal reconciles and pays providers.
 - The public API and TypeScript SDK hide provider-specific lifecycle, usage, and billing differences.
 
-The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Modal, Northflank, Runloop, and Vercel. Provider integrations remain behind one capability-oriented Metal API; they are not separate customer-facing products.
+The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Freestyle, Modal, Northflank, Runloop, and Vercel. Provider integrations remain behind one capability-oriented Metal API; they are not separate customer-facing products.
 
 ## Architecture
 
@@ -74,14 +74,25 @@ The skill follows the open [Agent Skills specification](https://agentskills.io) 
 
 ## Environment setup
 
+Shared development secrets live in the committed, encrypted `.env`. That file is Metal-only: do not add variables from other Superagent repos. The private decryption key is stored on the **superagent-team** Dotenvx Armor org, not in git.
+
+Machine-specific values (local Supabase URLs and keys) live in gitignored `.env.local`.
+
 ```bash
-cp .env.example .env
-cp supabase/.env.example supabase/.env
+pnpm exec dotenvx armor login
 pnpm supabase:start
 pnpm env:local
 ```
 
-`pnpm env:local` copies values from `supabase status` into gitignored `.env` files. It does not write OAuth secrets. Fill `supabase/.env` with Google and GitHub client credentials to test social login locally. Never commit tokens, database passwords, or secret keys.
+`pnpm env:local` writes `.env.local` and `apps/web/.env.local` from `supabase status`. It also copies shared Google and GitHub OAuth values from encrypted `.env` into `supabase/.env`. Never commit tokens, database passwords, or secret keys.
+
+To change a shared secret:
+
+```bash
+pnpm exec dotenvx set STRIPE_SECRET_KEY sk_test_... -f .env
+```
+
+`dotenvx set` encrypts the value in place. After the first encrypt, store this repo's private key on superagent-team with `pnpm env:armor`. `pnpm dev` and the integration test scripts load `.env.local` over encrypted `.env` through dotenvx.
 
 ## Local Supabase lifecycle
 
@@ -119,7 +130,9 @@ OAuth client IDs and secrets belong to Supabase Auth, not the Next.js app. Do no
 
 Local Auth reads credentials from `supabase/.env` via `config.toml` `env()` substitution. After changing `config.toml`, run `pnpm supabase:stop` then `pnpm supabase:start`. `pnpm supabase:reset` is not enough.
 
-**Local `supabase/.env`**
+**Local Auth OAuth**
+
+These values live in encrypted `.env` and are copied to `supabase/.env` by `pnpm env:local`.
 
 | Variable                                  | Source                           |
 | ----------------------------------------- | -------------------------------- |
@@ -138,7 +151,7 @@ Metal's local Auth callback is `http://127.0.0.1:55321/auth/v1/callback`, not th
    - Local: `http://127.0.0.1:55321/auth/v1/callback`
    - Hosted: `https://<project-ref>.supabase.co/auth/v1/callback`
 4. Scopes: `openid`, `userinfo.email`, `userinfo.profile`.
-5. Paste the client ID and secret into `supabase/.env` and into hosted Authentication → Sign In / Providers → Google. Leave Skip nonce check off in hosted; local `config.toml` sets `skip_nonce_check = true`.
+5. Paste the client ID and secret into encrypted `.env` (`pnpm exec dotenvx set ... -f .env`) and into hosted Authentication → Sign In / Providers → Google. `pnpm env:local` copies those values into `supabase/.env`. Leave Skip nonce check off in hosted; local `config.toml` sets `skip_nonce_check = true`.
 
 **GitHub OAuth App**
 
@@ -193,7 +206,7 @@ pnpm test:rls
 pnpm test:realtime
 ```
 
-Integration, RLS, and Realtime tests require local Supabase plus `pnpm env:local`.
+Integration, RLS, and Realtime tests require local Supabase plus `pnpm env:local` so `.env.local` has this machine's keys.
 
 ## Common local failures
 
@@ -203,6 +216,7 @@ Integration, RLS, and Realtime tests require local Supabase plus `pnpm env:local
 - **Magic link missing**: open Mailpit at `http://127.0.0.1:55324` rather than a real mailbox.
 - **OAuth redirect mismatch**: provider callback URLs must be `http://127.0.0.1:55321/auth/v1/callback` locally. The app route is `/auth/callback`.
 - **Port already allocated**: `pnpm supabase:stop` then start again. API uses 4000, web uses 3100.
+- **Encrypted `.env` will not decrypt**: run `pnpm exec dotenvx armor login` as a member of superagent-team. Do not copy keys from other Superagent repos into this `.env`.
 
 ## Root commands
 
@@ -220,5 +234,8 @@ pnpm format:check
 pnpm supabase:start
 pnpm supabase:stop
 pnpm supabase:reset
+pnpm env:local
+pnpm env:encrypt
+pnpm env:armor
 pnpm db:types
 ```

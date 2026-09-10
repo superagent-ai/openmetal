@@ -886,7 +886,7 @@ export async function requestSandboxResume(
 ) {
   return withTransaction(db, async (tx) => {
     const sandbox = await getSandbox(tx, input);
-    if (!["codesandbox", "e2b", "northflank", "runloop"].includes(sandbox.provider)) {
+    if (!["codesandbox", "e2b", "freestyle", "northflank", "runloop"].includes(sandbox.provider)) {
       throw new ApiError(
         409,
         "capability_unsupported",

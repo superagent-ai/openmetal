@@ -9,6 +9,7 @@ allowBuilds:
   unrs-resolver: true
 minimumReleaseAgeExclude:
   - "@fastify/helmet@13.1.1"
+  - freestyle@0.2.13
 patchedDependencies:
   # React 19 warns when next-themes renders its SSR-only init script on the client.
   # Upstream fix: https://github.com/pacocoursey/next-themes/pull/386

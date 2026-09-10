@@ -34,6 +34,7 @@ export const SandboxProviderSchema = z.enum([
   "codesandbox",
   "daytona",
   "e2b",
+  "freestyle",
   "modal",
   "northflank",
   "runloop",
@@ -88,8 +89,8 @@ export const LifecyclePolicySchema = z.object({
 export type LifecyclePolicy = z.infer<typeof LifecyclePolicySchema>;
 
 export const FallbackPolicySchema = z.object({
-  providers: z.array(SandboxProviderSchema).max(8),
-  max_attempts: z.number().int().min(1).max(9).optional(),
+  providers: z.array(SandboxProviderSchema).max(9),
+  max_attempts: z.number().int().min(1).max(10).optional(),
 });
 export type FallbackPolicy = z.infer<typeof FallbackPolicySchema>;
 
@@ -105,6 +106,7 @@ export const ProviderOptionsSchema = z.object({
     .optional(),
   daytona: ProviderOptionsBaseSchema.optional(),
   e2b: z.object({ template_id: z.string().optional() }).optional(),
+  freestyle: z.object({ snapshot_id: z.string().optional() }).optional(),
   modal: ProviderOptionsBaseSchema.optional(),
   northflank: z
     .object({

@@ -17,7 +17,7 @@ Metal is OpenRouter for cloud sandboxes and GPUs:
 - Customers pay Metal; Metal reconciles and pays providers.
 - The public API and TypeScript SDK hide provider-specific lifecycle, usage, and billing differences.
 
-The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Modal, Northflank, Runloop, and Vercel. Provider integrations remain behind one capability-oriented Metal API; they are not separate customer-facing products.
+The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Freestyle, Modal, Northflank, Runloop, and Vercel. Provider integrations remain behind one capability-oriented Metal API; they are not separate customer-facing products.
 
 ## Architecture
 

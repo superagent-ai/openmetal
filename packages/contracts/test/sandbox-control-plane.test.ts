@@ -76,6 +76,33 @@ describe("unified sandbox contracts", () => {
     ).toThrow();
   });
 
+  it("accepts Freestyle and all nine fallback providers", () => {
+    const parsed = CreateSandboxRequestSchema.parse({
+      ...request,
+      provider: "freestyle",
+      fallback: {
+        providers: [
+          "blaxel",
+          "cloudflare",
+          "codesandbox",
+          "daytona",
+          "e2b",
+          "modal",
+          "northflank",
+          "runloop",
+          "vercel",
+        ],
+        max_attempts: 10,
+      },
+      provider_options: {
+        freestyle: { snapshot_id: "freestyle/ubuntu-sm" },
+      },
+    });
+    expect(parsed.provider).toBe("freestyle");
+    expect(parsed.fallback.providers).toHaveLength(9);
+    expect(parsed.fallback.max_attempts).toBe(10);
+  });
+
   it("parses operation mutation envelopes", () => {
     const operation = OperationSchema.parse({
       id: "op_123",

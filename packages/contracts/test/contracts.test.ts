@@ -128,6 +128,15 @@ describe("contract parsing", () => {
         api_key: "token",
       }),
     ).toThrow();
+    expect(
+      ProviderCredentialInputSchema.parse({
+        provider: "freestyle",
+        api_key: "token",
+      }),
+    ).toEqual({
+      provider: "freestyle",
+      api_key: "token",
+    });
   });
 
   it("documents organization and project lifecycle operations", () => {

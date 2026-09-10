@@ -34,6 +34,10 @@ Managed sandbox creation requires a balance above zero. Usage is charged when du
 
 When a durable charge leaves the balance at or below zero and no automatic top up can run, Metal schedules managed sandboxes to stop.
 
+Freestyle charges use a low confidence rate card estimate from provider runtime counters and fixed
+VM resources. The estimate excludes data transfer, included credits, discounts, and enterprise
+pricing.
+
 ## BYOK
 
 BYOK capacity is billed by the provider and does not consume Metal credits. A single explicitly selected BYOK provider without fallback can create capacity without a positive managed balance.

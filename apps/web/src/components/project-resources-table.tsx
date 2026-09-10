@@ -68,6 +68,7 @@ type Sandbox = {
     | "codesandbox"
     | "daytona"
     | "e2b"
+    | "freestyle"
     | "modal"
     | "northflank"
     | "runloop"

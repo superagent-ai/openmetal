@@ -7,6 +7,7 @@ export const KNOWN_SANDBOX_PROVIDERS = [
   "codesandbox",
   "daytona",
   "e2b",
+  "freestyle",
   "modal",
   "northflank",
   "runloop",

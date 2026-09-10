@@ -40,13 +40,13 @@ This example is also available at `assets/sandbox.example.json`.
 `provider` is optional and accepts `auto` or one of:
 
 ```text
-blaxel, cloudflare, codesandbox, daytona, e2b, modal,
+blaxel, cloudflare, codesandbox, daytona, e2b, freestyle, modal,
 northflank, runloop, vercel
 ```
 
 Omitting `provider` behaves as automatic selection. Prefer automatic selection unless the task has a concrete provider requirement.
 
-`fallback.providers` is an ordered array of up to eight providers. `fallback.max_attempts` is an integer from 1 through 9. Primary and fallback candidates must be unique.
+`fallback.providers` is an ordered array of up to nine providers. `fallback.max_attempts` is an integer from 1 through 10. Primary and fallback candidates must be unique.
 
 With automatic selection, explicit fallback providers are tried first, followed by other configured providers in registry order. With an explicit provider, the primary is tried first, followed by the listed fallbacks. Safe fallback is currently limited to capacity, provider-unavailable, and known-absent timeout failures. Unknown outcomes enter reconciliation before another provider is attempted.
 
@@ -99,7 +99,7 @@ Only providers declaring OCI support are eligible.
 }
 ```
 
-Provider templates cannot use fallback. Prefer a matching explicit top-level provider; if it is omitted or `auto`, the service derives the primary provider from `source.provider`. Provider templates are supported by CodeSandbox, E2B, and Runloop.
+Provider templates cannot use fallback. Prefer a matching explicit top-level provider; if it is omitted or `auto`, the service derives the primary provider from `source.provider`. Provider templates are supported by CodeSandbox, E2B, Freestyle, and Runloop. Freestyle templates are snapshot IDs or slugs; pin an immutable snapshot ID for reproducibility.
 
 ## Resources
 
@@ -198,6 +198,9 @@ Provider options are grouped by provider name:
     "e2b": {
       "template_id": "template-id"
     },
+    "freestyle": {
+      "snapshot_id": "freestyle/ubuntu-sm"
+    },
     "northflank": {
       "deployment_plan": "nf-compute-20",
       "ephemeral_storage_mb": 4096
@@ -210,7 +213,7 @@ Provider options are grouped by provider name:
 }
 ```
 
-When an explicit provider is selected, options may only be supplied for that provider or its fallback candidates. CodeSandbox, E2B, Northflank, and Runloop have typed options. Other provider option objects accept provider-specific keys but offer fewer contract-level guarantees.
+When an explicit provider is selected, options may only be supplied for that provider or its fallback candidates. CodeSandbox, E2B, Freestyle, Northflank, and Runloop have typed options. Other provider option objects accept provider-specific keys but offer fewer contract-level guarantees.
 
 ## Enforcement Summary
 

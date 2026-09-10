@@ -52,6 +52,9 @@ export const WorkerEnvSchema = z.object({
   E2B_API_KEY: z.string().min(1).optional(),
   E2B_API_URL: z.string().url().optional(),
   E2B_TEMPLATE_ID: z.string().min(1).optional(),
+  FREESTYLE_API_KEY: z.string().min(1).optional(),
+  FREESTYLE_API_URL: z.string().url().optional(),
+  FREESTYLE_SNAPSHOT_ID: z.string().min(1).optional(),
   MODAL_TOKEN_ID: z.string().min(1).optional(),
   MODAL_TOKEN_SECRET: z.string().min(1).optional(),
   MODAL_TOKEN_PROFILE: z.string().min(1).optional(),
@@ -84,7 +87,13 @@ export const WorkerEnvSchema = z.object({
 });
 export type WorkerEnv = z.infer<typeof WorkerEnvSchema>;
 
-export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEnv {
+export function loadWorkerEnv(rawSource: NodeJS.ProcessEnv = process.env): WorkerEnv {
+  const source = Object.fromEntries(
+    Object.entries(rawSource).map(([key, value]) => [
+      key,
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    ]),
+  ) as NodeJS.ProcessEnv;
   return WorkerEnvSchema.parse({
     DATABASE_URL: source.DATABASE_URL,
     SUPABASE_URL: source.SUPABASE_URL,
@@ -130,6 +139,9 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     E2B_API_KEY: source.E2B_API_KEY,
     E2B_API_URL: source.E2B_API_URL,
     E2B_TEMPLATE_ID: source.E2B_TEMPLATE_ID,
+    FREESTYLE_API_KEY: source.FREESTYLE_API_KEY,
+    FREESTYLE_API_URL: source.FREESTYLE_API_URL,
+    FREESTYLE_SNAPSHOT_ID: source.FREESTYLE_SNAPSHOT_ID,
     MODAL_TOKEN_ID: source.MODAL_TOKEN_ID,
     MODAL_TOKEN_SECRET: source.MODAL_TOKEN_SECRET,
     MODAL_TOKEN_PROFILE: source.MODAL_TOKEN_PROFILE,

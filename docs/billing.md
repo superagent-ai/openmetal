@@ -64,6 +64,10 @@ Provider reported values can still lag or differ from a final invoice because of
 or delayed billing. Unsupported providers remain marked unavailable instead of receiving a
 fabricated estimate.
 
+Freestyle managed usage is a low-confidence rate-card estimate derived from provider-reported
+cumulative runtime and fixed VM resources. It excludes data transfer, included plan credits,
+discounts, and enterprise pricing, so it can differ from the Freestyle invoice.
+
 ## Provider eligibility
 
 Managed routing skips providers that do not expose durable cost evidence. BYOK continues to use those providers because the customer pays the provider directly.

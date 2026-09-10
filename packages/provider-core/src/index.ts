@@ -269,6 +269,7 @@ export type SandboxProviderName =
   | "codesandbox"
   | "daytona"
   | "e2b"
+  | "freestyle"
   | "modal"
   | "northflank"
   | "runloop"

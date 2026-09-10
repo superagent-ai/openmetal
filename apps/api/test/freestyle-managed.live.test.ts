@@ -11,9 +11,13 @@ import { buildApp } from "../src/app.js";
 import { loadApiEnv } from "../src/env.js";
 
 const enabled = process.env.METAL_LIVE_TESTS === "1" && Boolean(process.env.FREESTYLE_API_KEY);
-const testEnv = loadTestEnv();
+const testEnv = enabled ? loadTestEnv() : undefined;
 
 (enabled ? describe.sequential : describe.skip)("managed Freestyle API live flow", () => {
+  if (!testEnv) {
+    it.skip("requires live credentials and local Supabase", () => undefined);
+    return;
+  }
   const database = createDatabase({ DATABASE_URL: testEnv.DATABASE_URL });
   const publisher = { publish: async () => undefined };
   const workerEnv = loadWorkerEnv({

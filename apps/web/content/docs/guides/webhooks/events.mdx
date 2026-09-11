@@ -1,0 +1,207 @@
+---
+title: Webhook event catalog
+description: Every subscribable Metal event type with signed payload examples.
+---
+
+Endpoints subscribe to any subset of these types, or to every type when no filter is selected.
+Use the [receiving guide](/guides/webhooks) for setup, secrets, verification, and retries.
+
+## Envelope
+
+Every delivery POSTs one JSON envelope. `project_id` is present for project-scoped events;
+`data` carries the redacted public fields for the type. Secret material is never included.
+
+```json
+{
+  "cursor": "eyJ2IjoxLCJuIjoiMTIzIn0",
+  "event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "type": "sandbox.ready",
+  "organization_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "project_id": "prj_abc123",
+  "occurred_at": "2026-09-11T08:00:00.000Z",
+  "data": {
+    "sandbox_id": "sbx_abc123",
+    "provider": "e2b"
+  }
+}
+```
+
+Delivery metadata travels in headers: `metal-delivery-id`, `metal-event-id`,
+`metal-event-type`, `metal-signature-timestamp`, and `metal-signature`. The signature covers the
+exact request bytes as `HMAC-SHA256(secret, "<timestamp>.<delivery_id>.<raw_body>")`.
+
+## Organization and project events
+
+| Type                                           | `data` fields  |
+| ---------------------------------------------- | -------------- |
+| `organization.created`                         | `name`, `slug` |
+| `organization.updated`                         | `name`, `slug` |
+| `organization.deleted`                         | `name`, `slug` |
+| `organization.provider_credentials.configured` | `provider`     |
+| `organization.provider_credentials.rotated`    | `provider`     |
+| `organization.provider_credentials.removed`    | `provider`     |
+| `project.created`                              | `name`, `slug` |
+| `project.updated`                              | `name`, `slug` |
+| `project.deleted`                              | `name`, `slug` |
+
+## Sandbox events
+
+Sandbox events always include `sandbox_id` alongside the type-specific fields below.
+
+| Type                      | `data` fields                                                |
+| ------------------------- | ------------------------------------------------------------ |
+| `sandbox.requested`       | `sandbox_id`, `provider` (requested provider or `auto`)      |
+| `sandbox.ready`           | `sandbox_id`, `provider`                                     |
+| `sandbox.paused`          | `sandbox_id`, `provider`                                     |
+| `sandbox.resumed`         | `sandbox_id`, `provider`                                     |
+| `sandbox.attempt_started` | reserved, not currently emitted                              |
+| `sandbox.attempt_failed`  | reserved, not currently emitted                              |
+| `sandbox.cost_updated`    | `sandbox_id`, `provider`, `cost_microusd`, `cost_updated_at` |
+| `sandbox.failed`          | `sandbox_id`, `operation`, `error_code`                      |
+| `sandbox.deleted`         | `sandbox_id`, `provider`                                     |
+
+## Runtime events
+
+Worker-emitted sandbox and runtime events always include `sandbox_id` alongside the
+type-specific fields below.
+
+| Type                          | `data` fields                          |
+| ----------------------------- | -------------------------------------- |
+| `process.queued`              | `process_id`, `sandbox_id`             |
+| `process.started`             | `process_id`, `sandbox_id`             |
+| `process.cancel_requested`    | `process_id`, `sandbox_id`             |
+| `process.completed`           | `process_id`, `state`, `exit_code`     |
+| `process.cancelled`           | `process_id`, `state`                  |
+| `process.failed`              | `process_id`, `state`, `exit_code`     |
+| `runtime_operation.completed` | `runtime_operation_id`, `kind`         |
+| `runtime_operation.failed`    | `runtime_operation_id`, `kind`, `code` |
+| `endpoint.created`            | `endpoint_id`, `port`                  |
+| `endpoint.revoked`            | `endpoint_id`                          |
+| `endpoint.expired`            | `endpoint_id`                          |
+| `endpoint.failed`             | `endpoint_id`, `code`                  |
+
+## Billing events
+
+| Type                          | `data` fields                                                        |
+| ----------------------------- | -------------------------------------------------------------------- |
+| `billing.credits_purchased`   | `purchase_id`, `credit_microusd`, `fee_microusd`, `balance_microusd` |
+| `billing.credits_granted`     | `purchase_id`, `credit_microusd`, `balance_microusd`, `source`       |
+| `billing.usage_charged`       | `sandbox_id`, `snapshot_id`, `delta_microusd`, `balance_microusd`    |
+| `billing.auto_topup_failed`   | `purchase_id`, `error_code`, `requires_action`                       |
+| `billing.spend_limit_reached` | `balance_microusd`, `terminated_count`                               |
+
+## Connectivity checks
+
+| Type           | `data` fields                             |
+| -------------- | ----------------------------------------- |
+| `webhook.test` | `endpoint_id`, `endpoint_name`, `message` |
+
+Test deliveries bypass the endpoint event filter and enabled state so connectivity can be
+verified before going live.
+
+## Signed payload examples
+
+### Sandbox ready
+
+```http
+POST /metal-events HTTP/1.1
+Content-Type: application/json
+Metal-Delivery-Id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+Metal-Event-Id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+Metal-Event-Type: sandbox.ready
+Metal-Signature-Timestamp: 1786483200
+Metal-Signature: t=1786483200,v1=9f2c4a1b5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70819
+
+{
+  "cursor": "eyJ2IjoxLCJuIjoiNDU2In0",
+  "event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "type": "sandbox.ready",
+  "organization_id": "11111111-1111-4111-8111-111111111111",
+  "project_id": "prj_22222222222242228222222222222222",
+  "occurred_at": "2026-09-11T08:00:00.000Z",
+  "data": {
+    "sandbox_id": "sbx_abc123def456",
+    "provider": "e2b"
+  }
+}
+```
+
+### Usage charged
+
+```http
+POST /metal-events HTTP/1.1
+Content-Type: application/json
+Metal-Delivery-Id: 8d9e6679-7425-40de-944b-e07fc1f90ae8
+Metal-Event-Id: 4fa85f64-5717-4562-b3fc-2c963f66afa7
+Metal-Event-Type: billing.usage_charged
+Metal-Signature-Timestamp: 1786483260
+Metal-Signature: t=1786483260,v1=1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b
+
+{
+  "cursor": "eyJ2IjoxLCJuIjoiNzg5In0",
+  "event_id": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+  "type": "billing.usage_charged",
+  "organization_id": "11111111-1111-4111-8111-111111111111",
+  "project_id": "prj_22222222222242228222222222222222",
+  "occurred_at": "2026-09-11T08:01:00.000Z",
+  "data": {
+    "sandbox_id": "sbx_abc123def456",
+    "snapshot_id": "5fa85f64-5717-4562-b3fc-2c963f66afa8",
+    "delta_microusd": "125000",
+    "balance_microusd": "498681250"
+  }
+}
+```
+
+### Provider credentials rotated
+
+```http
+POST /metal-events HTTP/1.1
+Content-Type: application/json
+Metal-Delivery-Id: 9d9e6679-7425-40de-944b-e07fc1f90ae9
+Metal-Event-Id: 6fa85f64-5717-4562-b3fc-2c963f66afa9
+Metal-Event-Type: organization.provider_credentials.rotated
+Metal-Signature-Timestamp: 1786483320
+Metal-Signature: t=1786483320,v1=2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c
+
+{
+  "cursor": "eyJ2IjoxLCJuIjoiMTAyNCJ9",
+  "event_id": "6fa85f64-5717-4562-b3fc-2c963f66afa9",
+  "type": "organization.provider_credentials.rotated",
+  "organization_id": "11111111-1111-4111-8111-111111111111",
+  "occurred_at": "2026-09-11T08:02:00.000Z",
+  "data": {
+    "provider": "e2b"
+  }
+}
+```
+
+### Connectivity test
+
+```http
+POST /metal-events HTTP/1.1
+Content-Type: application/json
+Metal-Delivery-Id: ad9e6679-7425-40de-944b-e07fc1f90aea
+Metal-Event-Id: 7fa85f64-5717-4562-b3fc-2c963f66afaa
+Metal-Event-Type: webhook.test
+Metal-Signature-Timestamp: 1786483380
+Metal-Signature: t=1786483380,v1=3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d
+
+{
+  "cursor": "test",
+  "event_id": "7fa85f64-5717-4562-b3fc-2c963f66afaa",
+  "type": "webhook.test",
+  "organization_id": "11111111-1111-4111-8111-111111111111",
+  "occurred_at": "2026-09-11T08:03:00.000Z",
+  "data": {
+    "endpoint_id": "8fa85f64-5717-4562-b3fc-2c963f66afab",
+    "endpoint_name": "Deploy hook",
+    "message": "This is a Metal webhook connectivity test. No state changed."
+  }
+}
+```
+
+<Callout type="info" title="Verify against exact bytes">
+  Signatures in these samples are illustrative. Always compute the HMAC over the exact bytes your
+  server receives, as shown in the [receiving guide](/guides/webhooks#verify-signatures).
+</Callout>

@@ -139,11 +139,13 @@ describe("rls isolation", () => {
         ('metal', 'idempotency_keys'),
         ('metal', 'billing_accounts'),
         ('metal', 'ledger_entries'),
-        ('metal', 'user_welcome_credit_grants')
+        ('metal', 'user_welcome_credit_grants'),
+        ('metal', 'webhook_endpoints'),
+        ('metal', 'webhook_deliveries')
       )
       order by n.nspname, c.relname
     `;
-    expect(rlsRows).toHaveLength(11);
+    expect(rlsRows).toHaveLength(13);
     expect(rlsRows.every((row) => row.enabled === true)).toBe(true);
 
     const unsafeGrants = await database.sql`
@@ -163,7 +165,9 @@ describe("rls isolation", () => {
           'idempotency_keys',
           'billing_accounts',
           'ledger_entries',
-          'user_welcome_credit_grants'
+          'user_welcome_credit_grants',
+          'webhook_endpoints',
+          'webhook_deliveries'
         )
       )
     `;
@@ -222,6 +226,7 @@ describe("rls isolation", () => {
     `;
     expect(definerHelpers.map((row) => row.proname).sort()).toEqual([
       "delete_provider_credential_secret",
+      "delete_webhook_endpoint_secret",
       "has_organization_role",
       "is_organization_member",
       "is_project_member",

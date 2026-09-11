@@ -1,0 +1,15 @@
+{
+  "title": "Webhooks",
+  "description": "Outbound organization webhook endpoints and deliveries.",
+  "pages": [
+    "listWebhookEndpoints",
+    "createWebhookEndpoint",
+    "getWebhookEndpoint",
+    "updateWebhookEndpoint",
+    "deleteWebhookEndpoint",
+    "rotateWebhookSecret",
+    "testWebhookEndpoint",
+    "listWebhookDeliveries",
+    "redeliverWebhookDelivery"
+  ]
+}

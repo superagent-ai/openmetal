@@ -1,0 +1,144 @@
+---
+title: Receive webhooks
+description: Deliver signed Metal lifecycle events to your systems with retries and redelivery.
+---
+
+Organization owners and admins can register webhook endpoints that receive signed HTTP deliveries
+for Metal lifecycle events. Every delivery carries a stable, redacted event envelope, so
+consumers can deduplicate on `event_id` and verify authenticity with HMAC-SHA256.
+
+## Endpoint setup
+
+Create endpoints in the dashboard under **Webhooks**, or through the API:
+
+```bash
+curl -X POST "$METAL_API_URL/v1/organizations/$ORGANIZATION_ID/webhooks" \
+  -H "Authorization: Bearer $METAL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Deploy hook",
+    "url": "https://example.com/metal-events",
+    "event_types": ["sandbox.ready", "sandbox.failed"]
+  }'
+```
+
+```ts
+const endpoint = await metal.webhooks.create(organizationId, {
+  name: "Deploy hook",
+  url: "https://example.com/metal-events",
+  event_types: ["sandbox.ready", "sandbox.failed"],
+});
+// endpoint.secret is returned only here. Store it immediately.
+```
+
+Omit `event_types` (or leave every event unchecked in the dashboard) to receive every event in
+the [event catalog](/guides/webhooks/events). Endpoints can be renamed, repointed, refiltered,
+or disabled at any time; production deliveries use the endpoint URL snapshotted when each
+delivery is enqueued. Only enabled endpoints receive production deliveries.
+
+Production endpoints must use public HTTPS URLs. URLs with embedded credentials, private,
+link-local, or cloud metadata addresses are rejected at creation and revalidated on every
+attempt. Each delivery resolves the hostname once, then opens its connection directly to that
+validated IP while preserving the original `Host` header and TLS SNI, so DNS rebinding between
+validation and delivery cannot redirect the request; redirects are never followed.
+Non-production environments relax HTTPS and private-network rules so local tunnels can
+be tested.
+
+## Secrets and rotation
+
+The signing secret is generated server side and returned **once**, when the endpoint is created
+or rotated. Later reads expose only a prefix such as `whsec_a1B2c3D4e5F6`. The dashboard shows
+the secret in a one-time reveal dialog with copy guidance and never renders it in endpoint rows
+or delivery history.
+
+Rotate from the dashboard or the API when the secret may be exposed, or on a schedule:
+
+```bash
+curl -X POST \
+  "$METAL_API_URL/v1/organizations/$ORGANIZATION_ID/webhooks/$WEBHOOK_ID/rotate" \
+  -H "Authorization: Bearer $METAL_TOKEN"
+```
+
+<Callout type="warn" title="Rotation invalidates immediately">
+  Rotation installs the new secret atomically and the previous secret stops working at once. Update
+  your consumer before rotating, then confirm with a test send.
+</Callout>
+
+Deleting an endpoint stops deliveries immediately and destroys its signing secret. Delivery
+history is retained for audit.
+
+## Test sends
+
+The test action sends a `webhook.test` delivery through the same URL validation, signing,
+transport, and response limits as production. It persists a clearly marked test delivery with
+its HTTP result, latency, and timestamp, regardless of the endpoint's enabled state or event
+filter, so you can verify connectivity before enabling a filter:
+
+```ts
+const delivery = await metal.webhooks.test(organizationId, webhookId);
+// delivery.status starts as "pending"; poll listDeliveries for the outcome.
+const history = await metal.webhooks.listDeliveries(organizationId, webhookId, { limit: 20 });
+```
+
+## Verify signatures
+
+Each delivery is an HTTP POST of the event envelope JSON with these headers:
+
+- `metal-delivery-id`: the delivery identifier, stable across retries of one delivery
+- `metal-event-id`: the durable event identifier, stable across endpoints
+- `metal-event-type`: the event type
+- `metal-signature-timestamp`: Unix seconds when the request was signed
+- `metal-signature`: `t=<timestamp>,v1=<hex HMAC-SHA256>`
+
+The signature covers the exact request bytes as
+`HMAC-SHA256(secret, "<timestamp>.<delivery_id>.<raw_body>")`. Reject requests older than five
+minutes, compare digests in constant time, and scope verification per endpoint secret. See
+[signed payload examples](/guides/webhooks/events#signed-payload-examples) for complete
+request samples.
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verifyWebhook(request: Request, rawBody: string, secret: string): boolean {
+  const deliveryId = request.headers.get("metal-delivery-id") ?? "";
+  const header = request.headers.get("metal-signature") ?? "";
+  const match = /(?:^|,)t=(\d+),v1=([0-9a-fA-F]+)(?:,|$)/.exec(header);
+  if (!match) return false;
+  const timestamp = match[1]!;
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 5 * 60) return false;
+  const expected = createHmac("sha256", secret)
+    .update(`${timestamp}.${deliveryId}.${rawBody}`, "utf8")
+    .digest("hex");
+  return (
+    match[2]!.length === expected.length &&
+    timingSafeEqual(Buffer.from(match[2]!), Buffer.from(expected))
+  );
+}
+```
+
+## Retries and duplicates
+
+Deliveries are at-least-once. Metal retries network failures, timeouts, HTTP 408, HTTP 429, and
+5xx responses with exponential backoff and jitter (up to 8 attempts by default), honoring a
+bounded `Retry-After` header. Most other 4xx responses are terminal, and redirects are never
+followed — a redirect fails the delivery terminally.
+
+Deduplicate on `metal-event-id` per endpoint. Retries of one delivery reuse `metal-delivery-id`;
+manual redelivery requeues the same event for a fresh attempt series. Expect duplicates after
+worker restarts and redeliveries.
+
+```ts
+await metal.webhooks.redeliver(organizationId, webhookId, deliveryId);
+```
+
+Terminally failed deliveries can be redelivered from the dashboard history or the API. A
+delivery that is still queued (`pending` or `delivering`) cannot be redelivered until it settles.
+
+## Operations
+
+The dashboard shows per-endpoint delivery history with attempt counts, HTTP results, latencies,
+and sanitized errors. For alerting, watch for endpoints whose recent deliveries stay in
+`retrying` or land in `failed`, and for a growing backlog of `pending` deliveries.
+
+See the [event catalog](/guides/webhooks/events) for every subscribable type and the
+[webhooks endpoints](/api-reference) in the API reference for request and response shapes.

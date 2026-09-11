@@ -83,6 +83,9 @@ export const WorkerEnvSchema = z.object({
     .int()
     .min(60_000)
     .default(7 * 24 * 60 * 60_000),
+  WORKER_WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(8),
+  WORKER_WEBHOOK_BASE_BACKOFF_MS: z.coerce.number().int().min(100).default(5_000),
+  WORKER_WEBHOOK_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
   STRIPE_SECRET_KEY: z.string().min(1).optional(),
 });
 export type WorkerEnv = z.infer<typeof WorkerEnvSchema>;

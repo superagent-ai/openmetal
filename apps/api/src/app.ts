@@ -11,6 +11,7 @@ import {
   CreateProjectRequestSchema,
   CreateSandboxEndpointRequestSchema,
   CreateSandboxRequestSchema,
+  CreateWebhookEndpointRequestSchema,
   DeleteOrganizationRequestSchema,
   DeleteFileRequestSchema,
   ListEventsQuerySchema,
@@ -27,6 +28,7 @@ import {
   SandboxEndpointIdSchema,
   SandboxProviderSchema,
   SandboxIdSchema,
+  UpdateWebhookEndpointRequestSchema,
   UpdateOrganizationRequestSchema,
   UpdateProjectRequestSchema,
   UpdateOrganizationRoleRequestSchema,
@@ -83,6 +85,18 @@ import {
   listOrganizationProviderCredentials,
   removeOrganizationProviderCredential,
 } from "./provider-credentials.js";
+import {
+  createWebhookEndpoint,
+  deleteWebhookEndpoint,
+  getWebhookEndpoint,
+  listWebhookDeliveries,
+  listWebhookEndpoints,
+  redeliverWebhookDelivery,
+  rotateWebhookSecret,
+  testWebhookEndpoint,
+  updateWebhookEndpoint,
+  webhookUrlPolicyForEnvironment,
+} from "./webhooks.js";
 import {
   quoteOrganizationPurchase,
   readOrganizationBilling,
@@ -825,6 +839,164 @@ export async function buildApp(
         provider,
       });
       return { provider, deleted: true as const };
+    },
+  );
+
+  app.get(`/${API_VERSION}/organizations/:organization_id/webhooks`, async (request) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    const webhooks = await listWebhookEndpoints(db.db, {
+      userId: principal.userId,
+      organizationId,
+    });
+    return { webhooks };
+  });
+
+  app.post(`/${API_VERSION}/organizations/:organization_id/webhooks`, async (request, reply) => {
+    const principal = await requirePrincipal(request);
+    const organizationId = OpaqueIdSchema.parse(
+      (request.params as { organization_id: string }).organization_id,
+    );
+    const parsed = CreateWebhookEndpointRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid webhook endpoint payload", {
+        issues: parsed.error.issues,
+      });
+    }
+    const key = headerValue(request.headers["idempotency-key"]);
+    const result = await executeIdempotent(
+      db.db,
+      {
+        principalId: principal.userId,
+        operation: `webhooks.create:${organizationId}`,
+        key,
+        body: parsed.data,
+      },
+      async (tx) => {
+        const created = await createWebhookEndpoint(tx, {
+          userId: principal.userId,
+          organizationId,
+          body: parsed.data,
+          urlPolicy: webhookUrlPolicyForEnvironment(env.METAL_ENVIRONMENT),
+        });
+        return {
+          status: 201,
+          body: { ...created.endpoint, secret: created.secret },
+        };
+      },
+    );
+    return reply.status(result.status).send(result.body);
+  });
+
+  app.get(
+    `/${API_VERSION}/organizations/:organization_id/webhooks/:webhook_id`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; webhook_id: string };
+      return getWebhookEndpoint(db.db, {
+        userId: principal.userId,
+        organizationId: OpaqueIdSchema.parse(params.organization_id),
+        endpointId: OpaqueIdSchema.parse(params.webhook_id),
+      });
+    },
+  );
+
+  app.patch(
+    `/${API_VERSION}/organizations/:organization_id/webhooks/:webhook_id`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; webhook_id: string };
+      const parsed = UpdateWebhookEndpointRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new ApiError(422, "validation_error", "invalid webhook endpoint payload", {
+          issues: parsed.error.issues,
+        });
+      }
+      return updateWebhookEndpoint(db.db, {
+        userId: principal.userId,
+        organizationId: OpaqueIdSchema.parse(params.organization_id),
+        endpointId: OpaqueIdSchema.parse(params.webhook_id),
+        body: parsed.data,
+        urlPolicy: webhookUrlPolicyForEnvironment(env.METAL_ENVIRONMENT),
+      });
+    },
+  );
+
+  app.delete(
+    `/${API_VERSION}/organizations/:organization_id/webhooks/:webhook_id`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; webhook_id: string };
+      return deleteWebhookEndpoint(db.db, {
+        userId: principal.userId,
+        organizationId: OpaqueIdSchema.parse(params.organization_id),
+        endpointId: OpaqueIdSchema.parse(params.webhook_id),
+      });
+    },
+  );
+
+  app.post(
+    `/${API_VERSION}/organizations/:organization_id/webhooks/:webhook_id/rotate`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; webhook_id: string };
+      const rotated = await rotateWebhookSecret(db.db, {
+        userId: principal.userId,
+        organizationId: OpaqueIdSchema.parse(params.organization_id),
+        endpointId: OpaqueIdSchema.parse(params.webhook_id),
+      });
+      return { ...rotated.endpoint, secret: rotated.secret };
+    },
+  );
+
+  app.post(
+    `/${API_VERSION}/organizations/:organization_id/webhooks/:webhook_id/test`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; webhook_id: string };
+      return testWebhookEndpoint(db.db, {
+        userId: principal.userId,
+        organizationId: OpaqueIdSchema.parse(params.organization_id),
+        endpointId: OpaqueIdSchema.parse(params.webhook_id),
+        urlPolicy: webhookUrlPolicyForEnvironment(env.METAL_ENVIRONMENT),
+      });
+    },
+  );
+
+  app.get(
+    `/${API_VERSION}/organizations/:organization_id/webhooks/:webhook_id/deliveries`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as { organization_id: string; webhook_id: string };
+      const query = request.query as { limit?: string };
+      const limit = Math.min(Math.max(Number(query.limit ?? 50) || 50, 1), 100);
+      const deliveries = await listWebhookDeliveries(db.db, {
+        userId: principal.userId,
+        organizationId: OpaqueIdSchema.parse(params.organization_id),
+        endpointId: OpaqueIdSchema.parse(params.webhook_id),
+        limit,
+      });
+      return { deliveries };
+    },
+  );
+
+  app.post(
+    `/${API_VERSION}/organizations/:organization_id/webhooks/:webhook_id/deliveries/:delivery_id/redeliver`,
+    async (request) => {
+      const principal = await requirePrincipal(request);
+      const params = request.params as {
+        organization_id: string;
+        webhook_id: string;
+        delivery_id: string;
+      };
+      return redeliverWebhookDelivery(db.db, {
+        userId: principal.userId,
+        organizationId: OpaqueIdSchema.parse(params.organization_id),
+        endpointId: OpaqueIdSchema.parse(params.webhook_id),
+        deliveryId: OpaqueIdSchema.parse(params.delivery_id),
+      });
     },
   );
 

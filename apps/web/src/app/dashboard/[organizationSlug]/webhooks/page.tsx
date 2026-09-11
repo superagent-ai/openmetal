@@ -1,5 +1,7 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EventTypeValues } from "@openmetal/events";
+import { WebhooksView } from "@/components/webhooks-view";
 import { requireOrganizationBySlug } from "@/lib/dashboard-organizations";
+import { requireMetalSession } from "@/lib/metal-server";
 
 export default async function OrganizationWebhooksPage({
   params,
@@ -8,26 +10,15 @@ export default async function OrganizationWebhooksPage({
 }) {
   const { organizationSlug } = await params;
   const organization = await requireOrganizationBySlug(organizationSlug);
+  const { metal } = await requireMetalSession();
+  const { webhooks } = await metal.webhooks.list(organization.id);
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Webhooks</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Deliver lifecycle events from {organization.name} to your systems.
-        </p>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Webhook endpoints</CardTitle>
-          <CardDescription>
-            Endpoint configuration and delivery history will appear here.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">No webhook endpoints are configured.</p>
-        </CardContent>
-      </Card>
-    </div>
+    <WebhooksView
+      organizationId={organization.id}
+      organizationName={organization.name}
+      initialEndpoints={webhooks}
+      eventCatalog={[...EventTypeValues]}
+    />
   );
 }

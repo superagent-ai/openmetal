@@ -422,6 +422,15 @@ importers:
 
   packages/db:
     dependencies:
+      '@openmetal/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@openmetal/events':
+        specifier: workspace:*
+        version: link:../events
+      '@openmetal/logger':
+        specifier: workspace:*
+        version: link:../logger
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@opentelemetry/api@1.9.1)(postgres@3.4.9)

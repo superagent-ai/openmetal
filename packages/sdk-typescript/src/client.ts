@@ -34,8 +34,18 @@ import {
   SandboxListResponseSchema,
   SandboxSchema,
   WriteFileRequestSchema,
+  CreateWebhookEndpointRequestSchema,
+  UpdateWebhookEndpointRequestSchema,
+  WebhookDeliveryListResponseSchema,
+  WebhookDeliverySchema,
+  WebhookEndpointDeleteResponseSchema,
+  WebhookEndpointListResponseSchema,
+  WebhookEndpointSchema,
+  WebhookEndpointWithSecretSchema,
   type CreateSandboxRequest,
+  type CreateWebhookEndpointRequest,
   type InvitationRole,
+  type UpdateWebhookEndpointRequest,
   type OrganizationUsageQuery,
   type Operation,
   type Process,
@@ -598,6 +608,71 @@ export class MetalClient {
         method: "DELETE",
         path: `/v1/projects/${projectId}/api-keys/${apiKeyId}`,
         schema: z.object({ id: z.string(), deleted: z.literal(true) }),
+      }),
+  };
+
+  readonly webhooks = {
+    list: (organizationId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/organizations/${organizationId}/webhooks`,
+        schema: WebhookEndpointListResponseSchema,
+      }),
+    create: (
+      organizationId: string,
+      input: CreateWebhookEndpointRequest,
+      options?: { idempotencyKey?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/organizations/${organizationId}/webhooks`,
+        body: CreateWebhookEndpointRequestSchema.parse(input),
+        idempotencyKey: options?.idempotencyKey,
+        schema: WebhookEndpointWithSecretSchema,
+      }),
+    get: (organizationId: string, webhookId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/organizations/${organizationId}/webhooks/${webhookId}`,
+        schema: WebhookEndpointSchema,
+      }),
+    update: (organizationId: string, webhookId: string, input: UpdateWebhookEndpointRequest) =>
+      this.request({
+        method: "PATCH",
+        path: `/v1/organizations/${organizationId}/webhooks/${webhookId}`,
+        body: UpdateWebhookEndpointRequestSchema.parse(input),
+        schema: WebhookEndpointSchema,
+      }),
+    delete: (organizationId: string, webhookId: string) =>
+      this.request({
+        method: "DELETE",
+        path: `/v1/organizations/${organizationId}/webhooks/${webhookId}`,
+        schema: WebhookEndpointDeleteResponseSchema,
+      }),
+    rotate: (organizationId: string, webhookId: string) =>
+      this.request({
+        method: "POST",
+        path: `/v1/organizations/${organizationId}/webhooks/${webhookId}/rotate`,
+        schema: WebhookEndpointWithSecretSchema,
+      }),
+    test: (organizationId: string, webhookId: string) =>
+      this.request({
+        method: "POST",
+        path: `/v1/organizations/${organizationId}/webhooks/${webhookId}/test`,
+        schema: WebhookDeliverySchema,
+      }),
+    listDeliveries: (organizationId: string, webhookId: string, options?: { limit?: number }) =>
+      this.request({
+        method: "GET",
+        path: `/v1/organizations/${organizationId}/webhooks/${webhookId}/deliveries`,
+        query: { limit: options?.limit },
+        schema: WebhookDeliveryListResponseSchema,
+      }),
+    redeliver: (organizationId: string, webhookId: string, deliveryId: string) =>
+      this.request({
+        method: "POST",
+        path: `/v1/organizations/${organizationId}/webhooks/${webhookId}/deliveries/${deliveryId}/redeliver`,
+        schema: WebhookDeliverySchema,
       }),
   };
 

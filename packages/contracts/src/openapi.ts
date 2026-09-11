@@ -8,6 +8,17 @@ import {
 } from "./api-keys.js";
 import { ErrorEnvelopeSchema } from "./errors.js";
 import { CursorEventPageSchema, ListEventsQuerySchema } from "./events.js";
+import {
+  CreateWebhookEndpointRequestSchema,
+  RotateWebhookSecretResponseSchema,
+  UpdateWebhookEndpointRequestSchema,
+  WebhookDeliveryListResponseSchema,
+  WebhookDeliverySchema,
+  WebhookEndpointDeleteResponseSchema,
+  WebhookEndpointListResponseSchema,
+  WebhookEndpointSchema,
+  WebhookEndpointWithSecretSchema,
+} from "./webhooks.js";
 import { OperationEventSchema, OperationSchema } from "./operations.js";
 import { ApiMetadataResponseSchema, HealthResponseSchema, ReadinessResponseSchema } from "./ops.js";
 import {
@@ -138,6 +149,7 @@ export function buildOpenApiDocument(): OpenApiObject {
       { name: "runtime", description: "Processes, files, and leased HTTP endpoints." },
       { name: "operations", description: "Asynchronous lifecycle operation status and events." },
       { name: "events", description: "Durable project event history." },
+      { name: "webhooks", description: "Outbound organization webhook endpoints and deliveries." },
     ],
     components: {
       securitySchemes: {
@@ -226,6 +238,15 @@ export function buildOpenApiDocument(): OpenApiObject {
           pattern: "^ep_[A-Za-z0-9]+$",
         },
         Cursor: { type: "string", minLength: 1, maxLength: 512 },
+        WebhookEndpoint: json(WebhookEndpointSchema),
+        WebhookEndpointWithSecret: json(WebhookEndpointWithSecretSchema),
+        CreateWebhookEndpointRequest: json(CreateWebhookEndpointRequestSchema),
+        UpdateWebhookEndpointRequest: json(UpdateWebhookEndpointRequestSchema),
+        RotateWebhookSecretResponse: json(RotateWebhookSecretResponseSchema),
+        WebhookEndpointDeleteResponse: json(WebhookEndpointDeleteResponseSchema),
+        WebhookEndpointListResponse: json(WebhookEndpointListResponseSchema),
+        WebhookDelivery: json(WebhookDeliverySchema),
+        WebhookDeliveryListResponse: json(WebhookDeliveryListResponseSchema),
       },
       parameters: {
         OrganizationIdPath: {
@@ -352,6 +373,18 @@ export function buildOpenApiDocument(): OpenApiObject {
           in: "query",
           required: false,
           schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+        },
+        WebhookIdPath: {
+          name: "webhook_id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+        WebhookDeliveryIdPath: {
+          name: "delivery_id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
         },
       },
     },
@@ -1367,6 +1400,150 @@ export function buildOpenApiDocument(): OpenApiObject {
           },
         },
       },
+      "/v1/organizations/{organization_id}/webhooks": {
+        parameters: [parameterRef("OrganizationIdPath")],
+        get: {
+          operationId: "listWebhookEndpoints",
+          tags: ["webhooks"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response(
+              "Webhook endpoints for the organization",
+              "WebhookEndpointListResponse",
+            ),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Organization not found"),
+          },
+        },
+        post: {
+          operationId: "createWebhookEndpoint",
+          tags: ["webhooks"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("OptionalIdempotencyKeyHeader")],
+          requestBody: {
+            required: true,
+            content: jsonContent("CreateWebhookEndpointRequest"),
+          },
+          responses: {
+            "201": response(
+              "Webhook endpoint created with one-time secret",
+              "WebhookEndpointWithSecret",
+            ),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/webhooks/{webhook_id}": {
+        parameters: [parameterRef("OrganizationIdPath"), parameterRef("WebhookIdPath")],
+        get: {
+          operationId: "getWebhookEndpoint",
+          tags: ["webhooks"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Webhook endpoint", "WebhookEndpoint"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Webhook endpoint not found"),
+          },
+        },
+        patch: {
+          operationId: "updateWebhookEndpoint",
+          tags: ["webhooks"],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: jsonContent("UpdateWebhookEndpointRequest"),
+          },
+          responses: {
+            "200": response("Webhook endpoint updated", "WebhookEndpoint"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Webhook endpoint not found"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+        delete: {
+          operationId: "deleteWebhookEndpoint",
+          tags: ["webhooks"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Webhook endpoint deleted", "WebhookEndpointDeleteResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Webhook endpoint not found"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/webhooks/{webhook_id}/rotate": {
+        parameters: [parameterRef("OrganizationIdPath"), parameterRef("WebhookIdPath")],
+        post: {
+          operationId: "rotateWebhookSecret",
+          tags: ["webhooks"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response(
+              "Webhook secret rotated with one-time secret",
+              "RotateWebhookSecretResponse",
+            ),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Webhook endpoint not found"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/webhooks/{webhook_id}/test": {
+        parameters: [parameterRef("OrganizationIdPath"), parameterRef("WebhookIdPath")],
+        post: {
+          operationId: "testWebhookEndpoint",
+          tags: ["webhooks"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("Webhook test delivery enqueued", "WebhookDelivery"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Webhook endpoint not found"),
+            "422": errorResponse("Invalid request"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/webhooks/{webhook_id}/deliveries": {
+        parameters: [parameterRef("OrganizationIdPath"), parameterRef("WebhookIdPath")],
+        get: {
+          operationId: "listWebhookDeliveries",
+          tags: ["webhooks"],
+          security: [{ bearerAuth: [] }],
+          parameters: [parameterRef("LimitQuery")],
+          responses: {
+            "200": response("Webhook delivery history", "WebhookDeliveryListResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("Webhook endpoint not found"),
+          },
+        },
+      },
+      "/v1/organizations/{organization_id}/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver":
+        {
+          parameters: [
+            parameterRef("OrganizationIdPath"),
+            parameterRef("WebhookIdPath"),
+            parameterRef("WebhookDeliveryIdPath"),
+          ],
+          post: {
+            operationId: "redeliverWebhookDelivery",
+            tags: ["webhooks"],
+            security: [{ bearerAuth: [] }],
+            responses: {
+              "200": response("Webhook delivery requeued", "WebhookDelivery"),
+              "401": errorResponse("Authentication required"),
+              "403": errorResponse("Access denied"),
+              "404": errorResponse("Webhook delivery not found"),
+              "409": errorResponse("Delivery is already queued"),
+            },
+          },
+        },
     },
   };
 }

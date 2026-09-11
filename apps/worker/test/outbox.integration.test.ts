@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { claimOutboxJobs, createDatabase } from "@openmetal/db";
-import { serializeCursor } from "@openmetal/events";
+import { createServer, type IncomingMessage, type Server } from "node:http";
+import {
+  claimOutboxJobs,
+  createDatabase,
+  enqueueWebhookDeliveries,
+  insertDomainEventAndBroadcast,
+} from "@openmetal/db";
+import { serializeCursor, verifyWebhookSignature } from "@openmetal/events";
 import {
   createConfirmedUser,
   deleteUser,
@@ -1040,5 +1046,154 @@ describe("worker outbox", () => {
     `;
     expect(row?.status).toBe("pending");
     expect(String(row?.last_error)).toMatch(/stripe is not configured/i);
+  });
+
+  it("delivers signed webhooks with retries, dedupe, and disabled-endpoint filtering", async () => {
+    const user = await createConfirmedUser(env);
+    users.push(user.user.id);
+    const orgId = crypto.randomUUID();
+    await database.sql`
+      insert into public.organizations (id, name, slug)
+      values (${orgId}, 'Worker Webhook Org', ${`ww-${orgId.slice(0, 8)}`})
+    `;
+
+    type CapturedRequest = { headers: Record<string, string | string[] | undefined>; body: string };
+    const captured: CapturedRequest[] = [];
+    const responseQueue: number[] = [500, 200];
+    const server: Server = createServer((request: IncomingMessage, response) => {
+      let body = "";
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        captured.push({ headers: { ...request.headers }, body });
+        response.statusCode = responseQueue.shift() ?? 200;
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ ok: response.statusCode === 200 }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    expect(port).toBeGreaterThan(0);
+    try {
+      const webhookSecret = `whsec_worker_${crypto.randomUUID().replaceAll("-", "")}`;
+      const [endpoint] = await database.sql`
+        with secret as (
+          select vault.create_secret(
+            ${webhookSecret},
+            ${`metal:webhook:${orgId}:worker-test`},
+            'Worker webhook test'
+          ) as id
+        )
+        insert into metal.webhook_endpoints (
+          organization_id, name, url, event_types, enabled, secret_id, secret_prefix, created_by
+        )
+        select ${orgId}, 'worker hook', ${`http://127.0.0.1:${port}/hook`}, '["project.created"]'::jsonb, true, secret.id, 'whsec_worker', ${user.user.id}
+        from secret
+        returning id
+      `;
+      const endpointId = String(endpoint!.id);
+
+      const workerEnv = loadWorkerEnv({
+        ...process.env,
+        DATABASE_URL: env.DATABASE_URL,
+        SUPABASE_URL: env.SUPABASE_URL,
+        SUPABASE_SECRET_KEY: env.SUPABASE_SECRET_KEY,
+        WORKER_ID: "webhook-delivery-worker",
+        WORKER_LEASE_MS: "5000",
+        WORKER_POLL_MS: "50",
+        WORKER_BATCH_SIZE: "10",
+        WORKER_MAX_ATTEMPTS: "8",
+        WORKER_BASE_BACKOFF_MS: "10",
+        WORKER_WEBHOOK_BASE_BACKOFF_MS: "10",
+        LOG_LEVEL: "silent",
+        METAL_ENVIRONMENT: "test",
+      });
+      const publisher = { publish: async () => {} };
+
+      const { eventId, publicEvent } = await insertDomainEventAndBroadcast(database.db, {
+        type: "project.created",
+        organizationId: orgId,
+        actorId: user.user.id,
+        data: { name: "Webhook Project" },
+      });
+
+      const deliveries = await database.sql`
+        select id, status, event_id from metal.webhook_deliveries where endpoint_id = ${endpointId}
+      `;
+      expect(deliveries).toHaveLength(1);
+      const deliveryId = String(deliveries[0]!.id);
+
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await processOnce(database.db, publisher, workerEnv, {}, null);
+        const [current] = await database.sql`
+          select status from metal.webhook_deliveries where id = ${deliveryId}
+        `;
+        if (current?.status === "succeeded") break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        if (attempt === 39) {
+          throw new Error("webhook delivery did not succeed");
+        }
+      }
+
+      expect(captured.length).toBeGreaterThanOrEqual(2);
+      const success = captured.at(-1)!;
+      expect(
+        verifyWebhookSignature({
+          secret: webhookSecret,
+          deliveryId,
+          rawBody: success.body,
+          signatureHeader: String(success.headers["metal-signature"]),
+          timestampHeader: String(success.headers["metal-signature-timestamp"]),
+        }),
+      ).toBe(true);
+      expect(success.headers["metal-event-id"]).toBe(eventId);
+      expect(success.headers["metal-event-type"]).toBe("project.created");
+      expect(JSON.parse(success.body)).toMatchObject({
+        event_id: eventId,
+        type: "project.created",
+      });
+
+      const [final] = await database.sql`
+        select status, attempt_count, last_http_status, delivered_at
+        from metal.webhook_deliveries where id = ${deliveryId}
+      `;
+      expect(final).toMatchObject({
+        status: "succeeded",
+        last_http_status: 200,
+      });
+      expect(Number(final!.attempt_count)).toBe(2);
+      expect(final!.delivered_at).toBeTruthy();
+
+      const [job] = await database.sql`
+        select status from metal.outbox_jobs
+        where job_type = 'webhook.deliver' and payload->>'delivery_id' = ${deliveryId}
+      `;
+      expect(job?.status).toBe("succeeded");
+
+      const duplicate = await enqueueWebhookDeliveries(database.db, {
+        organizationId: orgId,
+        eventId,
+        publicEvent,
+      });
+      expect(duplicate).toBe(0);
+
+      await database.sql`
+        update metal.webhook_endpoints set enabled = false where id = ${endpointId}
+      `;
+      await insertDomainEventAndBroadcast(database.db, {
+        type: "project.created",
+        organizationId: orgId,
+        actorId: user.user.id,
+        data: { name: "Filtered Project" },
+      });
+      const afterDisable = await database.sql`
+        select count(*)::int as count from metal.webhook_deliveries where endpoint_id = ${endpointId}
+      `;
+      expect(afterDisable[0]?.count).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

@@ -1741,4 +1741,172 @@ describe("metal api integration", () => {
       database.sql`update metal.ledger_entries set amount_microusd = 1 where id = ${entryId?.id}`,
     ).rejects.toThrow(/append-only/);
   });
+
+  it("manages organization webhooks with generated secrets, fan-out, and redelivery", async () => {
+    const owner = await createConfirmedUser(env);
+    const member = await createConfirmedUser(env);
+    const outsider = await createConfirmedUser(env);
+    users.push(owner.user.id, member.user.id, outsider.user.id);
+    const ownerClient = clientFor(owner.accessToken);
+    const memberClient = clientFor(member.accessToken);
+    const outsiderClient = clientFor(outsider.accessToken);
+    const organization = await ownerClient.organizations.create({
+      name: "Webhooks Org",
+      slug: `wh-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values (${organization.id}, ${member.user.id}, 'member')
+    `;
+
+    await expect(ownerClient.webhooks.list(organization.id)).resolves.toEqual({ webhooks: [] });
+    await expect(memberClient.webhooks.list(organization.id)).resolves.toEqual({ webhooks: [] });
+    await expect(outsiderClient.webhooks.list(organization.id)).rejects.toMatchObject({
+      status: 403,
+    });
+    await expect(
+      memberClient.webhooks.create(organization.id, {
+        name: "member hook",
+        url: "https://93.184.216.34/member",
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+
+    await expect(
+      ownerClient.webhooks.create(organization.id, {
+        name: "bad scheme",
+        url: "ftp://93.184.216.34/hook",
+      }),
+    ).rejects.toMatchObject({ status: 422 });
+    await expect(
+      ownerClient.webhooks.create(organization.id, {
+        name: "bad events",
+        url: "https://93.184.216.34/hook",
+        event_types: ["not.an.event"],
+      }),
+    ).rejects.toMatchObject({ status: 422 });
+
+    const created = await ownerClient.webhooks.create(organization.id, {
+      name: "Deploy hook",
+      url: "https://93.184.216.34/metal-events",
+      event_types: ["project.created"],
+    });
+    expect(created.secret.startsWith("whsec_")).toBe(true);
+    expect(created.secret_prefix).toBe(created.secret.slice(0, 14));
+    const firstSecret = created.secret;
+
+    const listed = await ownerClient.webhooks.list(organization.id);
+    expect(listed.webhooks).toHaveLength(1);
+    expect(JSON.stringify(listed)).not.toContain(firstSecret);
+    expect(listed.webhooks[0]).toMatchObject({
+      name: "Deploy hook",
+      url: "https://93.184.216.34/metal-events",
+      event_types: ["project.created"],
+      enabled: true,
+      rotated_at: null,
+    });
+
+    const stored = await database.sql`
+      select secret_id, secrets.secret as encrypted_secret, secrets.decrypted_secret
+      from metal.webhook_endpoints endpoints
+      inner join vault.decrypted_secrets secrets on secrets.id = endpoints.secret_id
+      where endpoints.id = ${created.id}
+    `;
+    expect(stored).toHaveLength(1);
+    expect(String(stored[0]!.encrypted_secret)).not.toContain(firstSecret);
+    expect(String(stored[0]!.decrypted_secret)).toBe(firstSecret);
+
+    const project = await ownerClient.projects.create(organization.id, {
+      name: "Webhook Project",
+      slug: `wp-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const fannedOut = await database.sql`
+      select id, event_type, status, is_test, endpoint_url
+      from metal.webhook_deliveries
+      where endpoint_id = ${created.id}
+    `;
+    expect(fannedOut).toHaveLength(1);
+    expect(fannedOut[0]).toMatchObject({
+      event_type: "project.created",
+      status: "pending",
+      is_test: false,
+      endpoint_url: "https://93.184.216.34/metal-events",
+    });
+    const fanoutJobs = await database.sql`
+      select job_type, dedupe_key from metal.outbox_jobs where job_type = 'webhook.deliver'
+    `;
+    expect(fanoutJobs.length).toBeGreaterThanOrEqual(1);
+    expect(project.id.startsWith("prj_")).toBe(true);
+
+    const updated = await ownerClient.webhooks.update(organization.id, created.id, {
+      url: "https://93.184.216.34/metal-events-v2",
+      enabled: false,
+    });
+    expect(updated).toMatchObject({
+      url: "https://93.184.216.34/metal-events-v2",
+      enabled: false,
+    });
+    await expect(
+      memberClient.webhooks.update(organization.id, created.id, { name: "nope" }),
+    ).rejects.toMatchObject({ status: 403 });
+
+    const rotated = await ownerClient.webhooks.rotate(organization.id, created.id);
+    expect(rotated.secret.startsWith("whsec_")).toBe(true);
+    expect(rotated.secret).not.toBe(firstSecret);
+    expect(rotated.rotated_at).toBeTruthy();
+    const [rotatedStored] = await database.sql`
+      select secrets.decrypted_secret
+      from metal.webhook_endpoints endpoints
+      inner join vault.decrypted_secrets secrets on secrets.id = endpoints.secret_id
+      where endpoints.id = ${created.id}
+    `;
+    expect(String(rotatedStored!.decrypted_secret)).toBe(rotated.secret);
+
+    const testDelivery = await ownerClient.webhooks.test(organization.id, created.id);
+    expect(testDelivery).toMatchObject({
+      endpoint_id: created.id,
+      event_type: "webhook.test",
+      status: "pending",
+      is_test: true,
+    });
+    const testJobs = await database.sql`
+      select payload from metal.outbox_jobs
+      where job_type = 'webhook.deliver' and payload->>'delivery_id' = ${testDelivery.id}
+    `;
+    expect(testJobs).toHaveLength(1);
+
+    const history = await ownerClient.webhooks.listDeliveries(organization.id, created.id);
+    expect(history.deliveries.length).toBeGreaterThanOrEqual(2);
+
+    await expect(
+      ownerClient.webhooks.redeliver(organization.id, created.id, testDelivery.id),
+    ).rejects.toMatchObject({ status: 409 });
+    await database.sql`
+      update metal.webhook_deliveries set status = 'failed', last_error = 'boom'
+      where id = ${testDelivery.id}
+    `;
+    const redelivered = await ownerClient.webhooks.redeliver(
+      organization.id,
+      created.id,
+      testDelivery.id,
+    );
+    expect(redelivered).toMatchObject({
+      id: testDelivery.id,
+      status: "pending",
+      attempt_count: 0,
+    });
+
+    await expect(
+      memberClient.webhooks.redeliver(organization.id, created.id, testDelivery.id),
+    ).rejects.toMatchObject({ status: 403 });
+
+    await expect(ownerClient.webhooks.delete(organization.id, created.id)).resolves.toEqual({
+      id: created.id,
+      deleted: true,
+    });
+    await expect(ownerClient.webhooks.list(organization.id)).resolves.toEqual({ webhooks: [] });
+    const secretsAfterDelete = await database.sql`
+      select id from vault.secrets where id = ${stored[0]!.secret_id}
+    `;
+    expect(secretsAfterDelete).toHaveLength(0);
+  });
 });

@@ -1,7 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 import {
-  assertWebhookUrlAllowed,
   buildWebhookSignatureHeaders,
+  postPinnedWebhook,
+  resolveValidatedWebhookTarget,
+  type DnsResolver,
+  type PinnedWebhookResponse,
 } from "@openmetal/events/webhooks-node";
 import {
   isRetryableWebhookStatus,
@@ -11,7 +14,6 @@ import {
   WEBHOOK_DELIVERY_TIMEOUT_MS,
   WEBHOOK_MAX_ATTEMPTS,
   WEBHOOK_BASE_BACKOFF_MS,
-  WEBHOOK_MAX_RESPONSE_BYTES,
   WEBHOOK_MAX_STORED_RESPONSE_BYTES,
   type WebhookUrlPolicy,
 } from "@openmetal/events";
@@ -29,7 +31,13 @@ export type WebhookAttemptResult = {
   responseSnippet?: string;
 };
 
-export type WebhookFetch = typeof fetch;
+export type WebhookPost = (input: {
+  endpointUrl: string;
+  validatedIp: string;
+  headers: Record<string, string>;
+  body: string;
+  timeoutMs: number;
+}) => Promise<PinnedWebhookResponse>;
 
 export function webhookUrlPolicyForEnvironment(environment: string): WebhookUrlPolicy {
   if (environment === "production") {
@@ -38,43 +46,10 @@ export function webhookUrlPolicyForEnvironment(environment: string): WebhookUrlP
   return { allowHttp: true, allowPrivateNetwork: true };
 }
 
-async function readCappedResponse(
-  response: Response,
-): Promise<{ snippet: string; truncated: boolean }> {
-  const reader = response.body?.getReader();
-  if (!reader) {
-    return { snippet: "", truncated: false };
-  }
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let truncated = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        total += value.byteLength;
-        if (total <= WEBHOOK_MAX_STORED_RESPONSE_BYTES) {
-          chunks.push(value);
-        }
-        if (total > WEBHOOK_MAX_RESPONSE_BYTES) {
-          truncated = true;
-          break;
-        }
-      }
-    }
-  } finally {
-    try {
-      await reader.cancel();
-    } catch {
-      // Ignore cancellation errors on an already strained stream.
-    }
-  }
-  const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
-  return {
-    snippet: redactString(bytes.toString("utf8").slice(0, WEBHOOK_MAX_STORED_RESPONSE_BYTES)),
-    truncated,
-  };
+function snippetFor(body: Buffer, truncated: boolean): string | undefined {
+  if (body.byteLength === 0) return undefined;
+  const text = redactString(body.toString("utf8").slice(0, WEBHOOK_MAX_STORED_RESPONSE_BYTES));
+  return truncated ? `${text} (response truncated)` : text || undefined;
 }
 
 export async function attemptWebhookDelivery(input: {
@@ -85,12 +60,22 @@ export async function attemptWebhookDelivery(input: {
   eventType: string;
   rawBody: string;
   policy: WebhookUrlPolicy;
-  fetchImpl?: WebhookFetch;
+  resolver?: DnsResolver;
+  postImpl?: WebhookPost;
 }): Promise<WebhookAttemptResult> {
-  const fetchImpl = input.fetchImpl ?? globalThis.fetch;
   const startedAt = Date.now();
+  let validatedIp: string;
   try {
-    await assertWebhookUrlAllowed(input.endpointUrl, input.policy);
+    const target = await resolveValidatedWebhookTarget(
+      input.endpointUrl,
+      input.policy,
+      input.resolver,
+    );
+    const first = target.addresses[0];
+    if (!first) {
+      throw new Error("webhook url hostname could not be resolved");
+    }
+    validatedIp = first;
   } catch (error) {
     return {
       retryable: false,
@@ -105,18 +90,19 @@ export async function attemptWebhookDelivery(input: {
     eventType: input.eventType,
     rawBody: input.rawBody,
   });
-  let response: Response;
+  const post = input.postImpl ?? postPinnedWebhook;
+  let response: PinnedWebhookResponse;
   try {
-    response = await fetchImpl(input.endpointUrl, {
-      method: "POST",
+    response = await post({
+      endpointUrl: input.endpointUrl,
+      validatedIp,
       headers,
       body: input.rawBody,
-      redirect: "manual",
-      signal: AbortSignal.timeout(WEBHOOK_DELIVERY_TIMEOUT_MS),
+      timeoutMs: WEBHOOK_DELIVERY_TIMEOUT_MS,
     });
   } catch (error) {
     const latencyMs = Date.now() - startedAt;
-    if (error instanceof Error && error.name === "TimeoutError") {
+    if (error instanceof Error && /timed out/.test(error.message)) {
       return { retryable: true, error: "webhook delivery timed out", latencyMs };
     }
     return {
@@ -129,17 +115,15 @@ export async function attemptWebhookDelivery(input: {
     };
   }
   const latencyMs = Date.now() - startedAt;
-  const { snippet, truncated } = await readCappedResponse(response).catch(() => ({
-    snippet: "",
-    truncated: true,
-  }));
+  const truncated = response.headers.get("x-metal-response-truncated") === "true";
+  const responseSnippet = snippetFor(response.body, truncated);
   if (response.status >= 300 && response.status <= 399) {
     return {
       httpStatus: response.status,
       retryable: false,
       error: "webhook endpoint redirected the delivery; redirects are not followed",
       latencyMs,
-      responseSnippet: snippet || undefined,
+      responseSnippet,
     };
   }
   if (response.status >= 200 && response.status < 300) {
@@ -153,7 +137,7 @@ export async function attemptWebhookDelivery(input: {
       retryAfterMs,
       error: `webhook endpoint returned ${response.status}${truncated ? " (response truncated)" : ""}`,
       latencyMs,
-      responseSnippet: snippet || undefined,
+      responseSnippet,
     };
   }
   return {
@@ -161,7 +145,7 @@ export async function attemptWebhookDelivery(input: {
     retryable: false,
     error: `webhook endpoint rejected the delivery with ${response.status}`,
     latencyMs,
-    responseSnippet: snippet || undefined,
+    responseSnippet,
   };
 }
 
@@ -188,7 +172,8 @@ export async function deliverWebhookOnce(
     policy: WebhookUrlPolicy;
     maxAttempts?: number;
     baseBackoffMs?: number;
-    fetchImpl?: WebhookFetch;
+    resolver?: DnsResolver;
+    postImpl?: WebhookPost;
   },
 ): Promise<WebhookDeliveryDisposition> {
   const maxAttempts = input.maxAttempts ?? WEBHOOK_MAX_ATTEMPTS;
@@ -261,7 +246,8 @@ export async function deliverWebhookOnce(
     eventType: delivery.eventType,
     rawBody,
     policy: input.policy,
-    fetchImpl: input.fetchImpl,
+    resolver: input.resolver,
+    postImpl: input.postImpl,
   });
   const child = logger.child({
     endpoint_id: endpoint.id,

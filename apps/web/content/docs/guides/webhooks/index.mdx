@@ -38,7 +38,10 @@ delivery is enqueued. Only enabled endpoints receive production deliveries.
 
 Production endpoints must use public HTTPS URLs. URLs with embedded credentials, private,
 link-local, or cloud metadata addresses are rejected at creation and revalidated on every
-attempt. Non-production environments relax HTTPS and private-network rules so local tunnels can
+attempt. Each delivery resolves the hostname once, then opens its connection directly to that
+validated IP while preserving the original `Host` header and TLS SNI, so DNS rebinding between
+validation and delivery cannot redirect the request; redirects are never followed.
+Non-production environments relax HTTPS and private-network rules so local tunnels can
 be tested.
 
 ## Secrets and rotation

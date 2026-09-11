@@ -6,6 +6,7 @@
     "filesystem",
     "expose-endpoint",
     "routing-and-providers",
-    "billing"
+    "billing",
+    "webhooks"
   ]
 }

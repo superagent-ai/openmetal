@@ -1,11 +1,12 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import {
-  domainEvents,
+  insertDomainEventAndBroadcast,
   organizationProviderCredentials,
   withTransaction,
   type MetalDb,
 } from "@openmetal/db";
 import { ProviderCredentialInputSchema, type ProviderCredentialInput } from "@openmetal/contracts";
+import { organizationTopic } from "@openmetal/events";
 import { ApiError } from "./errors.js";
 import { requireMembership } from "./services.js";
 
@@ -107,14 +108,15 @@ export async function configureOrganizationProviderCredential(
     if (!credential) {
       throw new ApiError(500, "internal_error", "failed to save provider credentials");
     }
-    await tx.insert(domainEvents).values({
+    await insertDomainEventAndBroadcast(tx, {
       type:
         created || existing?.disabledAt
           ? "organization.provider_credentials.configured"
           : "organization.provider_credentials.rotated",
       organizationId: input.organizationId,
       actorId: input.userId,
-      payload: { provider: input.credential.provider },
+      data: { provider: input.credential.provider },
+      topic: organizationTopic(input.organizationId),
     });
     return { credential, created };
   });
@@ -150,11 +152,12 @@ export async function removeOrganizationProviderCredential(
       .update(organizationProviderCredentials)
       .set({ disabledAt: now, updatedAt: now })
       .where(eq(organizationProviderCredentials.id, credential.id));
-    await tx.insert(domainEvents).values({
+    await insertDomainEventAndBroadcast(tx, {
       type: "organization.provider_credentials.removed",
       organizationId: input.organizationId,
       actorId: input.userId,
-      payload: { provider: input.provider },
+      data: { provider: input.provider },
+      topic: organizationTopic(input.organizationId),
     });
     return credential;
   });

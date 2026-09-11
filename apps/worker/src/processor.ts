@@ -8,7 +8,7 @@ import {
 import { and, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import {
   claimOutboxJobs,
-  domainEvents,
+  insertDomainEventAndBroadcast,
   ownsOutboxJobLease,
   operationEvents,
   operations,
@@ -25,14 +25,7 @@ import {
   type MetalDb,
   type OutboxLease,
 } from "@openmetal/db";
-import {
-  OutboxJobPayloadSchema,
-  projectTopic,
-  publicationDedupeKey,
-  serializeCursor,
-  toPublicEvent,
-  type OutboxJobPayload,
-} from "@openmetal/events";
+import { OutboxJobPayloadSchema, projectTopic, type OutboxJobPayload } from "@openmetal/events";
 import { createLogger, redactString } from "@openmetal/logger";
 import {
   ProviderError,
@@ -44,6 +37,12 @@ import {
   type SandboxProviderName,
 } from "@openmetal/provider-core";
 import type { WorkerEnv } from "./env.js";
+import {
+  deliverWebhookOnce,
+  runWithConcurrency,
+  settleWebhookJob,
+  webhookUrlPolicyForEnvironment,
+} from "./webhooks.js";
 import {
   getByokProviderByCredentialId,
   listOrganizationByokProviders,
@@ -247,37 +246,14 @@ async function recordSandboxEvent(
     | "endpoint.failed",
   data: Record<string, unknown>,
 ) {
-  const [event] = await tx
-    .insert(domainEvents)
-    .values({
-      type,
-      organizationId: sandbox.organizationId,
-      projectId: sandbox.projectId,
-      actorId: sandbox.createdBy,
-      payload: { sandbox_id: sandbox.publicId, ...data },
-      occurredAt: new Date(),
-    })
-    .returning();
-  if (!event) {
-    throw new Error("failed to persist sandbox event");
-  }
-  const publicEvent = toPublicEvent({
-    cursor: serializeCursor(event.cursor),
-    eventId: event.eventId,
-    type: event.type,
-    organizationId: event.organizationId,
-    projectId: event.projectId ? `prj_${event.projectId.replaceAll("-", "")}` : undefined,
-    occurredAt: event.occurredAt,
-    data: event.payload,
-  });
-  await tx.insert(outboxJobs).values({
-    jobType: "realtime.broadcast",
-    dedupeKey: publicationDedupeKey(event.eventId),
-    payload: {
-      job_type: "realtime.broadcast",
-      topic: projectTopic(`prj_${sandbox.projectId.replaceAll("-", "")}`),
-      event: publicEvent,
-    },
+  await insertDomainEventAndBroadcast(tx, {
+    type,
+    organizationId: sandbox.organizationId,
+    projectId: sandbox.projectId,
+    actorId: sandbox.createdBy,
+    data: { sandbox_id: sandbox.publicId, ...data },
+    occurredAt: new Date(),
+    topic: projectTopic(`prj_${sandbox.projectId.replaceAll("-", "")}`),
   });
 }
 
@@ -1998,7 +1974,10 @@ async function cleanupExpiredProcessEvents(db: MetalDb, retentionMs: number) {
 
 async function recordTerminalSandboxFailure(
   db: MetalDb,
-  payload: Exclude<OutboxJobPayload, { job_type: "realtime.broadcast" }>,
+  payload: Exclude<
+    OutboxJobPayload,
+    { job_type: "realtime.broadcast" } | { job_type: "webhook.deliver" }
+  >,
 ) {
   if (
     payload.job_type !== "sandbox.provision" &&
@@ -2046,7 +2025,10 @@ async function recordTerminalSandboxFailure(
 
 async function recordTerminalRuntimeFailure(
   db: MetalDb,
-  payload: Exclude<OutboxJobPayload, { job_type: "realtime.broadcast" }>,
+  payload: Exclude<
+    OutboxJobPayload,
+    { job_type: "realtime.broadcast" } | { job_type: "webhook.deliver" }
+  >,
   error: unknown,
   guard: JobLeaseGuard,
 ) {
@@ -2180,8 +2162,10 @@ export async function processOnce(
   const guards = new Map(
     jobs.map((job) => [job.id, createJobLeaseGuard(db, job, env.WORKER_ID, env.WORKER_LEASE_MS)]),
   );
+  const webhookJobs = jobs.filter((job) => job.jobType === "webhook.deliver");
+  const sequentialJobs = jobs.filter((job) => job.jobType !== "webhook.deliver");
 
-  for (const job of jobs) {
+  for (const job of sequentialJobs) {
     const guard = guards.get(job.id)!;
     const child = logger.child({
       job_id: job.id,
@@ -2217,6 +2201,8 @@ export async function processOnce(
       } else if (payload.job_type === "sandbox.destroy") {
         const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
         await destroySandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
+      } else if (payload.job_type === "webhook.deliver") {
+        throw new Error("webhook.deliver jobs are processed outside the sequential path");
       } else {
         const sandboxId = await runtimeSandboxId(db, payload);
         if (sandboxId) {
@@ -2275,7 +2261,12 @@ export async function processOnce(
         payload?.job_type === "sandbox.cost.sync" && payload.final
           ? 2 * 60_000
           : backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS);
-      if (terminal && payload && payload.job_type !== "realtime.broadcast") {
+      if (
+        terminal &&
+        payload &&
+        payload.job_type !== "realtime.broadcast" &&
+        payload.job_type !== "webhook.deliver"
+      ) {
         await recordTerminalSandboxFailure(db, payload);
         await recordTerminalRuntimeFailure(db, payload, error, guard);
         if ("operation_id" in payload && payload.operation_id) {
@@ -2314,6 +2305,63 @@ export async function processOnce(
       guard.stop();
     }
   }
+
+  await runWithConcurrency(webhookJobs, env.WORKER_WEBHOOK_CONCURRENCY, async (job) => {
+    const guard = guards.get(job.id)!;
+    const child = logger.child({
+      job_id: job.id,
+      service: "worker",
+      environment: env.METAL_ENVIRONMENT,
+    });
+    try {
+      const payload = OutboxJobPayloadSchema.parse(job.payload);
+      if (payload.job_type !== "webhook.deliver") {
+        throw new Error(`unexpected job type ${payload.job_type} on the webhook path`);
+      }
+      const disposition = await deliverWebhookOnce(db, payload.delivery_id, {
+        policy: webhookUrlPolicyForEnvironment(env.METAL_ENVIRONMENT),
+        maxAttempts: env.WORKER_WEBHOOK_MAX_ATTEMPTS,
+        baseBackoffMs: env.WORKER_WEBHOOK_BASE_BACKOFF_MS,
+      });
+      await settleWebhookJob(db, job, env.WORKER_ID, guard.token, disposition);
+      child.info({ job_id: job.id, job_type: payload.job_type }, "processed outbox job");
+    } catch (error) {
+      if (error instanceof OutboxLeaseLostError) {
+        child.warn({ job_id: job.id }, "outbox lease lost; stale worker stopped");
+        return;
+      }
+      const attempts = job.attemptCount;
+      const terminal = attempts >= env.WORKER_MAX_ATTEMPTS;
+      await db
+        .update(outboxJobs)
+        .set({
+          status: terminal ? "failed" : "pending",
+          lastError: safeError(error),
+          availableAt: terminal
+            ? new Date()
+            : new Date(Date.now() + backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS)),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          leaseToken: null,
+          updatedAt: new Date(),
+          completedAt: terminal ? new Date() : null,
+        })
+        .where(
+          and(
+            eq(outboxJobs.id, job.id),
+            eq(outboxJobs.status, "leased"),
+            eq(outboxJobs.leaseOwner, env.WORKER_ID),
+            eq(outboxJobs.leaseToken, guard.token),
+          ),
+        );
+      child.warn(
+        { job_id: job.id, attempt: attempts, terminal, err: safeError(error) },
+        "webhook outbox job failed",
+      );
+    } finally {
+      guard.stop();
+    }
+  });
 
   return jobs.length;
 }

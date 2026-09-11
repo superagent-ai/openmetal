@@ -578,6 +578,81 @@ export const outboxJobStatusEnum = metalSchema.enum("outbox_job_status", [
   "failed",
 ]);
 
+export const webhookDeliveryStatusEnum = metalSchema.enum("webhook_delivery_status", [
+  "pending",
+  "delivering",
+  "succeeded",
+  "retrying",
+  "failed",
+]);
+
+export const webhookEndpoints = metalSchema.table(
+  "webhook_endpoints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    url: text("url").notNull(),
+    eventTypes: jsonb("event_types").$type<string[]>().notNull().default([]),
+    enabled: boolean("enabled").notNull().default(true),
+    secretId: uuid("secret_id").notNull(),
+    secretPrefix: text("secret_prefix").notNull(),
+    createdBy: uuid("created_by").notNull(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true, mode: "date" }),
+    rotatedBy: uuid("rotated_by"),
+    lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true, mode: "date" }),
+    lastDeliveryStatus: text("last_delivery_status"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true, mode: "date" }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    index("webhook_endpoints_organization_idx").on(table.organizationId, table.createdAt),
+    index("webhook_endpoints_active_org_idx")
+      .on(table.organizationId, table.enabled)
+      .where(sql`${table.deletedAt} is null and ${table.disabledAt} is null`),
+  ],
+);
+
+export const webhookDeliveries = metalSchema.table(
+  "webhook_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    event: jsonb("event").$type<Record<string, unknown>>().notNull(),
+    endpointUrl: text("endpoint_url").notNull(),
+    status: webhookDeliveryStatusEnum("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "date" }),
+    lastHttpStatus: integer("last_http_status"),
+    lastError: text("last_error"),
+    lastLatencyMs: integer("last_latency_ms"),
+    responseSnippet: text("response_snippet"),
+    isTest: boolean("is_test").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("webhook_deliveries_endpoint_event_key").on(table.endpointId, table.eventId),
+    index("webhook_deliveries_endpoint_created_idx").on(table.endpointId, table.createdAt),
+    index("webhook_deliveries_organization_created_idx").on(table.organizationId, table.createdAt),
+    index("webhook_deliveries_retry_idx")
+      .on(table.status, table.nextAttemptAt)
+      .where(sql`${table.status} in ('pending', 'retrying')`),
+  ],
+);
+
 export const domainEvents = metalSchema.table(
   "domain_events",
   {
@@ -917,6 +992,8 @@ export const schema = {
   domainEvents,
   outboxJobs,
   idempotencyKeys,
+  webhookEndpoints,
+  webhookDeliveries,
   pricingVersions,
   billingAccounts,
   autoTopupPolicies,

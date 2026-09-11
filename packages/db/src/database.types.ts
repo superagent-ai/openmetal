@@ -1251,6 +1251,137 @@ export type Database = {
           },
         ]
       }
+      webhook_deliveries: {
+        Row: {
+          attempt_count: number
+          created_at: string
+          delivered_at: string | null
+          endpoint_id: string
+          endpoint_url: string
+          event: Json
+          event_id: string
+          event_type: string
+          id: string
+          is_test: boolean
+          last_error: string | null
+          last_http_status: number | null
+          last_latency_ms: number | null
+          next_attempt_at: string | null
+          organization_id: string
+          response_snippet: string | null
+          status: Database["metal"]["Enums"]["webhook_delivery_status"]
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          created_at?: string
+          delivered_at?: string | null
+          endpoint_id: string
+          endpoint_url: string
+          event: Json
+          event_id: string
+          event_type: string
+          id?: string
+          is_test?: boolean
+          last_error?: string | null
+          last_http_status?: number | null
+          last_latency_ms?: number | null
+          next_attempt_at?: string | null
+          organization_id: string
+          response_snippet?: string | null
+          status?: Database["metal"]["Enums"]["webhook_delivery_status"]
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          created_at?: string
+          delivered_at?: string | null
+          endpoint_id?: string
+          endpoint_url?: string
+          event?: Json
+          event_id?: string
+          event_type?: string
+          id?: string
+          is_test?: boolean
+          last_error?: string | null
+          last_http_status?: number | null
+          last_latency_ms?: number | null
+          next_attempt_at?: string | null
+          organization_id?: string
+          response_snippet?: string | null
+          status?: Database["metal"]["Enums"]["webhook_delivery_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webhook_deliveries_endpoint_id_fkey"
+            columns: ["endpoint_id"]
+            isOneToOne: false
+            referencedRelation: "webhook_endpoints"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      webhook_endpoints: {
+        Row: {
+          created_at: string
+          created_by: string
+          deleted_at: string | null
+          disabled_at: string | null
+          enabled: boolean
+          event_types: Json
+          id: string
+          last_delivery_at: string | null
+          last_delivery_status: string | null
+          name: string
+          organization_id: string
+          rotated_at: string | null
+          rotated_by: string | null
+          secret_id: string
+          secret_prefix: string
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          deleted_at?: string | null
+          disabled_at?: string | null
+          enabled?: boolean
+          event_types?: Json
+          id?: string
+          last_delivery_at?: string | null
+          last_delivery_status?: string | null
+          name: string
+          organization_id: string
+          rotated_at?: string | null
+          rotated_by?: string | null
+          secret_id: string
+          secret_prefix: string
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          deleted_at?: string | null
+          disabled_at?: string | null
+          enabled?: boolean
+          event_types?: Json
+          id?: string
+          last_delivery_at?: string | null
+          last_delivery_status?: string | null
+          name?: string
+          organization_id?: string
+          rotated_at?: string | null
+          rotated_by?: string | null
+          secret_id?: string
+          secret_prefix?: string
+          updated_at?: string
+          url?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -1299,6 +1430,7 @@ export type Database = {
         | "usage_correction"
         | "adjustment"
       outbox_job_status: "pending" | "leased" | "succeeded" | "failed"
+      webhook_delivery_status: "pending" | "delivering" | "succeeded" | "retrying" | "failed"
       pricing_kind: "purchase_fee" | "usage"
       process_state:
         | "queued"
@@ -1655,6 +1787,7 @@ export const Constants = {
         "adjustment",
       ],
       outbox_job_status: ["pending", "leased", "succeeded", "failed"],
+      webhook_delivery_status: ["pending", "delivering", "succeeded", "retrying", "failed"],
       pricing_kind: ["purchase_fee", "usage"],
       process_state: [
         "queued",

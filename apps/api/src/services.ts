@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import {
   autoTopupAttempts,
   creditPurchases,
-  domainEvents,
+  insertDomainEventAndBroadcast,
   organizationInvitations,
   organizationMembers,
   organizationProviderCredentials,
@@ -17,13 +17,7 @@ import {
   withTransaction,
   type MetalDb,
 } from "@openmetal/db";
-import {
-  organizationTopic,
-  projectTopic,
-  publicationDedupeKey,
-  serializeCursor,
-  toPublicEvent,
-} from "@openmetal/events";
+import { organizationTopic, projectTopic } from "@openmetal/events";
 import type { CreateSandboxRequest } from "@openmetal/contracts";
 import {
   ensureBillingAccount,
@@ -117,14 +111,7 @@ async function requireProjectAccess(
 async function insertEventAndOutbox(
   tx: Tx,
   input: {
-    type:
-      | "organization.created"
-      | "organization.updated"
-      | "organization.deleted"
-      | "project.created"
-      | "project.deleted"
-      | "project.updated"
-      | "sandbox.requested";
+    type: string;
     organizationId: string;
     projectId?: string;
     actorId: string;
@@ -132,36 +119,13 @@ async function insertEventAndOutbox(
     topic: string;
   },
 ) {
-  const [event] = await tx
-    .insert(domainEvents)
-    .values({
-      type: input.type,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      actorId: input.actorId,
-      payload: input.data,
-    })
-    .returning();
-  if (!event) {
-    throw new ApiError(500, "internal_error", "failed to persist domain event");
-  }
-  const publicEvent = toPublicEvent({
-    cursor: serializeCursor(event.cursor),
-    eventId: event.eventId,
-    type: event.type,
-    organizationId: event.organizationId,
-    projectId: event.projectId ? `prj_${event.projectId.replaceAll("-", "")}` : undefined,
-    occurredAt: event.occurredAt,
-    data: event.payload,
-  });
-  await tx.insert(outboxJobs).values({
-    jobType: "realtime.broadcast",
-    dedupeKey: publicationDedupeKey(event.eventId),
-    payload: {
-      job_type: "realtime.broadcast",
-      topic: input.topic,
-      event: publicEvent,
-    },
+  const { publicEvent } = await insertDomainEventAndBroadcast(tx, {
+    type: input.type,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    actorId: input.actorId,
+    data: input.data,
+    topic: input.topic,
   });
   return publicEvent;
 }

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import {
-  domainEvents,
+  insertDomainEventAndBroadcast,
   outboxJobs,
   processEvents,
   runtimeOperations,
@@ -23,12 +23,7 @@ import {
   type RuntimeOperationKind,
   type WriteFileRequest,
 } from "@openmetal/contracts";
-import {
-  projectTopic,
-  publicationDedupeKey,
-  serializeCursor,
-  toPublicEvent,
-} from "@openmetal/events";
+import { projectTopic } from "@openmetal/events";
 import { ApiError } from "./errors.js";
 import { getSandbox } from "./services.js";
 
@@ -174,38 +169,19 @@ async function recordProcessDomainEvent(
     sandboxPublicId: string;
   },
 ) {
-  const [event] = await tx
-    .insert(domainEvents)
-    .values({
-      type: input.type,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      actorId: input.actorId,
-      payload: {
-        process_id: input.processPublicId,
-        sandbox_id: input.sandboxPublicId,
-      },
-    })
-    .returning();
-  if (!event) throw new ApiError(500, "internal_error", "failed to persist process event");
-  const publicEvent = toPublicEvent({
-    cursor: serializeCursor(event.cursor),
-    eventId: event.eventId,
-    type: event.type,
-    organizationId: event.organizationId,
-    projectId: input.projectPublicId,
-    occurredAt: event.occurredAt,
-    data: event.payload,
-  });
-  await tx.insert(outboxJobs).values({
-    jobType: "realtime.broadcast",
-    dedupeKey: publicationDedupeKey(event.eventId),
-    payload: {
-      job_type: "realtime.broadcast",
-      topic: projectTopic(input.projectPublicId),
-      event: publicEvent,
+  const { publicEvent } = await insertDomainEventAndBroadcast(tx, {
+    type: input.type,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    projectPublicId: input.projectPublicId,
+    actorId: input.actorId,
+    data: {
+      process_id: input.processPublicId,
+      sandbox_id: input.sandboxPublicId,
     },
+    topic: projectTopic(input.projectPublicId),
   });
+  return publicEvent;
 }
 
 export async function createProcess(db: MetalDb, input: Scope & { request: CreateProcessRequest }) {

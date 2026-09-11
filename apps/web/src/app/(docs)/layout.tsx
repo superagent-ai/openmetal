@@ -13,7 +13,7 @@ export default function DocumentationLayout({ children }: { children: ReactNode 
       nav={{ ...nav, mode: "top" }}
       containerProps={{ className: "[--fd-layout-width:100vw]" }}
       sidebar={{
-        className: "border-e border-border bg-muted",
+        className: "border-e border-border bg-background",
         defaultOpenLevel: 0,
         prefetch: false,
       }}

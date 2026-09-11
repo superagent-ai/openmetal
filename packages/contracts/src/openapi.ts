@@ -7,7 +7,11 @@ import {
   ProjectApiKeySchema,
 } from "./api-keys.js";
 import { ErrorEnvelopeSchema } from "./errors.js";
-import { CursorEventPageSchema, ListEventsQuerySchema } from "./events.js";
+import {
+  CursorEventPageSchema,
+  DurableEventEnvelopeSchema,
+  ListEventsQuerySchema,
+} from "./events.js";
 import {
   CreateWebhookEndpointRequestSchema,
   RotateWebhookSecretResponseSchema,
@@ -119,6 +123,59 @@ const errorResponse = (description: string): OpenApiObject => ({
   content: jsonContent("Error"),
 });
 
+const reusableObjectSchemas = new Set([
+  "Organization",
+  "OrganizationMember",
+  "OrganizationInvitation",
+  "ConfiguredProviderCredential",
+  "Project",
+  "ProjectApiKey",
+  "Sandbox",
+  "Operation",
+  "OperationEvent",
+  "Process",
+  "ProcessEvent",
+  "RuntimeOperation",
+  "SandboxEndpoint",
+  "DurableEventEnvelope",
+  "BillingQuote",
+  "OrganizationBilling",
+  "OrganizationUsage",
+]);
+
+function referenceReusableObjectSchemas(
+  schemas: Record<string, OpenApiObject>,
+): Record<string, OpenApiObject> {
+  const namesBySignature = new Map<string, string>();
+  for (const [name, schema] of Object.entries(schemas)) {
+    if (reusableObjectSchemas.has(name) && schema.type === "object") {
+      namesBySignature.set(JSON.stringify(schema), name);
+    }
+  }
+
+  function replace(value: unknown, rootName: string, isRoot = false): unknown {
+    if (Array.isArray(value)) return value.map((child) => replace(child, rootName));
+    if (!value || typeof value !== "object") return value;
+
+    const object = value as OpenApiObject;
+    if (!isRoot) {
+      const reusableName = namesBySignature.get(JSON.stringify(object));
+      if (reusableName && reusableName !== rootName) return ref(reusableName);
+    }
+
+    return Object.fromEntries(
+      Object.entries(object).map(([key, child]) => [key, replace(child, rootName)]),
+    );
+  }
+
+  return Object.fromEntries(
+    Object.entries(schemas).map(([name, schema]) => {
+      const linked = replace(schema, name, true) as OpenApiObject;
+      return [name, reusableObjectSchemas.has(name) ? { title: name, ...linked } : linked];
+    }),
+  );
+}
+
 const ProjectDeleteResponseSchema = z.object({
   id: ProjectIdSchema,
   deleted: z.literal(true),
@@ -158,7 +215,7 @@ export function buildOpenApiDocument(): OpenApiObject {
           scheme: "bearer",
         },
       },
-      schemas: {
+      schemas: referenceReusableObjectSchemas({
         Error: json(ErrorEnvelopeSchema),
         HealthResponse: json(HealthResponseSchema),
         ReadinessResponse: json(ReadinessResponseSchema),
@@ -208,6 +265,7 @@ export function buildOpenApiDocument(): OpenApiObject {
         CreateSandboxEndpointRequest: json(CreateSandboxEndpointRequestSchema),
         SandboxEndpoint: json(SandboxEndpointSchema),
         SandboxEndpointListResponse: json(SandboxEndpointListResponseSchema),
+        DurableEventEnvelope: json(DurableEventEnvelopeSchema),
         CursorEventPage: json(CursorEventPageSchema),
         BillingQuote: json(BillingQuoteSchema),
         CreateBillingCheckoutRequest: json(CreateBillingCheckoutRequestSchema),
@@ -247,7 +305,7 @@ export function buildOpenApiDocument(): OpenApiObject {
         WebhookEndpointListResponse: json(WebhookEndpointListResponseSchema),
         WebhookDelivery: json(WebhookDeliverySchema),
         WebhookDeliveryListResponse: json(WebhookDeliveryListResponseSchema),
-      },
+      }),
       parameters: {
         OrganizationIdPath: {
           name: "organization_id",

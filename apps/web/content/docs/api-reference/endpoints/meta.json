@@ -11,6 +11,7 @@
     "sandboxes",
     "runtime",
     "operations",
-    "events"
+    "events",
+    "webhooks"
   ]
 }

@@ -3,6 +3,7 @@ import { DurableEventEnvelopeSchema } from "@openmetal/contracts";
 
 export const OutboxJobTypeSchema = z.enum([
   "realtime.broadcast",
+  "webhook.deliver",
   "sandbox.provision",
   "sandbox.reconcile",
   "sandbox.pause",
@@ -26,6 +27,10 @@ export const RealtimeBroadcastJobPayloadSchema = z.object({
   job_type: z.literal("realtime.broadcast"),
   topic: z.string().min(1),
   event: DurableEventEnvelopeSchema,
+});
+export const WebhookDeliverJobPayloadSchema = z.object({
+  job_type: z.literal("webhook.deliver"),
+  delivery_id: z.uuid(),
 });
 export const SandboxProvisionJobPayloadSchema = z.object({
   job_type: z.literal("sandbox.provision"),
@@ -102,6 +107,7 @@ export const BillingSpendLimitEnforceJobPayloadSchema = z.object({
 });
 export const OutboxJobPayloadSchema = z.discriminatedUnion("job_type", [
   RealtimeBroadcastJobPayloadSchema,
+  WebhookDeliverJobPayloadSchema,
   SandboxProvisionJobPayloadSchema,
   SandboxReconcileJobPayloadSchema,
   SandboxPauseJobPayloadSchema,

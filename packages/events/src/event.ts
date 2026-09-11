@@ -1,38 +1,14 @@
 import { DurableEventEnvelopeSchema, type DurableEventEnvelope } from "@openmetal/contracts";
+import {
+  EventTypeValues as ContractEventTypeValues,
+  type EventType as ContractEventType,
+} from "@openmetal/contracts";
 import { redactRecord } from "@openmetal/logger";
 import { z } from "zod";
 
-export const EventTypeValues = [
-  "organization.created",
-  "project.created",
-  "project.deleted",
-  "project.updated",
-  "sandbox.requested",
-  "sandbox.ready",
-  "sandbox.paused",
-  "sandbox.resumed",
-  "sandbox.cost_updated",
-  "sandbox.failed",
-  "sandbox.deleted",
-  "process.queued",
-  "process.started",
-  "process.cancel_requested",
-  "process.completed",
-  "process.cancelled",
-  "process.failed",
-  "runtime_operation.completed",
-  "runtime_operation.failed",
-  "endpoint.created",
-  "endpoint.revoked",
-  "endpoint.expired",
-  "endpoint.failed",
-  "billing.credits_purchased",
-  "billing.usage_charged",
-  "billing.auto_topup_failed",
-  "billing.spend_limit_reached",
-] as const;
+export const EventTypeValues = ContractEventTypeValues;
+export type EventTypeValue = ContractEventType;
 export const EventTypeValueSchema = z.enum(EventTypeValues);
-export type EventTypeValue = z.infer<typeof EventTypeValueSchema>;
 
 export const CreateDomainEventInputSchema = z.object({
   type: EventTypeValueSchema,

@@ -6,6 +6,7 @@ export * from "./organizations.js";
 export * from "./members.js";
 export * from "./projects.js";
 export * from "./events.js";
+export * from "./webhooks.js";
 export * from "./api-keys.js";
 export * from "./provider-credentials.js";
 export * from "./sandboxes.js";

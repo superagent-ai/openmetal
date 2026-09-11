@@ -1,7 +1,3 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { promises as dns } from "node:dns";
-import { isIP } from "node:net";
-
 export const WEBHOOK_SIGNATURE_HEADER = "metal-signature";
 export const WEBHOOK_TIMESTAMP_HEADER = "metal-signature-timestamp";
 export const WEBHOOK_DELIVERY_ID_HEADER = "metal-delivery-id";
@@ -32,71 +28,6 @@ export function matchesWebhookEndpoint(
   if (!endpoint.enabled) return false;
   if (endpoint.eventTypes.length === 0) return true;
   return endpoint.eventTypes.includes(eventType);
-}
-
-export function signWebhookPayload(input: {
-  secret: string;
-  timestamp: string;
-  deliveryId: string;
-  rawBody: string | Uint8Array;
-}): string {
-  const body = typeof input.rawBody === "string" ? input.rawBody : Buffer.from(input.rawBody);
-  return createHmac("sha256", input.secret)
-    .update(input.timestamp, "utf8")
-    .update(".", "utf8")
-    .update(input.deliveryId, "utf8")
-    .update(".", "utf8")
-    .update(body)
-    .digest("hex");
-}
-
-export function buildWebhookSignatureHeaders(input: {
-  secret: string;
-  deliveryId: string;
-  eventId: string;
-  eventType: string;
-  rawBody: string;
-  timestamp?: string;
-}): Record<string, string> {
-  const timestamp = input.timestamp ?? String(Math.floor(Date.now() / 1000));
-  return {
-    "content-type": "application/json",
-    [WEBHOOK_DELIVERY_ID_HEADER]: input.deliveryId,
-    [WEBHOOK_EVENT_ID_HEADER]: input.eventId,
-    [WEBHOOK_EVENT_TYPE_HEADER]: input.eventType,
-    [WEBHOOK_TIMESTAMP_HEADER]: timestamp,
-    [WEBHOOK_SIGNATURE_HEADER]: `t=${timestamp},v1=${signWebhookPayload({
-      secret: input.secret,
-      timestamp,
-      deliveryId: input.deliveryId,
-      rawBody: input.rawBody,
-    })}`,
-  };
-}
-
-export function verifyWebhookSignature(input: {
-  secret: string;
-  deliveryId: string;
-  rawBody: string | Uint8Array;
-  signatureHeader: string;
-  timestampHeader?: string;
-  nowSeconds?: number;
-}): boolean {
-  const match = /(?:^|,)t=(\d+),v1=([0-9a-fA-F]+)(?:,|$)/.exec(input.signatureHeader);
-  if (!match) return false;
-  const timestamp = match[1]!;
-  if (input.timestampHeader && input.timestampHeader !== timestamp) return false;
-  const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
-  if (Math.abs(now - Number(timestamp)) > WEBHOOK_SIGNATURE_TOLERANCE_SECONDS) return false;
-  const expected = signWebhookPayload({
-    secret: input.secret,
-    timestamp,
-    deliveryId: input.deliveryId,
-    rawBody: input.rawBody,
-  });
-  const received = match[2]!;
-  if (received.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(received, "utf8"), Buffer.from(expected, "utf8"));
 }
 
 export function isRetryableWebhookStatus(status: number): boolean {
@@ -144,9 +75,13 @@ export function productionWebhookUrlPolicy(): WebhookUrlPolicy {
   return { allowHttp: false, allowPrivateNetwork: false };
 }
 
+export function isIpLiteral(hostname: string): boolean {
+  if (hostname.includes(":")) return true;
+  return /^\d+\.\d+\.\d+\.\d+$/.test(hostname);
+}
+
 export function isPrivateOrReservedIp(address: string): boolean {
-  if (isIP(address) === 0) return true;
-  const normalized = address.toLowerCase();
+  const normalized = address.toLowerCase().trim();
   if (normalized === "::" || normalized === "::1" || normalized === "0.0.0.0") return true;
   if (normalized.includes(":")) {
     if (
@@ -174,89 +109,22 @@ export function isPrivateOrReservedIp(address: string): boolean {
     }
     return false;
   }
-  const parts = address.split(".").map(Number);
+  const parts = normalized.split(".");
   if (
     parts.length !== 4 ||
-    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+    parts.some((part) => !/^\d+$/.test(part) || Number(part) < 0 || Number(part) > 255)
   ) {
     return true;
   }
-  const [a, b] = parts;
+  const [a, b] = parts.map(Number) as [number, number, number, number];
   if (a === 10 || a === 127 || (a === 169 && b === 254) || (a === 192 && b === 168)) return true;
-  if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true;
-  if (a === 0 || a === 100 || a === 192 || a === 198 || a === 203 || a === 224 || a! >= 240) {
-    if (a === 100 && b !== undefined && b >= 64 && b <= 127) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 0 || a === 100 || a === 192 || a === 198 || a === 203 || a === 224 || a >= 240) {
+    if (a === 100 && b >= 64 && b <= 127) return true;
     if (a === 192 && (b === 0 || b === 88 || b === 94)) return true;
-    if (a === 198 && b !== undefined && b >= 18 && b <= 19) return true;
-    if (a !== undefined && a >= 224) return true;
+    if (a === 198 && b >= 18 && b <= 19) return true;
+    if (a >= 224) return true;
     if (a === 0 || (a === 203 && b === 0) || (a === 192 && b === 0)) return true;
   }
   return false;
-}
-
-export type DnsResolver = {
-  lookup(hostname: string): Promise<Array<{ address: string }>>;
-};
-
-const defaultResolver: DnsResolver = {
-  async lookup(hostname: string) {
-    return dns.lookup(hostname, { all: true });
-  },
-};
-
-export async function assertWebhookUrlAllowed(
-  rawUrl: string,
-  policy: WebhookUrlPolicy,
-  resolver: DnsResolver = defaultResolver,
-): Promise<URL> {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new Error("webhook url must be an absolute http(s) URL");
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error("webhook url must be an absolute http(s) URL");
-  }
-  if (parsed.protocol === "http:" && !policy.allowHttp) {
-    throw new Error("webhook url must use https");
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error("webhook url must not embed credentials");
-  }
-  if (!parsed.hostname) {
-    throw new Error("webhook url must include a hostname");
-  }
-  const hostname = parsed.hostname.toLowerCase();
-  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
-    if (!policy.allowPrivateNetwork) {
-      throw new Error("webhook url must not target private or link-local addresses");
-    }
-    return parsed;
-  }
-  if (isIP(hostname) !== 0) {
-    if (!policy.allowPrivateNetwork && isPrivateOrReservedIp(hostname)) {
-      throw new Error("webhook url must not target private or link-local addresses");
-    }
-    return parsed;
-  }
-  if (hostname === "metadata.google.internal" || hostname.endsWith(".metadata.google.internal")) {
-    throw new Error("webhook url must not target cloud metadata endpoints");
-  }
-  let addresses: Array<{ address: string }>;
-  try {
-    addresses = await resolver.lookup(hostname);
-  } catch {
-    throw new Error("webhook url hostname could not be resolved");
-  }
-  if (addresses.length === 0) {
-    throw new Error("webhook url hostname could not be resolved");
-  }
-  if (
-    !policy.allowPrivateNetwork &&
-    addresses.some(({ address }) => isPrivateOrReservedIp(address))
-  ) {
-    throw new Error("webhook url must not target private or link-local addresses");
-  }
-  return parsed;
 }

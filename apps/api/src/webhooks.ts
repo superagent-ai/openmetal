@@ -7,7 +7,8 @@ import {
   withTransaction,
   type MetalDb,
 } from "@openmetal/db";
-import { assertWebhookUrlAllowed, EventTypeValues, type WebhookUrlPolicy } from "@openmetal/events";
+import { assertWebhookUrlAllowed } from "@openmetal/events/webhooks-node";
+import { EventTypeValues, type WebhookUrlPolicy } from "@openmetal/events";
 import type {
   CreateWebhookEndpointRequest,
   UpdateWebhookEndpointRequest,

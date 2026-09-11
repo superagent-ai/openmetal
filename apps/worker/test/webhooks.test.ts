@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createScriptedFetch } from "@openmetal/testkit";
-import { verifyWebhookSignature } from "@openmetal/events";
+import { verifyWebhookSignature } from "@openmetal/events/webhooks-node";
 import { attemptWebhookDelivery, runWithConcurrency } from "../src/webhooks.js";
 
 const policy = { allowHttp: true, allowPrivateNetwork: true };

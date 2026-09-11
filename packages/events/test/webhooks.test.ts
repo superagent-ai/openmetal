@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
-  assertWebhookUrlAllowed,
-  buildWebhookSignatureHeaders,
+  isIpLiteral,
   isPrivateOrReservedIp,
   isRetryableWebhookStatus,
   matchesWebhookEndpoint,
   parseWebhookRetryAfterMs,
-  verifyWebhookSignature,
   webhookDedupeKey,
   WEBHOOK_MAX_RETRY_AFTER_MS,
 } from "../src/webhooks.js";
+import {
+  assertWebhookUrlAllowed,
+  buildWebhookSignatureHeaders,
+  verifyWebhookSignature,
+} from "../src/webhooks-node.js";
 import { EventTypeValues } from "../src/event.js";
 
 describe("webhook helpers", () => {
@@ -107,6 +110,12 @@ describe("webhook helpers", () => {
 
   it("builds stable dedupe keys", () => {
     expect(webhookDedupeKey("endpoint", "event")).toBe("webhook:endpoint:event");
+  });
+
+  it("detects IP literals without node built-ins", () => {
+    expect(isIpLiteral("93.184.216.34")).toBe(true);
+    expect(isIpLiteral("::1")).toBe(true);
+    expect(isIpLiteral("example.com")).toBe(false);
   });
 
   it("flags private and reserved IPs", () => {

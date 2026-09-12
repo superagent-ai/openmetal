@@ -1,5 +1,13 @@
+import type { Metadata } from "next";
 import { NewOrganizationForm } from "@/components/new-organization-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { dashboardPageMetadata } from "@/lib/page-metadata";
+
+export const metadata: Metadata = dashboardPageMetadata({
+  title: "Create organization",
+  description: "Create an organization for members, projects, settings, and credits.",
+  path: "/dashboard/new",
+});
 
 export default function NewOrganizationPage() {
   return (

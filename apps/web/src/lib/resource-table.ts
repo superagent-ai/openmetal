@@ -611,7 +611,7 @@ function activeDurationMs(row: ResourceTableRow, now: number) {
 }
 
 function costValue(row: ResourceTableRow) {
-  if (row.provider === "modal" || row.cost_microusd === null) {
+  if (row.cost_microusd === null) {
     return null;
   }
   return BigInt(row.cost_microusd);

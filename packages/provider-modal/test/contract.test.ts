@@ -5,6 +5,8 @@ it("declares the Modal provider contract", () => {
   const provider = new ModalSandboxProvider({ tokenId: "test", tokenSecret: "test" });
   expect(provider.name).toBe("modal");
   expect(provider.capabilities.pause).toBe(false);
+  expect(provider.capabilities.cost).toBe(true);
+  expect(provider.capabilities.sizing).toBe("direct");
   expect(provider.capabilities.runtime).toMatchObject({
     process: { exec: true, streams: true, cancel: false },
     files: {
@@ -17,6 +19,126 @@ it("declares the Modal provider contract", () => {
     },
     httpEndpoints: { expose: false, revoke: false },
   });
+});
+
+it("applies Metal vCPU and memory requests to Modal sandboxes", async () => {
+  const app = { appId: "app-1" };
+  const image = {};
+  const sandbox = {
+    sandboxId: "sandbox-1",
+    exec: vi.fn().mockResolvedValue({ wait: vi.fn().mockResolvedValue(0) }),
+  };
+  const client = {
+    apps: { fromName: vi.fn().mockResolvedValue(app) },
+    images: { fromRegistry: vi.fn().mockReturnValue(image) },
+    sandboxes: { create: vi.fn().mockResolvedValue(sandbox) },
+  };
+  const provider = new ModalSandboxProvider({
+    tokenId: "test",
+    tokenSecret: "test",
+    client: client as never,
+  });
+
+  const created = await provider.create({
+    metalSandboxId: "sbx_1",
+    organizationId: "org-1",
+    projectId: "prj_1",
+    language: "typescript",
+    ttlMinutes: 30,
+    source: { kind: "environment", environment: "metal/node" },
+    resources: { vcpu: 4, memoryMb: 4096, architecture: "x86_64" },
+    lifecycle: {
+      runtimeTimeoutSeconds: 1_800,
+      onRuntimeTimeout: "destroy",
+      onIdleTimeout: "destroy",
+    },
+  });
+
+  expect(client.sandboxes.create).toHaveBeenCalledWith(
+    app,
+    image,
+    expect.objectContaining({
+      cpu: 2,
+      memoryMiB: 4096,
+      timeoutMs: 1_800_000,
+    }),
+  );
+  expect(created.resolvedResources).toMatchObject({ vcpu: 4, memoryMb: 4096 });
+});
+
+it("derives cumulative Modal cost from provider resource usage", async () => {
+  const sandboxGetResourceUsage = vi.fn().mockResolvedValue({
+    cpuCoreNanosecs: 100_000_000_000,
+    memGibNanosecs: 100_000_000_000,
+    gpuNanosecs: 0,
+  });
+  const provider = new ModalSandboxProvider({
+    tokenId: "test",
+    tokenSecret: "test",
+    client: { cpClient: { sandboxGetResourceUsage } } as never,
+  });
+  const measuredThrough = new Date("2026-09-11T12:00:00.000Z");
+
+  await expect(
+    provider.getCost({
+      providerResourceId: "sandbox-1",
+      providerOrganizationId: "app-1",
+      from: new Date("2026-09-11T11:00:00.000Z"),
+      to: measuredThrough,
+    }),
+  ).resolves.toMatchObject({
+    amountMicrousd: 4_609n,
+    providerOrganizationId: "app-1",
+    measuredThrough,
+    provenance: "provider_metered",
+    confidence: "medium",
+    source: "modal-sandbox-resource-usage-published-rate-card",
+    rateCardVersion: "2026-09-11",
+  });
+  expect(sandboxGetResourceUsage).toHaveBeenCalledWith({ sandboxId: "sandbox-1" });
+});
+
+it("captures final Modal usage before termination for reconciliation", async () => {
+  const terminate = vi.fn().mockResolvedValue(undefined);
+  const sandboxGetResourceUsage = vi.fn().mockResolvedValue({
+    cpuCoreNanosecs: 1_000_000_000,
+    memGibNanosecs: 2_000_000_000,
+    gpuNanosecs: 0,
+  });
+  const provider = new ModalSandboxProvider({
+    tokenId: "test",
+    tokenSecret: "test",
+    client: {
+      cpClient: { sandboxGetResourceUsage },
+      sandboxes: { fromId: vi.fn().mockResolvedValue({ terminate }) },
+    } as never,
+  });
+
+  const destroyed = await provider.destroy("sandbox-1");
+  expect(terminate).toHaveBeenCalledOnce();
+  expect(destroyed).toMatchObject({
+    providerMetadata: {
+      modal: {
+        finalResourceUsage: {
+          cpuCoreNanosecs: 1_000_000_000,
+          memGibNanosecs: 2_000_000_000,
+          gpuNanosecs: 0,
+        },
+      },
+    },
+  });
+
+  sandboxGetResourceUsage.mockClear();
+  await expect(
+    provider.getCost({
+      providerResourceId: "sandbox-1",
+      providerOrganizationId: "app-1",
+      providerMetadata: destroyed?.providerMetadata,
+      from: new Date("2026-09-11T11:00:00.000Z"),
+      to: new Date("2026-09-11T12:00:00.000Z"),
+    }),
+  ).resolves.toMatchObject({ amountMicrousd: 53n });
+  expect(sandboxGetResourceUsage).not.toHaveBeenCalled();
 });
 
 it("rejects oversized Modal files before readBytes buffers them", async () => {

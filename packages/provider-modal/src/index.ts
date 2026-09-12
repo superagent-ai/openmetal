@@ -10,6 +10,7 @@ import type {
   ProviderCreateSandboxInput,
   ProviderDeleteFileInput,
   ProviderDeleteFileResult,
+  ProviderDestroyResult,
   ProviderExecEvent,
   ProviderExecInput,
   ProviderExecResult,
@@ -30,6 +31,57 @@ import { ProviderError } from "@openmetal/provider-core";
 const MAX_OUTPUT_BYTES = 100 * 1_024 * 1_024;
 const MAX_FILE_BYTES = 10 * 1_024 * 1_024;
 const MAX_LIST_ENTRIES = 10_000;
+const NANOSECONDS_PER_HOUR = 3_600_000_000_000n;
+// Published Modal Sandbox rates: https://modal.com/pricing?calculator=
+const MODAL_RATE_CARD_VERSION = "2026-09-11";
+const CPU_MICROUSD_PER_CORE_HOUR = 141_912n;
+const MEMORY_MICROUSD_PER_GIB_HOUR = 24_012n;
+
+type ModalResourceUsage = {
+  cpuCoreNanosecs: number;
+  memGibNanosecs: number;
+  gpuNanosecs: number;
+  gpuType?: string;
+};
+
+function validUsageValue(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function parseResourceUsage(value: unknown): ModalResourceUsage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  if (
+    !("cpuCoreNanosecs" in value) ||
+    !validUsageValue(value.cpuCoreNanosecs) ||
+    !("memGibNanosecs" in value) ||
+    !validUsageValue(value.memGibNanosecs) ||
+    !("gpuNanosecs" in value) ||
+    !validUsageValue(value.gpuNanosecs)
+  ) {
+    return undefined;
+  }
+  const gpuType =
+    "gpuType" in value && typeof value.gpuType === "string" ? value.gpuType : undefined;
+  return {
+    cpuCoreNanosecs: value.cpuCoreNanosecs,
+    memGibNanosecs: value.memGibNanosecs,
+    gpuNanosecs: value.gpuNanosecs,
+    ...(gpuType ? { gpuType } : {}),
+  };
+}
+
+function usageFromMetadata(metadata: Record<string, unknown> | undefined) {
+  const modal = metadata?.modal;
+  if (!modal || typeof modal !== "object" || !("finalResourceUsage" in modal)) return undefined;
+  return parseResourceUsage(modal.finalResourceUsage);
+}
+
+function estimateCostMicrousd(usage: ModalResourceUsage): bigint {
+  const numerator =
+    BigInt(usage.cpuCoreNanosecs) * CPU_MICROUSD_PER_CORE_HOUR +
+    BigInt(usage.memGibNanosecs) * MEMORY_MICROUSD_PER_GIB_HOUR;
+  return (numerator + NANOSECONDS_PER_HOUR / 2n) / NANOSECONDS_PER_HOUR;
+}
 
 function modalExecTimeoutMs(deadline: Date | undefined): number | undefined {
   if (!deadline) return undefined;
@@ -82,8 +134,8 @@ export class ModalSandboxProvider implements SandboxProvider {
   readonly name = "modal" as const;
   readonly capabilities = {
     pause: false,
-    cost: false,
-    sizing: "fixed",
+    cost: true,
+    sizing: "direct",
     sources: ["environment", "oci_image"],
     runtime: {
       process: {
@@ -135,6 +187,8 @@ export class ModalSandboxProvider implements SandboxProvider {
     try {
       sandbox = await this.client.sandboxes.create(app, image, {
         name,
+        cpu: resolved.vcpu / 2,
+        memoryMiB: resolved.memoryMb,
         timeoutMs: input.ttlMinutes * 60_000,
         tags: {
           "metal.sandbox_id": input.metalSandboxId,
@@ -403,10 +457,30 @@ export class ModalSandboxProvider implements SandboxProvider {
     }
   }
 
-  async destroy(providerResourceId: string): Promise<void> {
+  async destroy(
+    providerResourceId: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderDestroyResult | void> {
     try {
-      const sandbox = await this.client.sandboxes.fromId(providerResourceId);
-      await sandbox.terminate();
+      const sandbox = await withOperation(
+        this.client.sandboxes.fromId(providerResourceId),
+        signal,
+        undefined,
+      );
+      let finalResourceUsage: ModalResourceUsage | undefined;
+      try {
+        finalResourceUsage = await this.getResourceUsage(providerResourceId, signal);
+      } catch {
+        // Cleanup must proceed even if Modal cannot return a final usage measurement.
+      }
+      await withOperation(sandbox.terminate(), signal, undefined);
+      return finalResourceUsage
+        ? {
+            providerMetadata: {
+              modal: { finalResourceUsage },
+            },
+          }
+        : undefined;
     } catch (error) {
       if (!(error instanceof NotFoundError)) {
         throw error;
@@ -418,8 +492,57 @@ export class ModalSandboxProvider implements SandboxProvider {
     throw new Error("Modal sandboxes do not support pause");
   }
 
-  async getCost(_input: ProviderSandboxCostInput): Promise<ProviderSandboxCost | null> {
-    return null;
+  async getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost | null> {
+    const usage =
+      usageFromMetadata(input.providerMetadata) ??
+      (await this.getResourceUsage(input.providerResourceId, input.signal));
+    if (usage.gpuNanosecs > 0) {
+      throw new ProviderError(
+        "Modal GPU usage cannot be priced by the CPU sandbox rate card",
+        "unsupported",
+        false,
+      );
+    }
+    return {
+      amountMicrousd: estimateCostMicrousd(usage),
+      providerOrganizationId: input.providerOrganizationId ?? this.appName,
+      measuredThrough: input.to,
+      provenance: "provider_metered",
+      confidence: "medium",
+      source: "modal-sandbox-resource-usage-published-rate-card",
+      rateCardVersion: MODAL_RATE_CARD_VERSION,
+      raw: {
+        cumulative: true,
+        excludes: ["credits", "discounts", "regional_modifiers"],
+        rateCardVersion: MODAL_RATE_CARD_VERSION,
+        usage: {
+          cpuCoreNanosecs: usage.cpuCoreNanosecs.toString(),
+          memGibNanosecs: usage.memGibNanosecs.toString(),
+          gpuNanosecs: usage.gpuNanosecs.toString(),
+          gpuType: usage.gpuType ?? null,
+        },
+        ratesMicrousdPerHour: {
+          cpuCore: CPU_MICROUSD_PER_CORE_HOUR.toString(),
+          memoryGib: MEMORY_MICROUSD_PER_GIB_HOUR.toString(),
+        },
+      },
+    };
+  }
+
+  private async getResourceUsage(
+    providerResourceId: string,
+    signal?: AbortSignal,
+  ): Promise<ModalResourceUsage> {
+    const usage = await withOperation(
+      this.client.cpClient.sandboxGetResourceUsage({ sandboxId: providerResourceId }),
+      signal,
+      undefined,
+    );
+    const parsed = parseResourceUsage(usage);
+    if (!parsed) {
+      throw new ProviderError("Modal returned invalid sandbox resource usage", "unavailable", true);
+    }
+    return parsed;
   }
 
   private runtimeSandbox(

@@ -79,7 +79,7 @@ writeFileSync(supabaseEnvPath, supabaseEnv);
 console.log("Wrote machine-specific .env.local files from supabase status.");
 
 function envValue(key, existing) {
-  return usableEnvValue(process.env[key]) || usableEnvValue(existing[key]) || "";
+  return usableEnvValue(process.env[key]) || usableEnvValue(existing[key]) || "local-unconfigured";
 }
 
 function usableEnvValue(value) {

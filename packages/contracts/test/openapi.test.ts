@@ -114,6 +114,31 @@ describe("generated OpenAPI document", () => {
     expect(JSON.stringify(create)).toContain("public_ports");
   });
 
+  it("references named objects inside response schemas", () => {
+    const schemas = (document.components as JsonObject).schemas as JsonObject;
+    expect((schemas.Organization as JsonObject).title).toBe("Organization");
+
+    const organizationList = schemas.OrganizationListResponse as JsonObject;
+    const organizationProperties = organizationList.properties as JsonObject;
+    const organizations = organizationProperties.organizations as JsonObject;
+    expect((organizations.items as JsonObject).$ref).toBe("#/components/schemas/Organization");
+
+    const membersResponse = schemas.OrganizationMembersResponse as JsonObject;
+    const memberProperties = membersResponse.properties as JsonObject;
+    expect(((memberProperties.members as JsonObject).items as JsonObject).$ref).toBe(
+      "#/components/schemas/OrganizationMember",
+    );
+    expect(((memberProperties.invitations as JsonObject).items as JsonObject).$ref).toBe(
+      "#/components/schemas/OrganizationInvitation",
+    );
+
+    const eventPage = schemas.CursorEventPage as JsonObject;
+    const eventProperties = eventPage.properties as JsonObject;
+    expect(((eventProperties.events as JsonObject).items as JsonObject).$ref).toBe(
+      "#/components/schemas/DurableEventEnvelope",
+    );
+  });
+
   it("generates a TypeScript client contract that typechecks", async () => {
     const directory = await mkdtemp(join(tmpdir(), "metal-openapi-"));
     try {

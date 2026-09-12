@@ -1,7 +1,23 @@
+import type { Metadata } from "next";
 import { UsageView } from "@/components/usage-view";
 import { requireOrganizationBySlug } from "@/lib/dashboard-organizations";
 import { requireMetalSession } from "@/lib/metal-server";
+import { dashboardPageMetadata } from "@/lib/page-metadata";
 import { parseUsageFilters, usageQueryForFilters } from "@/lib/usage-filters";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ organizationSlug: string }>;
+}): Promise<Metadata> {
+  const { organizationSlug } = await params;
+  const organization = await requireOrganizationBySlug(organizationSlug);
+  return dashboardPageMetadata({
+    title: "Usage",
+    description: `Sandbox and compute usage for ${organization.name}.`,
+    path: `/dashboard/${organization.slug}/usage`,
+  });
+}
 
 export default async function OrganizationUsagePage({
   params,

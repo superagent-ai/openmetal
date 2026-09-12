@@ -38,6 +38,10 @@ Freestyle charges use a low confidence rate card estimate from provider runtime 
 VM resources. The estimate excludes data transfer, included credits, discounts, and enterprise
 pricing.
 
+Modal charges use a medium confidence rate card calculation from provider reported cumulative CPU
+core nanoseconds and memory GiB nanoseconds. Metal captures a final usage measurement before
+termination. Credits, discounts, and regional modifiers are excluded.
+
 ## BYOK
 
 BYOK capacity is billed by the provider and does not consume Metal credits. A single explicitly selected BYOK provider without fallback can create capacity without a positive managed balance.

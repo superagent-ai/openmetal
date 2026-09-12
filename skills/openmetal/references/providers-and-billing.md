@@ -12,14 +12,16 @@ Read this reference before choosing a provider, requiring pause/resume, configur
 | Daytona     | Environment, OCI image         | Attempted; capability reporting is inconsistent | No     | Yes                                      |
 | E2B         | Environment, provider template | Yes                                             | Yes    | Yes                                      |
 | Freestyle   | Environment, provider template | Yes                                             | Yes    | Estimated rate card (low confidence)     |
-| Modal       | Environment, OCI image         | No                                              | No     | No                                       |
+| Modal       | Environment, OCI image         | No                                              | No     | Metered resource usage with rate card    |
 | Northflank  | Environment, OCI image         | Yes                                             | Yes    | Yes                                      |
 | Runloop     | Environment, provider template | Yes                                             | Yes    | Yes                                      |
 | Vercel      | Environment, OCI image         | No                                              | No     | Yes                                      |
 
 This matrix describes current adapters, not future vision documents. If reliable pause/resume is required, use CodeSandbox, E2B, Northflank, or Runloop. The API currently attempts Daytona pause even though the adapter advertises pause as disabled by default, and BYOK configuration cannot enable that capability flag. Treat Daytona pause as inconsistent until the implementation is corrected.
 
-Managed routing skips providers without durable cost evidence. Modal therefore requires BYOK in current routing. Cloudflare managed eligibility requires both account identification and analytics cost access.
+Managed routing skips providers without durable cost evidence. Modal is eligible using cumulative
+billable CPU and memory usage from its sandbox resource API with a versioned published rate card.
+Cloudflare managed eligibility requires both account identification and analytics cost access.
 
 ## Runtime Capabilities
 
@@ -53,6 +55,10 @@ Provider-specific runtime limitations:
 - Cloudflare supports ordered process execution with an omitted or empty environment, but rejects non-empty environment overrides. It has no process cancellation.
 - E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Runloop supports provider-level cancellation, but its buffered output is not usable through the public process API.
 - Daytona, E2B, and Modal reject append writes. Runloop and Vercel also reject append; Runloop rejects `create_parents: true`.
+- Modal managed cost uses cumulative CPU core nanoseconds and memory GiB nanoseconds from the
+  sandbox resource API. Metal applies the published Sandbox rate card with medium confidence and
+  retains a final usage measurement before termination. Credits, discounts, and regional modifiers
+  are excluded.
 - Blaxel and Cloudflare implement append by reading and rewriting the whole file, so the resulting file must still fit their 10 MiB adapter limit.
 - Cloudflare file paths must be within `/workspace`; it does not implement list or delete. Runloop and Vercel do not implement list or delete and require a file path rather than `/`.
 - Vercel file writes are additionally constrained by USTAR path-component limits.

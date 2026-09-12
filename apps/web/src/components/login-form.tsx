@@ -4,6 +4,7 @@ import { useFormStatus } from "react-dom";
 import { sendMagicLink, signInWithOAuth } from "@/app/login/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { OpenMetalLogo } from "@/components/openmetal-logo";
 import {
   Field,
   FieldDescription,
@@ -75,8 +76,10 @@ export function LoginForm({
   return (
     <div className={cn("flex flex-col gap-6", className)}>
       <FieldGroup>
-        <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-2xl font-semibold text-balance">Sign in to OpenMetal</h1>
+        <div className="flex flex-col items-center gap-2 text-center">
+          <h1 aria-label="Sign in to OpenMetal">
+            <OpenMetalLogo className="text-xl font-semibold" />
+          </h1>
           <p className="text-sm text-pretty text-muted-foreground">
             Continue with Google or GitHub, or email a magic link.
           </p>

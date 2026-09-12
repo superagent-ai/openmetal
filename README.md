@@ -217,6 +217,7 @@ Integration, RLS, and Realtime tests require local Supabase plus `pnpm env:local
 - **OAuth redirect mismatch**: provider callback URLs must be `http://127.0.0.1:55321/auth/v1/callback` locally. The app route is `/auth/callback`.
 - **Port already allocated**: `pnpm supabase:stop` then start again. API uses 4000, web uses 3100.
 - **Encrypted `.env` will not decrypt**: run `pnpm exec dotenvx armor login` as a member of superagent-team. Do not copy keys from other Superagent repos into this `.env`.
+- **`supabase start` missing private key**: use `pnpm supabase:start`, not bare `supabase start`. The CLI reads the encrypted root `.env` and needs dotenvx to decrypt OAuth secrets first.
 
 ## Root commands
 

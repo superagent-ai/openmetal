@@ -68,6 +68,11 @@ Freestyle managed usage is a low-confidence rate-card estimate derived from prov
 cumulative runtime and fixed VM resources. It excludes data transfer, included plan credits,
 discounts, and enterprise pricing, so it can differ from the Freestyle invoice.
 
+Modal managed usage is a medium-confidence rate-card calculation derived from provider-reported
+cumulative CPU core nanoseconds and memory GiB nanoseconds. Metal captures a final measurement
+before termination and applies the published Modal Sandbox rate card. The result excludes credits,
+discounts, and regional modifiers.
+
 ## Provider eligibility
 
 Managed routing skips providers that do not expose durable cost evidence. BYOK continues to use those providers because the customer pays the provider directly.

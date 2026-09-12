@@ -60,7 +60,7 @@ export function DeleteOrganizationDialog({
 
   return (
     <>
-      <Button type="button" variant="destructive" onClick={() => setOpen(true)}>
+      <Button type="button" variant="destructive" className="w-full" onClick={() => setOpen(true)}>
         Delete organization
       </Button>
       <AlertDialog open={open} onOpenChange={handleOpenChange}>

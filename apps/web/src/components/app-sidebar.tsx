@@ -586,10 +586,7 @@ export function AppSidebar({
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter className="gap-3 p-3 group-data-[collapsible=icon]:p-2">
-          <NavUser
-            user={user}
-            settingsHref={activeOrganization ? `${basePath}/settings` : "/dashboard/settings"}
-          />
+          <NavUser user={user} />
         </SidebarFooter>
         <form id="logout-form" action="/auth/logout" method="post" className="hidden" />
       </Sidebar>

@@ -332,7 +332,7 @@ describe("applyResourceTableState", () => {
     expect(ids(result).slice(3)).toEqual(["daytona-failed", "pending-provider"]);
   });
 
-  it("sorts cost numerically and keeps pending and modal last", () => {
+  it("sorts cost numerically and keeps missing costs last", () => {
     const result = table("", { sort: { column: "cost", direction: "asc" } });
     expect(ids(result)).toEqual([
       "vercel-ready",

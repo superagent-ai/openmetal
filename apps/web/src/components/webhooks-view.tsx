@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
   TableBody,
@@ -134,6 +135,7 @@ export function WebhooksView({
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<EventTypeValue[]>([]);
+  const [allEvents, setAllEvents] = useState(true);
   const [enabled, setEnabled] = useState(true);
   const [revealedSecret, setRevealedSecret] = useState<string>();
   const [copied, setCopied] = useState(false);
@@ -158,6 +160,7 @@ export function WebhooksView({
     setName("");
     setUrl("");
     setSelectedEvents([]);
+    setAllEvents(true);
     setEnabled(true);
     setRevealedSecret(undefined);
     setCopied(false);
@@ -175,6 +178,7 @@ export function WebhooksView({
     setName(endpoint.name);
     setUrl(endpoint.url);
     setSelectedEvents(endpoint.event_types as EventTypeValue[]);
+    setAllEvents(endpoint.event_types.length === 0);
     setEnabled(endpoint.enabled);
     setIsDialogOpen(true);
   }
@@ -193,6 +197,11 @@ export function WebhooksView({
       setError("Enter a name and a destination URL");
       return;
     }
+    if (!allEvents && selectedEvents.length === 0) {
+      setError("Select at least one event or choose All events");
+      return;
+    }
+    const eventTypes = allEvents ? [] : selectedEvents;
     setError(undefined);
     setIsSaving(true);
     try {
@@ -200,7 +209,7 @@ export function WebhooksView({
         const updated = await metal.webhooks.update(organizationId, editing.id, {
           name: trimmedName,
           url: trimmedUrl,
-          event_types: selectedEvents,
+          event_types: eventTypes,
           enabled,
         });
         setEndpoints((current) => current.map((item) => (item.id === updated.id ? updated : item)));
@@ -210,7 +219,7 @@ export function WebhooksView({
         const created = await metal.webhooks.create(organizationId, {
           name: trimmedName,
           url: trimmedUrl,
-          event_types: selectedEvents,
+          event_types: eventTypes,
           enabled,
         });
         const { secret, ...endpoint } = created;
@@ -496,7 +505,7 @@ export function WebhooksView({
               <DialogHeader>
                 <DialogTitle>{editing ? "Edit endpoint" : "Create endpoint"}</DialogTitle>
                 <DialogDescription>
-                  Choose which events to deliver. Leave all events unchecked to receive every event.
+                  Deliver every event or choose the specific events this endpoint should receive.
                 </DialogDescription>
               </DialogHeader>
               {error ? (
@@ -533,19 +542,37 @@ export function WebhooksView({
               </div>
               <div className="grid gap-2">
                 <Label>Events</Label>
-                <div className="grid max-h-48 gap-1 overflow-y-auto rounded-md border p-2">
-                  {eventCatalog.map((type) => (
-                    <label key={type} className="flex items-center gap-2 px-1 py-1 text-sm">
+                <ScrollArea className="h-48 rounded-md border">
+                  <div className="grid gap-1 p-2 pr-4">
+                    <label className="flex items-center gap-2 border-b px-1 pt-1 pb-2 text-sm font-medium">
                       <input
                         type="checkbox"
                         className="size-4 accent-current"
-                        checked={selectedEvents.includes(type)}
-                        onChange={() => toggleEvent(type)}
+                        checked={allEvents}
+                        onChange={(event) => {
+                          setAllEvents(event.target.checked);
+                          if (event.target.checked) setSelectedEvents([]);
+                        }}
                       />
-                      <code className="text-xs">{type}</code>
+                      All events
                     </label>
-                  ))}
-                </div>
+                    {eventCatalog.map((type) => (
+                      <label
+                        key={type}
+                        className="flex items-center gap-2 px-1 py-1 text-sm has-disabled:opacity-50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="size-4 accent-current"
+                          checked={selectedEvents.includes(type)}
+                          disabled={allEvents}
+                          onChange={() => toggleEvent(type)}
+                        />
+                        <code className="text-xs">{type}</code>
+                      </label>
+                    ))}
+                  </div>
+                </ScrollArea>
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <input

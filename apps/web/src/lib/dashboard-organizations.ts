@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { requireMetalSession } from "@/lib/metal-server";
@@ -17,11 +18,11 @@ export type DashboardOrganization = {
 export type DashboardSection =
   "api-keys" | "billing" | "members" | "projects" | "providers" | "settings" | "usage" | "webhooks";
 
-export async function listDashboardOrganizations(): Promise<DashboardOrganization[]> {
+export const listDashboardOrganizations = cache(async (): Promise<DashboardOrganization[]> => {
   const { metal } = await requireMetalSession();
   const result = await metal.organizations.list();
   return result.organizations;
-}
+});
 
 export async function getPreferredOrganization(
   organizations: DashboardOrganization[],
@@ -33,14 +34,16 @@ export async function getPreferredOrganization(
   );
 }
 
-export async function requireOrganizationBySlug(slug: string): Promise<DashboardOrganization> {
-  const organizations = await listDashboardOrganizations();
-  const organization = organizations.find((candidate) => candidate.slug === slug);
-  if (!organization) {
-    notFound();
-  }
-  return organization;
-}
+export const requireOrganizationBySlug = cache(
+  async (slug: string): Promise<DashboardOrganization> => {
+    const organizations = await listDashboardOrganizations();
+    const organization = organizations.find((candidate) => candidate.slug === slug);
+    if (!organization) {
+      notFound();
+    }
+    return organization;
+  },
+);
 
 export function organizationDashboardPath(
   organization: Pick<DashboardOrganization, "slug">,

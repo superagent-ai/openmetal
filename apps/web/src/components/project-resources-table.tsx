@@ -615,14 +615,12 @@ export function ProjectResourcesTable({
                     </TableCell>
                     <TableCell
                       title={
-                        sandbox.provider === "modal"
-                          ? "Cost is not available for this sandbox"
-                          : sandbox.cost_updated_at
-                            ? `Updated ${dateFormatter.format(new Date(sandbox.cost_updated_at))}`
-                            : `Waiting for ${sandbox.provider} usage data`
+                        sandbox.cost_updated_at
+                          ? `Updated ${dateFormatter.format(new Date(sandbox.cost_updated_at))}`
+                          : `Waiting for ${sandbox.provider} usage data`
                       }
                     >
-                      {sandbox.provider === "modal" ? "—" : formatMicrousd(sandbox.cost_microusd)}
+                      {formatMicrousd(sandbox.cost_microusd)}
                     </TableCell>
                     <TableCell className="pr-4 text-right">
                       <DropdownMenu>

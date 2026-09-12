@@ -1,11 +1,19 @@
+import type { Metadata } from "next";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { getCurrentUser } from "@/lib/current-user";
 import { getPreferredOrganization } from "@/lib/dashboard-organizations";
+import { dashboardPageMetadata } from "@/lib/page-metadata";
 import { requireMetalSession } from "@/lib/metal-server";
 import { resolveDisplayName } from "@/lib/user-profile";
+
+export const metadata: Metadata = dashboardPageMetadata({
+  title: "Dashboard",
+  description: "Manage organizations, projects, sandboxes, billing, and API keys.",
+  path: "/dashboard",
+});
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [{ metal }, user] = await Promise.all([requireMetalSession(), getCurrentUser()]);

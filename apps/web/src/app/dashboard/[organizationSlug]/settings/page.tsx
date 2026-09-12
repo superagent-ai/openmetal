@@ -1,8 +1,24 @@
+import type { Metadata } from "next";
 import { DeleteOrganizationDialog } from "@/components/delete-organization-dialog";
 import { OrganizationSettingsForm } from "@/components/organization-settings-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireOrganizationBySlug } from "@/lib/dashboard-organizations";
 import { requireMetalSession } from "@/lib/metal-server";
+import { dashboardPageMetadata } from "@/lib/page-metadata";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ organizationSlug: string }>;
+}): Promise<Metadata> {
+  const { organizationSlug } = await params;
+  const organization = await requireOrganizationBySlug(organizationSlug);
+  return dashboardPageMetadata({
+    title: "Organization settings",
+    description: `Manage the identity and lifecycle of ${organization.name}.`,
+    path: `/dashboard/${organization.slug}/settings`,
+  });
+}
 
 export default async function OrganizationSettingsPage({
   params,
@@ -55,10 +71,7 @@ export default async function OrganizationSettingsPage({
             Delete this organization and permanently remove member and API access.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-pretty text-muted-foreground">
-            Active resources and pending billing must be resolved before deletion.
-          </p>
+        <CardContent>
           {canDelete ? (
             <DeleteOrganizationDialog
               organization={{ id: organization.id, name: organization.name }}

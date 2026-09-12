@@ -17,7 +17,7 @@ import {
   CopilotMark,
   CursorMark,
   PiAgentMark,
-} from "@/components/login-route-diagram";
+} from "@/components/agent-marks";
 import type { MDXComponents } from "mdx/types";
 
 export function getMDXComponents(components?: MDXComponents) {

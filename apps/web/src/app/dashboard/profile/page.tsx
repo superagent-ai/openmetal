@@ -1,7 +1,15 @@
+import type { Metadata } from "next";
 import { ProfileSettingsForm } from "@/components/profile-settings-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/current-user";
+import { dashboardPageMetadata } from "@/lib/page-metadata";
 import { resolveDisplayName } from "@/lib/user-profile";
+
+export const metadata: Metadata = dashboardPageMetadata({
+  title: "Profile",
+  description: "Manage how your account appears across OpenMetal.",
+  path: "/dashboard/profile",
+});
 
 export default async function ProfilePage() {
   const user = await getCurrentUser();
@@ -9,7 +17,7 @@ export default async function ProfilePage() {
   const displayName = resolveDisplayName(email, user.user_metadata);
 
   return (
-    <div className="max-w-3xl space-y-4">
+    <div className="mx-auto w-full max-w-3xl space-y-4">
       <div>
         <h1 className="text-2xl font-semibold text-balance">Profile</h1>
         <p className="mt-1 text-sm text-muted-foreground text-pretty">

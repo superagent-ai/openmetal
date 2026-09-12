@@ -8,7 +8,6 @@ import {
   Moon02Icon,
   MoreHorizontalIcon,
   PaintBoardIcon,
-  Settings04Icon,
   Sun03Icon,
   UserAccountIcon,
 } from "@hugeicons/core-free-icons";
@@ -30,13 +29,11 @@ import { resolveInitials } from "@/lib/user-profile";
 
 export function NavUser({
   user,
-  settingsHref,
 }: {
   user: {
     name: string;
     email: string;
   };
-  settingsHref: string;
 }) {
   const { isMobile } = useSidebar();
   const { setTheme, theme } = useTheme();
@@ -84,10 +81,6 @@ export function NavUser({
               <DropdownMenuItem onClick={() => router.push("/dashboard/profile")}>
                 <HugeiconsIcon icon={UserAccountIcon} strokeWidth={2} />
                 Profile
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push(settingsHref)}>
-                <HugeiconsIcon icon={Settings04Icon} strokeWidth={2} />
-                Organization settings
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

@@ -173,11 +173,11 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           package_json="$(npm pack ./apps/cli/dist/npm --pack-destination "$RUNNER_TEMP" --json)"
-          tarball="$(printf '%s' "$package_json" | node -e 'let input=\"\"; process.stdin.on(\"data\", chunk => input += chunk).on(\"end\", () => console.log(JSON.parse(input)[0].filename))')"
+          tarball="$(printf '%s' "$package_json" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input)[0].filename))')"
           smoke_dir="$RUNNER_TEMP/openmetal-npm-smoke"
           mkdir -p "$smoke_dir"
           npm install --prefix "$smoke_dir" "$RUNNER_TEMP/$tarball"
-          actual_version="$("$smoke_dir/node_modules/.bin/openmetal" --json version | node -e 'let input=\"\"; process.stdin.on(\"data\", chunk => input += chunk).on(\"end\", () => console.log(JSON.parse(input).version))')"
+          actual_version="$("$smoke_dir/node_modules/.bin/openmetal" --json version | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).version))')"
           expected_version="${EXPECTED_VERSION#cli-v}"
           test "$actual_version" = "$expected_version"
       - name: Check npm version

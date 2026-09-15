@@ -19,6 +19,14 @@ OpenMetal is OpenRouter for cloud sandboxes and GPUs:
 
 The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Freestyle, Modal, Northflank, Runloop, and Vercel. Provider integrations remain behind one capability-oriented OpenMetal API; they are not separate customer-facing products.
 
+## Roadmap
+
+OpenMetal is expanding one portable compute interface in stages:
+
+- **Available now**: CPU sandboxes, lifecycle operations, processes, files, leased HTTP endpoints, provider routing, managed credits, BYOK, TypeScript SDK, CLI, and Agent Skill.
+- **Coming next**: GPU and accelerator workloads for training, inference, and computer use.
+- **Planned**: browser computers and persistent machines through the same API and capability model.
+
 ## Architecture
 
 ```text

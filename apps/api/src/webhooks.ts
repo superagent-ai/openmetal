@@ -336,7 +336,7 @@ export async function testWebhookEndpoint(
       data: {
         endpoint_id: existing.id,
         endpoint_name: existing.name,
-        message: "This is a Metal webhook connectivity test. No state changed.",
+        message: "This is an OpenMetal webhook connectivity test. No state changed.",
       },
     };
     const [delivery] = await tx

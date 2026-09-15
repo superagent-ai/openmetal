@@ -185,11 +185,11 @@ export function buildOpenApiDocument(): OpenApiObject {
   return {
     openapi: "3.1.0",
     info: {
-      title: "Metal API",
+      title: "OpenMetal API",
       version: API_SEMVER,
-      description: `Superagent Metal control plane ${API_VERSION}.`,
+      description: `Portable compute API for AI agents and applications. API version ${API_VERSION}.`,
     },
-    servers: [{ url: "/", description: "Configured Metal API origin" }],
+    servers: [{ url: "https://api.openmetal.sh", description: "OpenMetal production API" }],
     tags: [
       { name: "ops", description: "Service health, readiness, and API metadata." },
       { name: "organizations", description: "Organization lifecycle and access." },
@@ -199,7 +199,7 @@ export function buildOpenApiDocument(): OpenApiObject {
       { name: "projects", description: "Organization projects." },
       {
         name: "provider credentials",
-        description: "Encrypted organization BYOK provider credentials.",
+        description: "Bring your own provider credentials.",
       },
       { name: "api keys", description: "Project scoped API keys." },
       { name: "sandboxes", description: "Portable sandbox lifecycle." },
@@ -213,6 +213,8 @@ export function buildOpenApiDocument(): OpenApiObject {
         bearerAuth: {
           type: "http",
           scheme: "bearer",
+          description:
+            "Use a project API key for sandbox and runtime routes, or an OpenMetal user access token for account management routes.",
         },
       },
       schemas: referenceReusableObjectSchemas({
@@ -827,28 +829,6 @@ export function buildOpenApiDocument(): OpenApiObject {
             "401": errorResponse("Authentication required"),
             "403": errorResponse("Access denied"),
             "503": errorResponse("Billing is not configured"),
-          },
-        },
-      },
-      "/v1/webhooks/stripe": {
-        post: {
-          operationId: "stripeWebhook",
-          tags: ["billing"],
-          security: [],
-          responses: {
-            "200": {
-              description: "Webhook accepted",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: { received: { type: "boolean" } },
-                    required: ["received"],
-                  },
-                },
-              },
-            },
-            "400": errorResponse("Invalid webhook"),
           },
         },
       },

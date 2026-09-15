@@ -1,9 +1,9 @@
 ---
 title: Authenticate requests
-description: Choose the correct credential for control plane and sandbox routes.
+description: Choose the correct credential for account management and compute routes.
 ---
 
-Metal has two credential classes. They are not interchangeable.
+OpenMetal has two credential classes. They are not interchangeable.
 
 ## Project API keys
 
@@ -20,27 +20,26 @@ Project keys are returned once when created. Store them in a secret manager or t
 
 ## User access tokens
 
-Use a Supabase user access token to administer organizations, members, projects, API keys, provider credentials, billing, webhooks, and durable project events.
+Use an OpenMetal user access token to manage organizations, members, projects, API keys, provider
+credentials, billing, usage, webhooks, and durable project events.
 
 ```http
-Authorization: Bearer <supabase-access-token>
+Authorization: Bearer <openmetal-user-access-token>
 ```
 
-The SDK token callback may be asynchronous, so an application can refresh a user session before each request.
+The dashboard and CLI create and refresh this session after you sign in. Advanced SDK integrations
+can provide a token callback:
 
 ```ts
 const controlPlane = new MetalClient({
   baseUrl: process.env.OPENMETAL_API_URL!,
-  accessToken: async () => {
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token;
-  },
+  accessToken: () => process.env.OPENMETAL_ACCESS_TOKEN,
 });
 ```
 
 <Callout type="error" title="Fail closed">
   Do not use a user access token for project key routes or a project key for user administration
-  routes. Metal rejects credentials with the wrong scope.
+  routes. OpenMetal rejects credentials with the wrong scope.
 </Callout>
 
 ## Security checklist

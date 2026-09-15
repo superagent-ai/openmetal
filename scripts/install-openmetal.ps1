@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$Repository = if ($env:OPENMETAL_REPOSITORY) { $env:OPENMETAL_REPOSITORY } else { "homanp/metal" }
+$Repository = if ($env:OPENMETAL_REPOSITORY) { $env:OPENMETAL_REPOSITORY } else { "superagent-ai/openmetal" }
 $InstallDir = if ($env:OPENMETAL_INSTALL_DIR) {
   $env:OPENMETAL_INSTALL_DIR
 } else {

@@ -45,11 +45,11 @@ const events = await metal.operations.events(operation.id, {
 
 ## Reconciliation
 
-`reconciling` means the provider result is uncertain. Metal avoids fallback because another attempt could duplicate live capacity.
+`reconciling` means the provider result is uncertain. OpenMetal avoids fallback because another attempt could duplicate live capacity.
 
 <Callout type="warn" title="Bound your wait">
-  Current reconciliation can remain active without a public recovery command. Stop after a bounded
-  wait and retain the operation and sandbox IDs for an operator.
+  If an operation remains `reconciling`, stop after a bounded wait and contact OpenMetal support
+  with the operation and sandbox IDs.
 </Callout>
 
 See [common errors](/errors/common-errors) for safe retry rules.

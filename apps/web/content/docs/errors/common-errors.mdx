@@ -37,11 +37,17 @@ The action is not valid for the current state. Runtime operations require `ready
 
 The resource does not exist in the authenticated scope. Confirm both the ID and project context.
 
+### `insufficient_credits`
+
+The organization balance cannot fund a managed sandbox request. Add credits, enable automatic top
+up, or use one explicitly selected BYOK provider without fallback.
+
 ## Provider and runtime
 
 ### `capability_unsupported`
 
-The selected provider cannot perform the accepted runtime operation. Choose a provider with the required capability or adjust the workflow.
+The selected provider cannot perform the accepted runtime operation. Choose a provider with the
+required capability in [Routing and capabilities](/concepts/routing), or adjust the workflow.
 
 ### `process_exit_nonzero`
 
@@ -49,7 +55,8 @@ The process ran and returned a nonzero exit code. Inspect its ordered stdout and
 
 ### `reconciling`
 
-The provider result is uncertain. Do not create replacement capacity. Stop after a bounded wait and escalate with the operation and sandbox IDs.
+The provider result is uncertain. Do not create replacement capacity. Stop after a bounded wait and
+contact OpenMetal support with the operation and sandbox IDs.
 
 ## Retry rules
 

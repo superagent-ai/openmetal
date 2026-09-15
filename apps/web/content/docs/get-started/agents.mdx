@@ -5,17 +5,37 @@ description: Install the OpenMetal skill and CLI so your coding agent can provis
 
 OpenMetal gives coding agents one safe interface for compute across sandbox providers. The skill teaches the exact workflow. The CLI performs it.
 
+## Before you begin
+
+1. [Create an OpenMetal account](https://www.openmetal.sh/login) and complete sign in.
+2. Use a trusted terminal with Node.js 22 or later.
+3. Have a place to store the project API key that OpenMetal shows once.
+
+The guided CLI setup selects or creates your organization and project, then creates the project key.
+You can also complete those steps in the [OpenMetal dashboard](https://www.openmetal.sh/dashboard)
+before installing the agent tools.
+
 ## Install the agent skill
 
 Add OpenMetal to any client that supports the Agent Skills specification:
 
+<Callout type="warn" title="Public release pending">
+  The source repository is currently private. This install command works only for authorized GitHub
+  users until the skill is published from a public source.
+</Callout>
+
 ```bash
-npx skills add homanp/metal --skill openmetal
+npx skills add superagent-ai/openmetal --skill openmetal
 ```
 
 The skill works with Cursor, Claude Code, Codex, OpenCode, and other compatible agents.
 
 ## Install the CLI
+
+<Callout type="warn" title="Public release pending">
+  `@openmetal/cli` is not yet available on public npm. The install command below becomes available
+  with the first public CLI release.
+</Callout>
 
 ```bash
 npm install --global @openmetal/cli

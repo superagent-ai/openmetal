@@ -7,6 +7,11 @@ Use the SDK when your agent application needs to manage compute directly rather 
 
 Install the SDK on Node.js 22 or later:
 
+<Callout type="warn" title="Public release pending">
+  `@openmetal/sdk` is not yet available on public npm. The install command below becomes available
+  with the first public SDK release.
+</Callout>
+
 ```bash
 npm install @openmetal/sdk
 ```
@@ -38,13 +43,18 @@ const metal = new MetalClient({
 - `filesystem` reads, writes, lists, deletes, uploads, and downloads.
 - `runtimeOperations` waits for filesystem work.
 - `endpoints` creates, lists, and revokes HTTP leases.
-- Organization namespaces manage members, projects, keys, providers, billing, and events with a user session.
+- `organizations`, `projects`, `apiKeys`, `members`, `invitations`, `providerCredentials`,
+  `billing`, `usage`, `webhooks`, and `events` use an OpenMetal user access token.
 
 ## Errors and retries
 
-`MetalApiError` exposes status, code, details, and a request ID. `MetalTimeoutError` and `MetalNetworkError` can carry an idempotency key when a mutation result is uncertain.
+`MetalError` exposes status, code, details, a request ID, and whether the error is retryable.
+`RuntimeOperationWaitError` preserves the runtime operation and idempotency key when a file upload
+has an uncertain result.
 
-The client retries safe GET requests only. Application code must decide whether mutation replay is safe and reuse the original idempotency key.
+The client retries safe GET requests only. A mutation error can expose its original
+`idempotencyKey`. Application code must decide whether replay is safe and reuse that exact key with
+identical input.
 
 <Cards>
   <Card title="TypeScript quickstart" href="/get-started/typescript" />

@@ -3,11 +3,12 @@ title: Authentication model
 description: Understand user sessions, project keys, and resource scope.
 ---
 
-Metal separates administration from runtime access.
+OpenMetal separates account management from project runtime access.
 
 ## User sessions
 
-A Supabase access token represents a person. It authorizes organization scoped administration:
+An OpenMetal user access token represents a signed-in person. It authorizes organization-scoped
+management:
 
 - organizations and members
 - projects and project API keys
@@ -21,7 +22,8 @@ Authorization still checks organization membership and role on every request.
 
 A `metal_sk_` key represents application access to one project. Pair it with the public `prj_` project ID for sandbox and runtime routes.
 
-Project keys cannot administer the organization. User sessions cannot replace project keys on sandbox routes.
+Project keys cannot manage the organization. User sessions cannot replace project keys on sandbox
+routes.
 
 ## Operation scope
 
@@ -31,8 +33,9 @@ This keeps operation access bound to its original project even when a client man
 
 ## Secret handling
 
-New project keys are returned once. Metal stores only the protected credential state needed for later verification.
+New project keys are returned once. OpenMetal stores only the protected credential state needed for
+later verification.
 
-Provider BYOK credentials are encrypted in Supabase Vault and never returned by API responses.
+Provider BYOK credentials are encrypted at rest and never returned by API responses.
 
 See [authenticate requests](/get-started/authentication) for headers and SDK examples.

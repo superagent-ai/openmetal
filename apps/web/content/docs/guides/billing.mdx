@@ -3,7 +3,8 @@ title: Manage billing and credits
 description: Fund managed compute, understand charges, and configure automatic top ups.
 ---
 
-Metal uses prepaid organization credits for managed capacity. Provider usage is deducted at cost. The platform fee applies when credits are purchased.
+OpenMetal uses prepaid organization credits for managed capacity. Provider usage is deducted from
+the organization balance. A platform fee applies when credits are purchased.
 
 ## Welcome credits
 
@@ -18,37 +19,50 @@ The purchase fee is 5.5 percent of the credit amount with a USD 0.80 minimum.
 ```bash
 openmetal billing show --organization <organization-id>
 openmetal billing quote --organization <organization-id> --amount-usd 20.00
+openmetal billing checkout --organization <organization-id> --amount-usd 20.00 --open
 ```
 
-The dashboard confirms the final amount before opening Stripe Checkout. A success redirect never changes the balance by itself. Signed Stripe webhooks are the source of truth.
+You can also add credits from the
+[OpenMetal dashboard](https://www.openmetal.sh/dashboard). Credits appear after payment
+confirmation.
 
 ## Automatic top ups
 
-Owners and admins can choose a balance threshold, refill amount, and monthly cap after saving a payment method.
+Owners and admins can save a payment method, then choose a balance threshold, refill amount, and
+monthly cap.
+
+```bash
+openmetal billing payment-method --organization <organization-id> --open
+openmetal billing auto-topup \
+  --organization <organization-id> \
+  --enabled true \
+  --threshold-usd 10.00 \
+  --refill-usd 50.00 \
+  --monthly-cap-usd 500.00
+```
 
 A declined payment or required customer action pauses the policy instead of retrying indefinitely. Update the payment method in the dashboard to recover.
 
 ## Spend behavior
 
-Managed sandbox creation requires a balance above zero. Usage is charged when durable provider cost evidence arrives, so delayed metering can temporarily produce a negative balance.
+Managed sandbox creation requires a balance above zero. A request without sufficient credits
+returns `insufficient_credits` with HTTP 402.
 
-When a durable charge leaves the balance at or below zero and no automatic top up can run, Metal schedules managed sandboxes to stop.
+Usage is applied when provider measurements are available. Delayed measurements can temporarily
+produce a negative balance. If the balance reaches zero and automatic top up cannot run, OpenMetal
+schedules managed sandboxes to stop.
 
-Freestyle charges use a low confidence rate card estimate from provider runtime counters and fixed
-VM resources. The estimate excludes data transfer, included credits, discounts, and enterprise
-pricing.
-
-Modal charges use a medium confidence rate card calculation from provider reported cumulative CPU
-core nanoseconds and memory GiB nanoseconds. Metal captures a final usage measurement before
-termination. Credits, discounts, and regional modifiers are excluded.
+Some providers report monetary usage directly. Others are calculated from provider runtime
+measurements and documented rates. The Usage page labels the source and confidence of each amount.
 
 ## BYOK
 
-BYOK capacity is billed by the provider and does not consume Metal credits. A single explicitly selected BYOK provider without fallback can create capacity without a positive managed balance.
+BYOK capacity is billed by the provider and does not consume OpenMetal credits. A single explicitly selected BYOK provider without fallback can create capacity without a positive managed balance.
 
 <Callout type="info" title="Keep money exact">
-  Metal stores amounts as integer micro USD. Never calculate balances or fees with binary floating
-  point.
+  API amounts use integer micro USD, where USD 1 equals 1,000,000 micro USD. Avoid binary floating
+  point when calculating balances or fees.
 </Callout>
 
-See [billing endpoints](/api-reference) for the user session API.
+See the [billing API reference](/api-reference/endpoints/billing/getOrganizationBilling) for
+request and response schemas.

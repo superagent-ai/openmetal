@@ -7,13 +7,13 @@
 macOS and Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/homanp/metal/main/scripts/install-openmetal.sh | sh
+curl -fsSL https://raw.githubusercontent.com/superagent-ai/openmetal/main/scripts/install-openmetal.sh | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/homanp/metal/main/scripts/install-openmetal.ps1 | iex
+irm https://raw.githubusercontent.com/superagent-ai/openmetal/main/scripts/install-openmetal.ps1 | iex
 ```
 
 With Node.js 22 or later:
@@ -140,7 +140,7 @@ openmetal endpoint revoke <sandbox-id> <endpoint-id> --yes
 Every interactive flow has a flag or environment alternative. Use `--no-input` to reject missing choices, `--yes` for destructive commands, and `--json` for stable machine output.
 
 ```bash
-export OPENMETAL_API_URL=https://api.example.com
+export OPENMETAL_API_URL=https://api.openmetal.sh
 export OPENMETAL_PROJECT_ID=prj_example
 export OPENMETAL_API_KEY=metal_sk_example
 
@@ -165,11 +165,9 @@ Precedence is command flags, environment, active profile, then compiled defaults
 ## Profiles and diagnostics
 
 ```bash
-openmetal config use-profile staging
-openmetal --profile staging config set \
-  --api-url https://staging-api.example.com \
-  --supabase-url https://example.supabase.co \
-  --supabase-publishable-key <publishable-key>
+openmetal config use-profile production
+openmetal --profile production config set \
+  --api-url https://api.openmetal.sh
 openmetal doctor
 ```
 
@@ -221,7 +219,7 @@ The first npm release cannot use trusted publishing because npm requires `@openm
 
    OPENMETAL_CLI_VERSION=0.1.0 \
    OPENMETAL_BUILD_COMMIT="$(git rev-parse HEAD)" \
-   OPENMETAL_DEFAULT_API_URL="<production-api-url>" \
+   OPENMETAL_DEFAULT_API_URL="https://api.openmetal.sh" \
    OPENMETAL_DEFAULT_SUPABASE_URL="<production-supabase-url>" \
    OPENMETAL_DEFAULT_SUPABASE_KEY="<publishable-key>" \
    pnpm --filter @openmetal/cli build:npm
@@ -229,11 +227,11 @@ The first npm release cannot use trusted publishing because npm requires `@openm
    npm publish ./apps/cli/dist/npm --access public
    ```
 
-3. Configure npm trusted publishing for repository `homanp/metal`, workflow `release-cli.yml`, with `npm publish` allowed:
+3. Configure npm trusted publishing for repository `superagent-ai/openmetal`, workflow `release-cli.yml`, with `npm publish` allowed:
 
    ```bash
    npm trust github @openmetal/cli \
-     --repo homanp/metal \
+     --repo superagent-ai/openmetal \
      --file release-cli.yml \
      --allow-publish \
      --yes

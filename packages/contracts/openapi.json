@@ -1,14 +1,14 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Metal API",
+    "title": "OpenMetal API",
     "version": "1.0.0",
-    "description": "Superagent Metal control plane v1."
+    "description": "Portable compute API for AI agents and applications. API version v1."
   },
   "servers": [
     {
-      "url": "/",
-      "description": "Configured Metal API origin"
+      "url": "https://api.openmetal.sh",
+      "description": "OpenMetal production API"
     }
   ],
   "tags": [
@@ -38,7 +38,7 @@
     },
     {
       "name": "provider credentials",
-      "description": "Encrypted organization BYOK provider credentials."
+      "description": "Bring your own provider credentials."
     },
     {
       "name": "api keys",
@@ -69,7 +69,8 @@
     "securitySchemes": {
       "bearerAuth": {
         "type": "http",
-        "scheme": "bearer"
+        "scheme": "bearer",
+        "description": "Use a project API key for sandbox and runtime routes, or an OpenMetal user access token for account management routes."
       }
     },
     "schemas": {
@@ -8104,45 +8105,6 @@
           },
           "503": {
             "description": "Billing is not configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/webhooks/stripe": {
-      "post": {
-        "operationId": "stripeWebhook",
-        "tags": [
-          "billing"
-        ],
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Webhook accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "received": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "received"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid webhook",
             "content": {
               "application/json": {
                 "schema": {

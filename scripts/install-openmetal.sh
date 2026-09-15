@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPOSITORY="${OPENMETAL_REPOSITORY:-homanp/metal}"
+REPOSITORY="${OPENMETAL_REPOSITORY:-superagent-ai/openmetal}"
 INSTALL_DIR="${OPENMETAL_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${OPENMETAL_VERSION:-latest}"
 

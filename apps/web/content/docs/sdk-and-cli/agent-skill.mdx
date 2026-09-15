@@ -5,11 +5,19 @@ description: Give compatible coding agents exact OpenMetal workflows and safety 
 
 Install the OpenMetal skill with the Skills CLI:
 
+<Callout type="warn" title="Public release pending">
+  The source repository is currently private. This install command works only for authorized GitHub
+  users until the skill is published from a public source.
+</Callout>
+
 ```bash
-npx skills add homanp/metal --skill openmetal
+npx skills add superagent-ai/openmetal --skill openmetal
 ```
 
 The skill works with Cursor, Claude Code, Codex, OpenCode, and other clients that support the Agent Skills specification.
+
+The skill is optional. Applications integrating directly through the SDK or CLI do not need to
+install it.
 
 ## What the skill teaches
 

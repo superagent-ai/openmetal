@@ -1,19 +1,27 @@
 ---
 title: Receive webhooks
-description: Deliver signed Metal lifecycle events to your systems with retries and redelivery.
+description: Deliver signed OpenMetal lifecycle events to your systems with retries and redelivery.
 ---
 
 Organization owners and admins can register webhook endpoints that receive signed HTTP deliveries
-for Metal lifecycle events. Every delivery carries a stable, redacted event envelope, so
+for OpenMetal lifecycle events. Every delivery carries a stable, redacted event envelope, so
 consumers can deduplicate on `event_id` and verify authenticity with HMAC-SHA256.
 
 ## Endpoint setup
 
-Create endpoints in the dashboard under **Webhooks**, or through the API:
+Webhook management requires an OpenMetal user access token. A project API key cannot create or
+change organization webhooks.
 
 ```bash
-curl -X POST "$METAL_API_URL/v1/organizations/$ORGANIZATION_ID/webhooks" \
-  -H "Authorization: Bearer $METAL_TOKEN" \
+export OPENMETAL_API_URL="https://api.openmetal.sh"
+export OPENMETAL_ACCESS_TOKEN="<openmetal-user-access-token>"
+```
+
+Create an endpoint through the API:
+
+```bash
+curl -X POST "$OPENMETAL_API_URL/v1/organizations/$ORGANIZATION_ID/webhooks" \
+  -H "Authorization: Bearer $OPENMETAL_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Deploy hook",
@@ -31,32 +39,29 @@ const endpoint = await metal.webhooks.create(organizationId, {
 // endpoint.secret is returned only here. Store it immediately.
 ```
 
+You can also create and inspect endpoints from the
+[OpenMetal dashboard](https://www.openmetal.sh/dashboard). The CLI does not currently expose
+webhook management commands.
+
 Omit `event_types` (or leave every event unchecked in the dashboard) to receive every event in
 the [event catalog](/guides/webhooks/events). Endpoints can be renamed, repointed, refiltered,
-or disabled at any time; production deliveries use the endpoint URL snapshotted when each
-delivery is enqueued. Only enabled endpoints receive production deliveries.
+or disabled at any time. Only enabled endpoints receive production deliveries.
 
-Production endpoints must use public HTTPS URLs. URLs with embedded credentials, private,
-link-local, or cloud metadata addresses are rejected at creation and revalidated on every
-attempt. Each delivery resolves the hostname once, then opens its connection directly to that
-validated IP while preserving the original `Host` header and TLS SNI, so DNS rebinding between
-validation and delivery cannot redirect the request; redirects are never followed.
-Non-production environments relax HTTPS and private-network rules so local tunnels can
-be tested.
+Production endpoints must use public HTTPS URLs. OpenMetal rejects embedded credentials and private
+or internal addresses. Redirects are not followed.
 
 ## Secrets and rotation
 
-The signing secret is generated server side and returned **once**, when the endpoint is created
-or rotated. Later reads expose only a prefix such as `whsec_a1B2c3D4e5F6`. The dashboard shows
-the secret in a one-time reveal dialog with copy guidance and never renders it in endpoint rows
-or delivery history.
+The signing secret is generated server side and returned **once**, when the endpoint is created or
+rotated. Later reads expose only a prefix such as `whsec_a1B2c3D4e5F6`. Store the full value in your
+secret manager immediately.
 
 Rotate from the dashboard or the API when the secret may be exposed, or on a schedule:
 
 ```bash
 curl -X POST \
-  "$METAL_API_URL/v1/organizations/$ORGANIZATION_ID/webhooks/$WEBHOOK_ID/rotate" \
-  -H "Authorization: Bearer $METAL_TOKEN"
+  "$OPENMETAL_API_URL/v1/organizations/$ORGANIZATION_ID/webhooks/$WEBHOOK_ID/rotate" \
+  -H "Authorization: Bearer $OPENMETAL_ACCESS_TOKEN"
 ```
 
 <Callout type="warn" title="Rotation invalidates immediately">
@@ -118,14 +123,14 @@ function verifyWebhook(request: Request, rawBody: string, secret: string): boole
 
 ## Retries and duplicates
 
-Deliveries are at-least-once. Metal retries network failures, timeouts, HTTP 408, HTTP 429, and
+Deliveries are at-least-once. OpenMetal retries network failures, timeouts, HTTP 408, HTTP 429, and
 5xx responses with exponential backoff and jitter (up to 8 attempts by default), honoring a
 bounded `Retry-After` header. Most other 4xx responses are terminal, and redirects are never
 followed — a redirect fails the delivery terminally.
 
 Deduplicate on `metal-event-id` per endpoint. Retries of one delivery reuse `metal-delivery-id`;
 manual redelivery requeues the same event for a fresh attempt series. Expect duplicates after
-worker restarts and redeliveries.
+retries and redeliveries.
 
 ```ts
 await metal.webhooks.redeliver(organizationId, webhookId, deliveryId);

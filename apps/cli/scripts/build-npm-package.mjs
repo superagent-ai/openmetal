@@ -57,11 +57,11 @@ const manifest = {
   engines: { node: ">=22.0.0" },
   repository: {
     type: "git",
-    url: "git+https://github.com/homanp/metal.git",
+    url: "git+https://github.com/superagent-ai/openmetal.git",
     directory: "apps/cli",
   },
-  homepage: "https://github.com/homanp/metal#openmetal-cli",
-  bugs: { url: "https://github.com/homanp/metal/issues" },
+  homepage: "https://github.com/superagent-ai/openmetal#openmetal-cli",
+  bugs: { url: "https://github.com/superagent-ai/openmetal/issues" },
   license: "UNLICENSED",
   publishConfig: {
     access: "public",

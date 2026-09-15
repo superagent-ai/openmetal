@@ -5,15 +5,18 @@ description: Understand candidate order, fallback safety, and current provider l
 
 ## Candidate order
 
-Automatic selection tries explicit fallback providers first, then other configured managed or BYOK providers in registry order.
+Automatic selection tries explicit fallback providers first, then other configured managed or BYOK
+providers in their configured order.
 
 An explicit provider is primary. Listed fallback providers follow in order. Candidates must be unique.
 
-Metal does not currently calculate cheapest, fastest, reliable, or balanced rankings.
+OpenMetal does not currently calculate cheapest, fastest, reliable, or balanced rankings.
 
 ## Source support
 
-Portable environments work across all current providers. OCI images work with Blaxel, Daytona, Modal, Northflank, and Vercel. Provider templates work with CodeSandbox, E2B, and Runloop.
+Portable environments work across all current providers. OCI images work with Blaxel, Daytona,
+Modal, Northflank, and Vercel. Provider templates work with CodeSandbox, E2B, Freestyle, and
+Runloop.
 
 Recognized portable environments are `metal/base`, `metal/node`, and `metal/python`.
 
@@ -25,19 +28,21 @@ Filesystem read and write support is broader. List, delete, append, and parent c
 
 Portable leased HTTP endpoints are currently available only through Blaxel.
 
-Reliable pause and resume are available through CodeSandbox, E2B, Northflank, and Runloop. Daytona pause reporting is inconsistent.
+Reliable pause and resume are available through CodeSandbox, E2B, Freestyle, Northflank, and
+Runloop. Daytona pause reporting is inconsistent.
 
 ## Stored versus enforced requirements
 
-Metal accepts and stores isolation, PTY, pause, public port, and network requirements. Current routing does not pass these requirements to provider adapters.
+OpenMetal accepts and stores isolation, PTY, pause, public port, and network requirements. Current
+routing does not enforce these requirements through providers.
 
 <Callout type="error" title="No fail closed egress guarantee">
-  Do not claim that allow or deny domain lists restrict outbound traffic today. Metal cannot
+  Do not claim that allow or deny domain lists restrict outbound traffic today. OpenMetal cannot
   currently guarantee that enforcement.
 </Callout>
 
 ## Fallback safety
 
-Capacity, provider unavailable, and known absent timeout failures can move to the next candidate. Unknown provider outcomes enter `reconciling` first so Metal does not create duplicate live capacity.
+Capacity, provider unavailable, and known absent timeout failures can move to the next candidate. Unknown provider outcomes enter `reconciling` first so OpenMetal does not create duplicate live capacity.
 
 See [route across providers](/guides/routing-and-providers) for a complete request.

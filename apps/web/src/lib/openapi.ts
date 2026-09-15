@@ -15,7 +15,7 @@ export const openapi = createOpenAPI({
             process.env.NEXT_PUBLIC_METAL_API_URL ??
             process.env.METAL_API_URL ??
             defaultMetalApiUrl,
-          description: "Metal API",
+          description: "OpenMetal API",
         },
       ];
       return document;

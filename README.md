@@ -177,6 +177,20 @@ GitHub allows one callback URL per app, so use separate apps for local and hoste
 
 Enable Google and GitHub under Providers and paste the same credentials. No schema migration is required.
 
+**Hosted Auth email (Resend SMTP)**
+
+Production Auth emails (magic links, confirmations, and invites) send through Resend. Local Auth still uses Mailpit at `http://127.0.0.1:55324`.
+
+| Setting  | Value                                                                           |
+| -------- | ------------------------------------------------------------------------------- |
+| Sender   | OpenMetal `<updates@openmetal.sh>`                                              |
+| Host     | `smtp.resend.com`                                                               |
+| Port     | `465`                                                                           |
+| Username | `resend`                                                                        |
+| Password | `RESEND_API_KEY` in encrypted `.env` (also stored in hosted Auth SMTP settings) |
+
+Do not run `supabase config push` after changing hosted SMTP; local `config.toml` keeps SMTP disabled so developers keep Mailpit.
+
 ## API and worker division
 
 The API never calls providers and does not publish Realtime events inside the originating HTTP request. The worker is the trusted publisher. Duplicate job delivery is safe: domain events are append-only and unique on `event_id`, and the dashboard deduplicates by event ID and cursor.

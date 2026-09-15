@@ -1,0 +1,68 @@
+---
+title: Pause and resume a sandbox
+description: Suspend supported sandboxes and continue them through durable lifecycle operations.
+---
+
+Pause preserves a sandbox while stopping active compute charges where the provider supports it.
+Resume returns a paused sandbox to `ready`.
+
+## Provider support
+
+Reliable pause and resume are available through CodeSandbox, E2B, Freestyle, Northflank, and
+Runloop. Other providers return `capability_unsupported`. Daytona pause reporting is currently
+inconsistent.
+
+## Pause
+
+The sandbox must be `ready`. Keep the returned operation ID until it reaches a terminal state.
+
+<Tabs items={["TypeScript", "CLI"]}>
+  <Tab value="TypeScript">
+
+```ts
+const mutation = await metal.sandboxes.pauseAsync(sandbox.id);
+const operation = await metal.operations.wait(mutation.operation);
+
+if (operation.state !== "succeeded") {
+  throw new Error(operation.error?.message ?? `Pause ${operation.state}`);
+}
+```
+
+  </Tab>
+  <Tab value="CLI">
+
+```bash
+openmetal sandbox pause <sandbox-id>
+```
+
+  </Tab>
+</Tabs>
+
+## Resume
+
+The sandbox must be `paused`.
+
+<Tabs items={["TypeScript", "CLI"]}>
+  <Tab value="TypeScript">
+
+```ts
+const mutation = await metal.sandboxes.resumeAsync(sandbox.id);
+const operation = await metal.operations.wait(mutation.operation);
+
+if (operation.state !== "succeeded") {
+  throw new Error(operation.error?.message ?? `Resume ${operation.state}`);
+}
+```
+
+  </Tab>
+  <Tab value="CLI">
+
+```bash
+openmetal sandbox resume <sandbox-id>
+```
+
+  </Tab>
+</Tabs>
+
+Do not automatically submit the same lifecycle action again after an uncertain response. Inspect
+the sandbox and original operation before deciding how to recover.

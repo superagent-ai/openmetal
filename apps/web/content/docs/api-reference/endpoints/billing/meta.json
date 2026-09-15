@@ -6,7 +6,6 @@
     "quoteCreditPurchase",
     "createBillingCheckout",
     "updateAutoTopup",
-    "createBillingPaymentMethodSetup",
-    "stripeWebhook"
+    "createBillingPaymentMethodSetup"
   ]
 }

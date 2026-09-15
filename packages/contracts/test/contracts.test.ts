@@ -222,7 +222,7 @@ describe("contract parsing", () => {
     expect(() => UpdateOrganizationRoleRequestSchema.parse({ role: "owner" })).toThrow();
   });
 
-  it("documents organization billing routes", () => {
+  it("documents customer billing routes without internal Stripe ingress", () => {
     const document = buildOpenApiDocument() as {
       paths: Record<
         string,
@@ -235,7 +235,7 @@ describe("contract parsing", () => {
     expect(
       document.paths["/v1/organizations/{organization_id}/billing/checkout"]?.post?.operationId,
     ).toBe("createBillingCheckout");
-    expect(document.paths["/v1/webhooks/stripe"]?.post?.operationId).toBe("stripeWebhook");
+    expect(document.paths["/v1/webhooks/stripe"]).toBeUndefined();
     expect(document.paths["/v1/sandboxes"]?.post?.responses?.["402"]).toBeTruthy();
     expect(document.paths["/v1/organizations/{organization_id}/usage"]?.get?.operationId).toBe(
       "getOrganizationUsage",

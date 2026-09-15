@@ -12,7 +12,12 @@ import {
   withTransaction,
   type MetalDb,
 } from "@openmetal/db";
-import { ensureBillingAccount, getOrganizationName, getOrganizationSlug } from "./accounts.js";
+import {
+  ensureBillingAccount,
+  getBillingAccount,
+  getOrganizationName,
+  getOrganizationSlug,
+} from "./accounts.js";
 import { recordBillingEvent } from "./events.js";
 import { postLedgerTransaction } from "./ledger.js";
 import {
@@ -504,51 +509,51 @@ export async function recordStripeEvent(
 }
 
 export async function getBillingSummary(tx: MetalDb, organizationId: string) {
-  const account = await ensureBillingAccount(tx, organizationId);
-  const [policy] = await tx
-    .select()
-    .from(autoTopupPolicies)
-    .where(eq(autoTopupPolicies.organizationId, organizationId));
-  const purchases = await tx
-    .select()
-    .from(creditPurchases)
-    .where(eq(creditPurchases.organizationId, organizationId))
-    .orderBy(desc(creditPurchases.createdAt))
-    .limit(20);
-  const entries = await tx
-    .select({
-      id: ledgerEntries.id,
-      account: ledgerEntries.account,
-      amountMicrousd: ledgerEntries.amountMicrousd,
-      createdAt: ledgerEntries.createdAt,
-      kind: ledgerTransactions.kind,
-      description: ledgerTransactions.description,
-    })
-    .from(ledgerEntries)
-    .innerJoin(ledgerTransactions, eq(ledgerTransactions.id, ledgerEntries.transactionId))
-    .where(
-      and(
-        eq(ledgerEntries.organizationId, organizationId),
-        eq(ledgerEntries.account, "customer_credits"),
-      ),
-    )
-    .orderBy(desc(ledgerEntries.createdAt))
-    .limit(25);
-
   const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
-  const [{ total } = { total: 0n }] = await tx
-    .select({
-      total: sql<bigint>`coalesce(sum(${creditPurchases.creditMicrousd}), 0)`,
-    })
-    .from(creditPurchases)
-    .where(
-      and(
-        eq(creditPurchases.organizationId, organizationId),
-        eq(creditPurchases.source, "auto_topup"),
-        eq(creditPurchases.status, "paid"),
-        gte(creditPurchases.paidAt, monthStart),
+  const [account, policyRows, purchases, entries, totalRows] = await Promise.all([
+    getBillingAccount(tx, organizationId),
+    tx.select().from(autoTopupPolicies).where(eq(autoTopupPolicies.organizationId, organizationId)),
+    tx
+      .select()
+      .from(creditPurchases)
+      .where(eq(creditPurchases.organizationId, organizationId))
+      .orderBy(desc(creditPurchases.createdAt))
+      .limit(20),
+    tx
+      .select({
+        id: ledgerEntries.id,
+        account: ledgerEntries.account,
+        amountMicrousd: ledgerEntries.amountMicrousd,
+        createdAt: ledgerEntries.createdAt,
+        kind: ledgerTransactions.kind,
+        description: ledgerTransactions.description,
+      })
+      .from(ledgerEntries)
+      .innerJoin(ledgerTransactions, eq(ledgerTransactions.id, ledgerEntries.transactionId))
+      .where(
+        and(
+          eq(ledgerEntries.organizationId, organizationId),
+          eq(ledgerEntries.account, "customer_credits"),
+        ),
+      )
+      .orderBy(desc(ledgerEntries.createdAt))
+      .limit(25),
+    tx
+      .select({
+        total: sql<bigint>`coalesce(sum(${creditPurchases.creditMicrousd}), 0)`,
+      })
+      .from(creditPurchases)
+      .where(
+        and(
+          eq(creditPurchases.organizationId, organizationId),
+          eq(creditPurchases.source, "auto_topup"),
+          eq(creditPurchases.status, "paid"),
+          gte(creditPurchases.paidAt, monthStart),
+        ),
       ),
-    );
+  ]);
+  const policy = policyRows[0];
+  const total = totalRows[0]?.total ?? 0n;
 
   return {
     account,

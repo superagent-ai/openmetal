@@ -9,7 +9,7 @@ Filesystem operations require a `ready` sandbox. Portable paths are absolute and
   <Tab value="TypeScript">
 
 ```ts
-const bytes = new TextEncoder().encode("hello from Metal\n");
+const bytes = new TextEncoder().encode("hello from OpenMetal\n");
 
 await metal.filesystem.upload(sandbox.id, "/workspace/input.txt", bytes, { createParents: true });
 
@@ -48,6 +48,12 @@ const queued = await metal.filesystem.write(sandbox.id, {
 });
 
 const completed = await metal.runtimeOperations.wait(queued);
+```
+
+Inspect an accepted operation later with its sandbox and runtime operation IDs:
+
+```ts
+const current = await metal.runtimeOperations.get(sandbox.id, queued.id);
 ```
 
 Writes are limited to 10 MiB per operation. Reads use chunks up to 10 MiB and lists return at most 10,000 entries. Provider limits can be narrower.

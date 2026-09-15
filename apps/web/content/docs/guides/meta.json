@@ -2,6 +2,7 @@
   "title": "Guides",
   "pages": [
     "create-sandbox",
+    "pause-and-resume-sandbox",
     "run-process",
     "filesystem",
     "expose-endpoint",

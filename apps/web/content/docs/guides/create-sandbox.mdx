@@ -3,7 +3,21 @@ title: Create a sandbox
 description: Provision portable compute and wait until it is ready.
 ---
 
-Create requests are asynchronous. Metal returns a sandbox ID and an operation ID before provider provisioning finishes.
+Create requests are asynchronous. OpenMetal returns a sandbox ID and an operation ID before provider provisioning finishes.
+
+## Before you begin
+
+Create an account, organization, project, and project API key through the
+[agent setup](/get-started/agents) or [OpenMetal dashboard](https://www.openmetal.sh/dashboard).
+Set the production API and project credentials:
+
+```bash
+export OPENMETAL_API_URL="https://api.openmetal.sh"
+export OPENMETAL_PROJECT_ID="prj_your_project"
+export OPENMETAL_API_KEY="metal_sk_your_key"
+```
+
+Managed sandbox creation requires a positive organization balance. BYOK uses your provider account.
 
 <Tabs items={["TypeScript", "CLI", "curl"]}>
   <Tab value="TypeScript">

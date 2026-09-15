@@ -1,4 +1,4 @@
 {
-  "title": "Agent tools",
+  "title": "SDK and CLI",
   "pages": ["agent-skill", "cli", "typescript-sdk"]
 }

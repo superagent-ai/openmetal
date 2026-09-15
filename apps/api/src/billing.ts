@@ -78,8 +78,11 @@ export async function readOrganizationBilling(
   stripe: StripeGateway | null,
   input: { userId: string; organizationId: string },
 ) {
-  const membership = await requireMembership(db, input.userId, input.organizationId);
-  let summary = await getBillingSummary(db, input.organizationId);
+  const [membership, initialSummary] = await Promise.all([
+    requireMembership(db, input.userId, input.organizationId),
+    getBillingSummary(db, input.organizationId),
+  ]);
+  let summary = initialSummary;
   if (stripe) {
     const updated = await persistMissingPurchaseDocuments(db, stripe, summary.purchases);
     if (updated) {

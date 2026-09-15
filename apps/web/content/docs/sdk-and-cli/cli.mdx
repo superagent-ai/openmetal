@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: Configure profiles and automate Metal from a terminal or CI.
+description: Configure OpenMetal profiles and automate production workloads from a terminal or CI.
 ---
 
 ## Install
@@ -26,21 +26,48 @@ openmetal --json --no-input --profile ci sandbox list
 Prefer environment variables to secret command arguments in automation.
 
 ```bash
-export OPENMETAL_API_URL="http://localhost:4000"
+export OPENMETAL_API_URL="https://api.openmetal.sh"
 export OPENMETAL_PROJECT_ID="prj_your_project"
 export OPENMETAL_API_KEY="metal_sk_your_key"
 ```
 
-## Profiles
+## Command groups
 
-Use profiles to separate local, staging, and production contexts.
+Account and project management:
 
 ```bash
-openmetal config use-profile staging
-openmetal --profile staging config set \
-  --api-url https://staging-api.example.com \
-  --supabase-url https://example.supabase.co \
-  --supabase-publishable-key <publishable-key>
+openmetal org list
+openmetal project list
+openmetal api-key list
+openmetal provider-credential list
+openmetal member list
+openmetal invitation create --email user@example.com
+openmetal billing show
+```
+
+Compute and runtime:
+
+```bash
+openmetal sandbox list
+openmetal operation get <operation-id>
+openmetal process get <sandbox-id> <process-id>
+openmetal file list <sandbox-id> /workspace
+openmetal endpoint list <sandbox-id>
+openmetal events list
+```
+
+Webhook management and organization usage analytics are currently available through the
+[OpenMetal dashboard](https://www.openmetal.sh/dashboard), REST API, and TypeScript SDK rather than
+dedicated CLI commands.
+
+## Profiles
+
+Use profiles to separate environments and projects. Production uses the hosted OpenMetal API:
+
+```bash
+openmetal config use-profile production
+openmetal --profile production config set \
+  --api-url https://api.openmetal.sh
 openmetal doctor
 ```
 

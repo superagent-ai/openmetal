@@ -3,7 +3,7 @@ title: Run a process
 description: Execute an argv based command and consume ordered output.
 ---
 
-The sandbox must be `ready`. Metal runs processes asynchronously and persists ordered stdout and stderr events.
+The sandbox must be `ready`. OpenMetal runs processes asynchronously and persists ordered stdout and stderr events.
 
 <Tabs items={["TypeScript", "CLI"]}>
   <Tab value="TypeScript">
@@ -50,8 +50,20 @@ openmetal process events <sandbox-id> <process-id> --after 42
 
 The SDK event iterator reconnects finite SSE batches and stops after a terminal event. Process states are `queued`, `running`, `cancelling`, `succeeded`, `failed`, `cancelled`, and `timed_out`.
 
+## Cancel a process
+
+Cancellation depends on provider support:
+
+```ts
+await metal.processes.cancel(sandbox.id, process.id);
+```
+
+```bash
+openmetal process cancel <sandbox-id> <process-id> --yes
+```
+
 <Callout type="info" title="Runtime boundary">
-  Metal executes argv arrays. It does not provide an interactive terminal, streaming stdin, SSH,
+  OpenMetal executes argv arrays. It does not provide an interactive terminal, streaming stdin, SSH,
   WebSocket, or a general connection API.
 </Callout>
 

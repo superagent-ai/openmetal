@@ -8,16 +8,16 @@ OpenMetal is the universal compute gateway for AI agents. This repository implem
 
 ## Product model
 
-Metal is OpenRouter for cloud sandboxes and GPUs:
+OpenMetal is OpenRouter for cloud sandboxes and GPUs:
 
-- Managed Metal capacity is the default. Superagent owns provider contracts and credentials.
-- Customers have one Metal account and organization-scoped balance.
+- Managed OpenMetal capacity is the default. Superagent owns provider contracts and credentials.
+- Customers have one OpenMetal account and organization-scoped balance.
 - API keys are scoped per project.
-- Every provider resource maps back to one Metal organization and project.
-- Customers pay Metal; Metal reconciles and pays providers.
+- Every provider resource maps back to one OpenMetal organization and project.
+- Customers pay OpenMetal; OpenMetal reconciles and pays providers.
 - The public API and TypeScript SDK hide provider-specific lifecycle, usage, and billing differences.
 
-The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Freestyle, Modal, Northflank, Runloop, and Vercel. Provider integrations remain behind one capability-oriented Metal API; they are not separate customer-facing products.
+The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Freestyle, Modal, Northflank, Runloop, and Vercel. Provider integrations remain behind one capability-oriented OpenMetal API; they are not separate customer-facing products.
 
 ## Architecture
 
@@ -30,7 +30,7 @@ apps/api  --outbox-------->  apps/worker --Broadcast--> Supabase Realtime
 - `apps/web` is the Next.js dashboard. It uses Supabase only for login, logout, confirmation, session refresh, and authorized private Realtime channels.
 - `apps/api` is the only public product API. It authenticates Supabase JWTs, authorizes every org/project operation, and writes product state, a durable event, and an outbox job in one transaction.
 - `apps/worker` claims outbox jobs with `FOR UPDATE SKIP LOCKED` and publishes committed events to private Broadcast topics.
-- `packages/sdk-typescript` (`@openmetal/sdk`) is the only way the dashboard talks to the Metal API.
+- `packages/sdk-typescript` (`@openmetal/sdk`) is the only way the dashboard talks to the OpenMetal API.
 - `packages/contracts` holds runtime Zod schemas shared by the API and SDK.
 - `packages/billing` holds credit purchase fees, the organization ledger, Stripe Checkout, and automatic top ups.
 - One Supabase project per environment provides Auth, PostgreSQL, and Realtime.
@@ -67,14 +67,14 @@ Tagged `cli-v*` releases publish checksum-verified binaries for macOS, Linux, an
 Install the OpenMetal skill to give compatible coding agents detailed CLI and TypeScript SDK guidance for configuring, provisioning, observing, and managing sandboxes:
 
 ```bash
-npx skills add homanp/metal --skill openmetal
+npx skills add superagent-ai/openmetal --skill openmetal
 ```
 
 The skill follows the open [Agent Skills specification](https://agentskills.io) and works with OpenCode, Claude Code, Codex, Cursor, and other clients supported by the Skills CLI. Its source and reference material are in [`skills/openmetal`](skills/openmetal).
 
 ## Environment setup
 
-Shared development secrets live in the committed, encrypted `.env`. That file is Metal-only: do not add variables from other Superagent repos. The private decryption key is stored on the **superagent-team** Dotenvx Armor org, not in git.
+Shared development secrets live in the committed, encrypted `.env`. That file is OpenMetal-only: do not add variables from other Superagent repos. The private decryption key is stored on the **superagent-team** Dotenvx Armor org, not in git.
 
 Machine-specific values (local Supabase URLs and keys) live in gitignored `.env.local`.
 
@@ -141,7 +141,7 @@ These values live in encrypted `.env` and are copied to `supabase/.env` by `pnpm
 | `SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID` | GitHub OAuth App client ID       |
 | `SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET`    | GitHub OAuth App client secret   |
 
-Metal's local Auth callback is `http://127.0.0.1:55321/auth/v1/callback`, not the CLI callback port 54389.
+OpenMetal's local Auth callback is `http://127.0.0.1:55321/auth/v1/callback`, not the CLI callback port 54389.
 
 **Google Cloud (Web application)**
 
@@ -164,7 +164,7 @@ GitHub allows one callback URL per app, so use separate apps for local and hoste
 
 **Hosted Supabase Dashboard → Authentication → URL Configuration**
 
-- Site URL: production app origin (must match `NEXT_PUBLIC_SITE_URL`). The dashboard default `http://localhost:3000` is wrong for Metal.
+- Site URL: production app origin (must match `NEXT_PUBLIC_SITE_URL`). The dashboard default `http://localhost:3000` is wrong for OpenMetal.
 - Redirect URLs: add `https://<prod>/auth/callback`, `https://<prod>/auth/callback**`, and keep `/auth/confirm` for magic links. Add `http://localhost:3100/auth/callback` and `http://localhost:3100/auth/callback**` if you test hosted Auth from local web.
 
 Enable Google and GitHub under Providers and paste the same credentials. No schema migration is required.
@@ -179,7 +179,7 @@ The API never calls providers and does not publish Realtime events inside the or
 import { MetalClient } from "@openmetal/sdk";
 
 const metal = new MetalClient({
-  baseUrl: "http://localhost:4000",
+  baseUrl: "https://api.openmetal.sh",
   accessToken: async () => currentSupabaseAccessToken,
 });
 

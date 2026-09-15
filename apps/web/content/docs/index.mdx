@@ -17,15 +17,15 @@ description: Give your agent access to OpenMetal with one skill, one CLI, and on
 <Cards className="home-icon-cards grid-cols-1 md:grid-cols-3">
   <Card
     icon={<AgentQuickstartIcon />}
-    title="Quickstart"
+    title="Agent quickstart"
     href="/get-started/agents"
-    description="Install the skill and give your agent access to OpenMetal."
+    description="Set up an account, install the skill, and give your agent access to OpenMetal."
   />
   <Card
     icon={<GuidesIcon />}
-    title="Guides"
-    href="/guides/create-sandbox"
-    description="Build complete sandbox, process, filesystem, and endpoint workflows."
+    title="TypeScript SDK"
+    href="/get-started/typescript"
+    description="Integrate portable compute directly into an agent application."
   />
   <Card
     icon={<ApiReferenceIcon />}
@@ -39,99 +39,70 @@ description: Give your agent access to OpenMetal with one skill, one CLI, and on
 
 Integrate once, then move workloads between providers without rewriting your agent.
 
-<div className="not-prose grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img src="/providers/blaxel.png" alt="Blaxel" className="size-5 object-contain" />
-    <div>
-      <p className="font-medium">Blaxel</p>
-      <p className="text-sm text-muted-foreground">Files and leased HTTP endpoints.</p>
+<Tabs items={["Sandboxes", "GPUs", "Browsers"]}>
+  <Tab value="Sandboxes">
+    <div className="not-prose grid gap-4 pt-2 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img src="/providers/blaxel.png" alt="Blaxel" className="size-5 object-contain" />
+        <p className="font-medium">Blaxel</p>
+      </div>
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img src="/providers/cloudflare.ico" alt="Cloudflare" className="size-5 object-contain" />
+        <p className="font-medium">Cloudflare</p>
+      </div>
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img
+          src="/providers/codesandbox.svg"
+          alt="CodeSandbox"
+          className="size-5 object-contain dark:invert"
+        />
+        <p className="font-medium">CodeSandbox</p>
+      </div>
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img src="/providers/daytona.svg" alt="Daytona" className="size-5 object-contain" />
+        <p className="font-medium">Daytona</p>
+      </div>
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img src="/providers/e2b.png" alt="E2B" className="size-5 object-contain dark:invert" />
+        <p className="font-medium">E2B</p>
+      </div>
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img src="/providers/freestyle.png" alt="Freestyle" className="size-5 object-contain" />
+        <p className="font-medium">Freestyle</p>
+      </div>
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img src="/providers/modal.svg" alt="Modal" className="size-5 object-contain" />
+        <p className="font-medium">Modal</p>
+      </div>
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img src="/providers/northflank.svg" alt="Northflank" className="size-5 object-contain" />
+        <p className="font-medium">Northflank</p>
+      </div>
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img src="/providers/runloop.png" alt="Runloop" className="size-5 object-contain" />
+        <p className="font-medium">Runloop</p>
+      </div>
+      <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
+        <img
+          src="/providers/vercel.ico"
+          alt="Vercel"
+          className="size-5 object-contain dark:invert"
+        />
+        <p className="font-medium">Vercel</p>
+      </div>
     </div>
-  </div>
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img src="/providers/cloudflare.ico" alt="Cloudflare" className="size-5 object-contain" />
-    <div>
-      <p className="font-medium">Cloudflare</p>
-      <p className="text-sm text-muted-foreground">Edge compute with process streaming.</p>
-    </div>
-  </div>
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img
-      src="/providers/codesandbox.svg"
-      alt="CodeSandbox"
-      className="size-5 object-contain dark:invert"
-    />
-    <div>
-      <p className="font-medium">CodeSandbox</p>
-      <p className="text-sm text-muted-foreground">Pauseable development sandboxes.</p>
-    </div>
-  </div>
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img src="/providers/daytona.svg" alt="Daytona" className="size-5 object-contain" />
-    <div>
-      <p className="font-medium">Daytona</p>
-      <p className="text-sm text-muted-foreground">OCI and environment sandboxes.</p>
-    </div>
-  </div>
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img src="/providers/e2b.png" alt="E2B" className="size-5 object-contain dark:invert" />
-    <div>
-      <p className="font-medium">E2B</p>
-      <p className="text-sm text-muted-foreground">Streaming processes and files.</p>
-    </div>
-  </div>
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img src="/providers/freestyle.png" alt="Freestyle" className="size-5 object-contain" />
-    <div>
-      <p className="font-medium">Freestyle</p>
-      <p className="text-sm text-muted-foreground">Pauseable VMs with full filesystem access.</p>
-    </div>
-  </div>
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img src="/providers/modal.svg" alt="Modal" className="size-5 object-contain" />
-    <div>
-      <p className="font-medium">Modal</p>
-      <p className="text-sm text-muted-foreground">BYOK compute and streaming processes.</p>
-    </div>
-  </div>
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img src="/providers/northflank.svg" alt="Northflank" className="size-5 object-contain" />
-    <div>
-      <p className="font-medium">Northflank</p>
-      <p className="text-sm text-muted-foreground">Pauseable managed sandboxes.</p>
-    </div>
-  </div>
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img src="/providers/runloop.png" alt="Runloop" className="size-5 object-contain" />
-    <div>
-      <p className="font-medium">Runloop</p>
-      <p className="text-sm text-muted-foreground">Template based agent environments.</p>
-    </div>
-  </div>
-  <div className="flex items-center gap-3 rounded-xl bg-muted p-4">
-    <img src="/providers/vercel.ico" alt="Vercel" className="size-5 object-contain dark:invert" />
-    <div>
-      <p className="font-medium">Vercel</p>
-      <p className="text-sm text-muted-foreground">Streaming sandbox processes.</p>
-    </div>
-  </div>
-</div>
-
-## Sandboxes now. Every machine next.
-
-<Cards className="grid-cols-1 md:grid-cols-3">
-  <Card
-    title="CPU sandboxes"
-    description="Available now. Request portable environments or OCI images with explicit CPU, memory, disk, region, and lifecycle requirements."
-  />
-  <Card
-    title="GPUs and accelerators"
-    description="Expanding next. Route training, inference, and computer use workloads through the same capability model."
-  />
-  <Card
-    title="Browser and persistent machines"
-    description="On the roadmap. Keep long lived state and browser computers behind one agent interface."
-  />
-</Cards>
+  </Tab>
+  <Tab value="GPUs">
+    <Callout type="info" title="Coming soon">
+      Route training and inference workloads through the same OpenMetal capability model.
+    </Callout>
+  </Tab>
+  <Tab value="Browsers">
+    <Callout type="info" title="Coming soon">
+      Provision browser computers and persistent machines through the same agent interface.
+    </Callout>
+  </Tab>
+</Tabs>
 
 ## Keep provider logic out of your agent
 
@@ -156,12 +127,12 @@ Describe CPU, memory, region, and lifecycle once. OpenMetal selects eligible cap
   <Card
     icon={<ByokIcon />}
     title="Managed or BYOK"
-    description="Use OpenMetal capacity or bring provider credentials while keeping one control surface."
+    description="Use OpenMetal capacity or bring provider credentials through one unified interface."
   />
   <Card
     icon={<BalanceIcon />}
     title="One balance"
-    description="Fund managed workloads once and track durable provider usage in one organization ledger."
+    description="Fund managed workloads once and track provider usage against one organization balance."
   />
   <Card
     icon={<ControlIcon />}

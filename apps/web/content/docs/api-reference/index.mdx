@@ -1,49 +1,76 @@
 ---
-title: Overview
-description: Explore the Metal REST API generated from its OpenAPI 3.1 contract.
+title: OpenMetal API
+description: Provision and manage portable compute through the production OpenMetal REST API.
 ---
 
-The Metal API uses JSON over HTTPS and is versioned under `/v1`.
+The OpenMetal API uses JSON over HTTPS. Versioned endpoints are available under `/v1`.
 
-The interactive endpoint pages come directly from the same OpenAPI contract used by the API and TypeScript SDK.
-
-## Base URL
-
-Use the API origin configured for your environment:
+## Production base URL
 
 ```text
-http://localhost:4000
+https://api.openmetal.sh
 ```
 
-Production and staging origins are supplied with your Metal environment.
+## Start with a project key
 
-## Authentication
-
-Sandbox and runtime endpoints use a project API key:
+Most integrations use a project API key to create sandboxes, run processes, transfer files, expose
+HTTP endpoints, and inspect operations. Sign in to the
+[OpenMetal dashboard](https://www.openmetal.sh/dashboard), create an organization and project, then
+create a project key. Send both project credentials:
 
 ```http
 Authorization: Bearer metal_sk_your_key
 X-Metal-Project-ID: prj_your_project
 ```
 
-Organization administration uses a Supabase user access token:
+Check connectivity without authentication:
+
+```bash
+curl https://api.openmetal.sh/ready
+```
+
+Then follow [Create a sandbox](/guides/create-sandbox) for a complete API request.
+
+## Account management
+
+Organization, member, project, billing, usage, and webhook management routes use an OpenMetal user
+access token:
 
 ```http
-Authorization: Bearer <supabase-access-token>
+Authorization: Bearer <openmetal-user-access-token>
 ```
+
+The dashboard and CLI manage this user session for you. Most sandbox integrations only need a
+project key.
+
+## Route families
+
+- `/v1/sandboxes`, `/v1/operations`, and sandbox runtime routes use project credentials and are the
+  primary integration surface used by the SDK and CLI.
+- `/v1/organizations` and `/v1/projects` manage account-level resources with a user access token.
+- Project-scoped sandbox aliases under `/v1/projects/{project_id}/sandboxes` support dashboard and
+  user-session integrations.
+
+## Asynchronous operations
+
+Sandbox lifecycle and runtime mutations can return `202 Accepted` before provider work finishes.
+Persist the returned operation ID and wait until it reaches `succeeded`, `failed`, or `cancelled`.
 
 ## Idempotency
 
-Mutation endpoints that accept `Idempotency-Key` return the original result when the same key and identical request are replayed.
-
-Keep the same key after an uncertain network result. Reusing it with different input returns `idempotency_mismatch`.
+Mutation endpoints that accept `Idempotency-Key` return the original result when the same key and
+identical request are replayed. Keep the original key after an uncertain network result. Reusing it
+with different input returns `idempotency_mismatch`.
 
 ## Errors
 
-Errors include a stable machine readable code and human readable message. Asynchronous capability failures can appear on the terminal operation after the initial request was accepted.
+Errors include a stable machine-readable code, a safe message, a request ID, and whether the failure
+is retryable. Provider capability failures can appear on the operation after the initial request is
+accepted.
 
 <Cards>
-  <Card title="Create a sandbox" href="/api-reference/endpoints/sandboxes/createSandbox" />
-  <Card title="Authentication" href="/get-started/authentication" />
+  <Card title="Create a sandbox" href="/guides/create-sandbox" />
+  <Card title="Authenticate requests" href="/get-started/authentication" />
+  <Card title="Receive webhooks" href="/guides/webhooks" />
   <Card title="Common errors" href="/errors/common-errors" />
 </Cards>

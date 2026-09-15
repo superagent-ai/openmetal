@@ -1,4 +1,4 @@
 {
   "title": "Get started",
-  "pages": ["agents", "cli", "typescript", "authentication"]
+  "pages": ["agents", "authentication", "cli", "typescript"]
 }

@@ -1,10 +1,15 @@
 ---
 title: Webhook event catalog
-description: Every subscribable Metal event type with signed payload examples.
+description: Every subscribable OpenMetal event type with signed payload examples.
 ---
 
 Endpoints subscribe to any subset of these types, or to every type when no filter is selected.
 Use the [receiving guide](/guides/webhooks) for setup, secrets, verification, and retries.
+
+<Callout type="info" title="Reserved event types">
+  `sandbox.attempt_started` and `sandbox.attempt_failed` are reserved in the schema but are not
+  currently emitted.
+</Callout>
 
 ## Envelope
 
@@ -54,16 +59,15 @@ Sandbox events always include `sandbox_id` alongside the type-specific fields be
 | `sandbox.ready`           | `sandbox_id`, `provider`                                     |
 | `sandbox.paused`          | `sandbox_id`, `provider`                                     |
 | `sandbox.resumed`         | `sandbox_id`, `provider`                                     |
-| `sandbox.attempt_started` | reserved, not currently emitted                              |
-| `sandbox.attempt_failed`  | reserved, not currently emitted                              |
+| `sandbox.attempt_started` | reserved                                                     |
+| `sandbox.attempt_failed`  | reserved                                                     |
 | `sandbox.cost_updated`    | `sandbox_id`, `provider`, `cost_microusd`, `cost_updated_at` |
 | `sandbox.failed`          | `sandbox_id`, `operation`, `error_code`                      |
 | `sandbox.deleted`         | `sandbox_id`, `provider`                                     |
 
 ## Runtime events
 
-Worker-emitted sandbox and runtime events always include `sandbox_id` alongside the
-type-specific fields below.
+Sandbox and runtime events include `sandbox_id` when the event relates directly to a sandbox.
 
 | Type                          | `data` fields                          |
 | ----------------------------- | -------------------------------------- |
@@ -196,7 +200,7 @@ Metal-Signature: t=1786483380,v1=3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a
   "data": {
     "endpoint_id": "8fa85f64-5717-4562-b3fc-2c963f66afab",
     "endpoint_name": "Deploy hook",
-    "message": "This is a Metal webhook connectivity test. No state changed."
+    "message": "This is an OpenMetal webhook connectivity test. No state changed."
   }
 }
 ```

@@ -1,6 +1,17 @@
 import { eq, sql } from "drizzle-orm";
 import { autoTopupPolicies, billingAccounts, organizations, type MetalDb } from "@openmetal/db";
 
+export async function getBillingAccount(tx: MetalDb, organizationId: string) {
+  const [account] = await tx
+    .select()
+    .from(billingAccounts)
+    .where(eq(billingAccounts.organizationId, organizationId));
+  if (!account) {
+    throw new Error("billing account not found");
+  }
+  return account;
+}
+
 export async function ensureBillingAccount(tx: MetalDb, organizationId: string) {
   await tx
     .insert(billingAccounts)
@@ -13,14 +24,7 @@ export async function ensureBillingAccount(tx: MetalDb, organizationId: string) 
   await tx.execute(
     sql`select organization_id from metal.billing_accounts where organization_id = ${organizationId} for update`,
   );
-  const [account] = await tx
-    .select()
-    .from(billingAccounts)
-    .where(eq(billingAccounts.organizationId, organizationId));
-  if (!account) {
-    throw new Error("billing account not found");
-  }
-  return account;
+  return getBillingAccount(tx, organizationId);
 }
 
 export async function getOrganizationName(tx: MetalDb, organizationId: string): Promise<string> {

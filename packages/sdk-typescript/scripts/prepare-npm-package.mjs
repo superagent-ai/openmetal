@@ -40,11 +40,11 @@ const manifest = {
   },
   repository: {
     type: "git",
-    url: "git+https://github.com/homanp/metal.git",
+    url: "git+https://github.com/superagent-ai/openmetal.git",
     directory: "packages/sdk-typescript",
   },
-  homepage: "https://github.com/homanp/metal#typescript-sdk",
-  bugs: { url: "https://github.com/homanp/metal/issues" },
+  homepage: "https://github.com/superagent-ai/openmetal#typescript-sdk",
+  bugs: { url: "https://github.com/superagent-ai/openmetal/issues" },
   license: "UNLICENSED",
   publishConfig: {
     access: "public",

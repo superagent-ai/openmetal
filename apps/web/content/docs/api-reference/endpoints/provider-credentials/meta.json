@@ -1,5 +1,5 @@
 {
   "title": "Provider credentials",
-  "description": "Encrypted organization BYOK provider credentials.",
+  "description": "Bring your own provider credentials.",
   "pages": ["listProviderCredentials", "removeProviderCredential", "configureProviderCredential"]
 }

@@ -5,7 +5,8 @@ description: Select automatic routing, explicit providers, fallback, and BYOK.
 
 ## Automatic routing
 
-Set `provider` to `auto` or omit it. Explicit fallback providers are tried in your order, followed by other configured providers in registry order.
+Set `provider` to `auto` or omit it. Explicit fallback providers are tried in your order, followed
+by other managed or BYOK providers in their configured order.
 
 ```json
 {
@@ -31,7 +32,8 @@ Set `provider` to `auto` or omit it. Explicit fallback providers are tried in yo
 }
 ```
 
-Current routing uses caller order and registry order. It does not rank candidates by price, speed, reliability, or a balanced score.
+Current routing uses your fallback order and the configured provider order. It does not rank
+candidates by price, speed, reliability, or a balanced score.
 
 ## Choose a provider explicitly
 
@@ -41,13 +43,14 @@ Provider templates work with CodeSandbox, E2B, Freestyle, and Runloop. They cann
 
 ## Safe fallback
 
-Metal falls back after capacity, unavailable, and known absent timeout failures. Unknown outcomes enter reconciliation before any further provider attempt.
+OpenMetal falls back after capacity, unavailable, and known absent timeout failures. Unknown outcomes enter reconciliation before any further provider attempt.
 
 Authentication, invalid request, unsupported capability, and customer errors do not fan out.
 
 ## Bring your own key
 
-BYOK credentials belong to an organization, are encrypted in Supabase Vault, and are never returned by the API. The provider bills BYOK capacity directly, so it does not consume Metal credits.
+BYOK credentials belong to an organization, are encrypted at rest, and are never returned by the
+API. The provider bills BYOK capacity directly, so it does not consume OpenMetal credits.
 
 ```bash
 openmetal provider-credential set --file provider.json

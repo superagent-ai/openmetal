@@ -5,6 +5,9 @@ description: Create a time limited public route to a process in a sandbox.
 
 Start a service inside a `ready` sandbox, then create a leased HTTP endpoint for its port.
 
+Portable leased endpoints are currently available through Blaxel. Other providers return
+`capability_unsupported`.
+
 <Tabs items={["TypeScript", "CLI"]}>
   <Tab value="TypeScript">
 
@@ -45,7 +48,9 @@ openmetal endpoint revoke <sandbox-id> <endpoint-id> --yes
 
 Endpoint creation returns a `provisioning` resource immediately. Poll the list until it becomes `active` with a URL or `failed`.
 
-Only HTTP is supported. Ports range from 1 through 65,535 and leases range from 60 through 86,400 seconds before provider restrictions.
+The SDK does not expose a single-endpoint read method, so use `endpoints.list()` while waiting. Only
+HTTP is supported. Ports range from 1 through 65,535 and leases range from 60 through 86,400
+seconds before provider restrictions.
 
 ## Revoke early
 

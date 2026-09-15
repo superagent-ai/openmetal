@@ -15,7 +15,7 @@ export default function DocumentationLayout({ children }: { children: ReactNode 
       sidebar={{
         className: "border-e border-border bg-background",
         defaultOpenLevel: 0,
-        prefetch: false,
+        prefetch: true,
       }}
     >
       {children}

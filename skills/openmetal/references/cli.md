@@ -60,7 +60,7 @@ The browser login callback is `http://127.0.0.1:54389/callback`. Use `--no-brows
 Set the project-scoped credentials in the environment:
 
 ```bash
-export OPENMETAL_API_URL="https://api.example.com"
+export OPENMETAL_API_URL="https://api.openmetal.sh"
 export OPENMETAL_PROJECT_ID="prj_example"
 export OPENMETAL_API_KEY="metal_sk_example"
 

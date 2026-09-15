@@ -191,7 +191,7 @@ Then configure the GitHub OIDC publisher:
 
 ```bash
 npm trust github @openmetal/sdk \
-  --repo homanp/metal \
+  --repo superagent-ai/openmetal \
   --file release-sdk.yml \
   --allow-publish \
   --yes

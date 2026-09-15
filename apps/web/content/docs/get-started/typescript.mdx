@@ -5,12 +5,16 @@ description: Embed OpenMetal sandbox workflows with the published TypeScript SDK
 
 ## Before you begin
 
-You need Node.js 22 or later, a Metal project, and a project API key. Keep the project ID and key in environment variables.
+You need Node.js 22 or later, an OpenMetal project, and a project API key. Keep the project ID and
+key in environment variables.
+
+Create an account, organization, project, and key from the
+[OpenMetal dashboard](https://www.openmetal.sh/dashboard). The key is shown once.
 
 ```bash
 npm install @openmetal/sdk
 
-export OPENMETAL_API_URL="http://localhost:4000"
+export OPENMETAL_API_URL="https://api.openmetal.sh"
 export OPENMETAL_PROJECT_ID="prj_your_project"
 export OPENMETAL_API_KEY="metal_sk_your_key"
 ```

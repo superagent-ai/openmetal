@@ -19,6 +19,14 @@ OpenMetal is OpenRouter for cloud sandboxes and GPUs:
 
 The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Freestyle, Modal, Northflank, Runloop, and Vercel. Provider integrations remain behind one capability-oriented OpenMetal API; they are not separate customer-facing products.
 
+## Roadmap
+
+OpenMetal is expanding one portable compute interface in stages:
+
+- **Available now**: CPU sandboxes, lifecycle operations, processes, files, leased HTTP endpoints, provider routing, managed credits, BYOK, TypeScript SDK, CLI, and Agent Skill.
+- **Coming next**: GPU and accelerator workloads for training, inference, and computer use.
+- **Planned**: browser computers and persistent machines through the same API and capability model.
+
 ## Architecture
 
 ```text
@@ -169,6 +177,20 @@ GitHub allows one callback URL per app, so use separate apps for local and hoste
 
 Enable Google and GitHub under Providers and paste the same credentials. No schema migration is required.
 
+**Hosted Auth email (Resend SMTP)**
+
+Production Auth emails (magic links, confirmations, and invites) send through Resend. Local Auth still uses Mailpit at `http://127.0.0.1:55324`.
+
+| Setting  | Value                                                                           |
+| -------- | ------------------------------------------------------------------------------- |
+| Sender   | OpenMetal `<updates@openmetal.sh>`                                              |
+| Host     | `smtp.resend.com`                                                               |
+| Port     | `465`                                                                           |
+| Username | `resend`                                                                        |
+| Password | `RESEND_API_KEY` in encrypted `.env` (also stored in hosted Auth SMTP settings) |
+
+Do not run `supabase config push` after changing hosted SMTP; local `config.toml` keeps SMTP disabled so developers keep Mailpit.
+
 ## API and worker division
 
 The API never calls providers and does not publish Realtime events inside the originating HTTP request. The worker is the trusted publisher. Duplicate job delivery is safe: domain events are append-only and unique on `event_id`, and the dashboard deduplicates by event ID and cursor.
@@ -240,3 +262,18 @@ pnpm env:encrypt
 pnpm env:armor
 pnpm db:types
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, validation, and pull request
+guidelines.
+
+## Security
+
+Report vulnerabilities privately through
+[GitHub Security Advisories](https://github.com/superagent-ai/openmetal/security/advisories/new).
+See [SECURITY.md](SECURITY.md) for the reporting policy.
+
+## License
+
+OpenMetal is available under the [MIT License](LICENSE.md).

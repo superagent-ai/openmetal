@@ -45,7 +45,7 @@ const manifest = {
   },
   homepage: "https://github.com/superagent-ai/openmetal#typescript-sdk",
   bugs: { url: "https://github.com/superagent-ai/openmetal/issues" },
-  license: "UNLICENSED",
+  license: "MIT",
   publishConfig: {
     access: "public",
   },

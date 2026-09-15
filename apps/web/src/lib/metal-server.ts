@@ -1,10 +1,11 @@
 import "server-only";
 
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createMetalClient } from "@/lib/metal";
 import { createClient } from "@/lib/supabase/server";
 
-export async function requireMetalSession() {
+export const requireMetalSession = cache(async () => {
   const supabase = await createClient();
   const { data: claimsData } = await supabase.auth.getClaims();
   if (!claimsData?.claims) {
@@ -21,4 +22,4 @@ export async function requireMetalSession() {
     claims: claimsData.claims,
     metal: createMetalClient(async () => accessToken),
   };
-}
+});

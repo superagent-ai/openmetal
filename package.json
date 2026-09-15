@@ -1,6 +1,7 @@
 {
   "name": "metal",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@11.13.1",
   "engines": {
     "node": ">=22.0.0",

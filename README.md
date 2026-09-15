@@ -248,3 +248,18 @@ pnpm env:encrypt
 pnpm env:armor
 pnpm db:types
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, validation, and pull request
+guidelines.
+
+## Security
+
+Report vulnerabilities privately through
+[GitHub Security Advisories](https://github.com/superagent-ai/openmetal/security/advisories/new).
+See [SECURITY.md](SECURITY.md) for the reporting policy.
+
+## License
+
+OpenMetal is available under the [MIT License](LICENSE.md).

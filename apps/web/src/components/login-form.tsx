@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useFormStatus } from "react-dom";
 import { sendMagicLink, signInWithOAuth } from "@/app/login/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -138,6 +139,17 @@ export function LoginForm({
             </Field>
           </FieldGroup>
         </form>
+        <p className="text-center text-xs text-pretty text-muted-foreground">
+          By continuing, you agree to the{" "}
+          <Link className="underline underline-offset-4 hover:text-foreground" href="/terms">
+            Terms of Service
+          </Link>{" "}
+          and acknowledge the{" "}
+          <Link className="underline underline-offset-4 hover:text-foreground" href="/privacy">
+            Privacy Policy
+          </Link>
+          .
+        </p>
       </FieldGroup>
     </div>
   );

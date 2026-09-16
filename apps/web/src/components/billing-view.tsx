@@ -553,6 +553,15 @@ export function BillingView({
               </p>
             )}
 
+            <p className="text-xs text-pretty text-muted-foreground">
+              By purchasing, you authorize the amount shown and agree to the{" "}
+              <Link className="underline underline-offset-4 hover:text-foreground" href="/terms">
+                Terms of Service
+              </Link>
+              . Purchased credits are generally nonrefundable except where required by law or for a
+              billing error.
+            </p>
+
             <Button
               type="submit"
               className="w-full"
@@ -657,6 +666,16 @@ export function BillingView({
             <p className="text-sm text-muted-foreground">
               This month ${formatUsd(billing.auto_topup.month_credited_usd)} of $
               {formatUsd(billing.auto_topup.monthly_cap_usd)}
+            </p>
+
+            <p className="text-xs text-pretty text-muted-foreground">
+              When enabled, saving authorizes recurring charges at the threshold, refill amount,
+              monthly cap, and fee shown above. You can disable automatic top up here before the
+              next charge. The{" "}
+              <Link className="underline underline-offset-4 hover:text-foreground" href="/terms">
+                Terms of Service
+              </Link>{" "}
+              apply.
             </p>
 
             <DialogFooter>

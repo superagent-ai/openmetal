@@ -586,6 +586,23 @@ export function AppSidebar({
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter className="gap-3 p-3 group-data-[collapsible=icon]:p-2">
+          <nav
+            aria-label="Legal"
+            className="flex items-center gap-3 px-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden"
+          >
+            <Link
+              className="hover:text-foreground hover:underline hover:underline-offset-4"
+              href="/terms"
+            >
+              Terms
+            </Link>
+            <Link
+              className="hover:text-foreground hover:underline hover:underline-offset-4"
+              href="/privacy"
+            >
+              Privacy
+            </Link>
+          </nav>
           <NavUser user={user} />
         </SidebarFooter>
         <form id="logout-form" action="/auth/logout" method="post" className="hidden" />

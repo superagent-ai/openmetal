@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { DocsLayout } from "fumadocs-ui/layouts/notebook";
+import { DocsSidebarFooter } from "@/components/docs-sidebar-footer";
 import { baseOptions } from "@/lib/layout.shared";
 import { source } from "@/lib/source";
 
@@ -15,6 +16,7 @@ export default function DocumentationLayout({ children }: { children: ReactNode 
       sidebar={{
         className: "border-e border-border bg-background",
         defaultOpenLevel: 0,
+        footer: DocsSidebarFooter,
         prefetch: true,
       }}
     >

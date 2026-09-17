@@ -10,7 +10,7 @@ OpenMetal is the universal compute gateway for AI agents. This repository implem
 
 OpenMetal is OpenRouter for cloud sandboxes and GPUs:
 
-- Managed OpenMetal capacity is the default. Superagent owns provider contracts and credentials.
+- Managed OpenMetal capacity is the default. OpenMetal owns provider contracts and credentials.
 - Customers have one OpenMetal account and organization-scoped balance.
 - API keys are scoped per project.
 - Every provider resource maps back to one OpenMetal organization and project.
@@ -82,7 +82,7 @@ The skill follows the open [Agent Skills specification](https://agentskills.io) 
 
 ## Environment setup
 
-Shared development secrets live in the committed, encrypted `.env`. That file is OpenMetal-only: do not add variables from other Superagent repos. The private decryption key is stored on the **superagent-team** Dotenvx Armor org, not in git.
+Shared development secrets live in the committed, encrypted `.env`. That file is OpenMetal-only: do not mix variables from other repositories. The private decryption key is stored on the **superagent-team** Dotenvx Armor org, not in git.
 
 Machine-specific values (local Supabase URLs and keys) live in gitignored `.env.local`.
 
@@ -238,7 +238,7 @@ Integration, RLS, and Realtime tests require local Supabase plus `pnpm env:local
 - **Magic link missing**: open Mailpit at `http://127.0.0.1:55324` rather than a real mailbox.
 - **OAuth redirect mismatch**: provider callback URLs must be `http://127.0.0.1:55321/auth/v1/callback` locally. The app route is `/auth/callback`.
 - **Port already allocated**: `pnpm supabase:stop` then start again. API uses 4000, web uses 3100.
-- **Encrypted `.env` will not decrypt**: run `pnpm exec dotenvx armor login` as a member of superagent-team. Do not copy keys from other Superagent repos into this `.env`.
+- **Encrypted `.env` will not decrypt**: run `pnpm exec dotenvx armor login` as a member of superagent-team. Do not copy keys from other repositories into this `.env`.
 - **`supabase start` missing private key**: use `pnpm supabase:start`, not bare `supabase start`. The CLI reads the encrypted root `.env` and needs dotenvx to decrypt OAuth secrets first.
 
 ## Root commands

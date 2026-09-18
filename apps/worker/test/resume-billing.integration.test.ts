@@ -233,4 +233,123 @@ describe("codesandbox resume billing baseline", () => {
       (500_000_000n + segmentMicrousd).toString(),
     );
   });
+
+  it("captures usage accrued before the pause even when no cost sync has run yet", async () => {
+    const orgId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const sandboxId = crypto.randomUUID();
+    const actorId = crypto.randomUUID();
+    const providerResourceId = `csb-${sandboxId.replaceAll("-", "")}`;
+
+    await database.sql`
+      insert into public.organizations (id, name, slug)
+      values (${orgId}, 'Resume Tail Org', ${`rt-${orgId.slice(0, 8)}`})
+    `;
+    await database.sql`
+      insert into public.projects (id, public_id, organization_id, name, slug)
+      values (
+        ${projectId},
+        ${`prj_${projectId.replaceAll("-", "")}`},
+        ${orgId},
+        'Resume Tail Project',
+        ${`p-${projectId.slice(0, 8)}`}
+      )
+    `;
+    await database.sql`
+      insert into metal.billing_accounts (organization_id, balance_microusd)
+      values (${orgId}, 100000000)
+    `;
+    // Paused after 30 minutes of runtime but never cost-synced
+    // (provider_cost_microusd is null): the baseline must be recomputed from
+    // the pre-resume metadata, not copied from the lagging column.
+    await database.sql`
+      insert into metal.sandboxes (
+        id, public_id, organization_id, project_id, provider, primary_provider,
+        status, source, resource_requirements, lifecycle, fallback,
+        provider_options, environment, secret_refs, metadata, created_by,
+        provider_resource_id, provider_organization_id, provider_metadata,
+        billing_mode, ready_at, paused_at
+      )
+      values (
+        ${sandboxId},
+        ${`sbx_${sandboxId.replaceAll("-", "")}`},
+        ${orgId},
+        ${projectId},
+        'codesandbox',
+        'codesandbox',
+        'paused',
+        ${JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" })}::jsonb,
+        ${JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" })}::jsonb,
+        ${JSON.stringify({ runtime_timeout_seconds: 300 })}::jsonb,
+        ${JSON.stringify({ providers: [] })}::jsonb,
+        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+        ${actorId},
+        ${providerResourceId},
+        'codesandbox-workspace',
+        ${JSON.stringify({
+          vmTier: "Medium",
+          hourlyRateMicrousd: "80000000",
+          startedAt: "2026-09-18T10:00:00.000Z",
+        })}::jsonb,
+        'managed',
+        '2026-09-18T10:00:00.000Z',
+        '2026-09-18T10:30:00.000Z'
+      )
+    `;
+
+    const realCost = new CodeSandboxProvider({
+      apiKey: "test",
+      creditRateMicrousd: 1_000_000n,
+    });
+    const resumeProvider = new FakeSandboxProvider("codesandbox");
+    resumeProvider.resume = async (resourceId: string) => ({
+      providerResourceId: resourceId,
+      providerOrganizationId: "codesandbox-workspace",
+      providerMetadata: {
+        vmTier: "Medium",
+        startedAt: new Date().toISOString(),
+        codesandbox: { start: { id: resourceId } },
+      },
+    });
+    resumeProvider.getCost = (input) => realCost.getCost(input);
+
+    const resumeJobId = await enqueueResume(sandboxId, orgId, projectId);
+    await processUntilJob(resumeJobId, { codesandbox: resumeProvider });
+
+    // 30 accrued minutes at the Medium rate: (30 * 80_000_000 + 30) / 60.
+    const accruedMicrousd = (30n * 80_000_000n + 30n) / 60n;
+    const [resumed] = await database.sql`
+      select status, provider_metadata from metal.sandboxes where id = ${sandboxId}
+    `;
+    expect(resumed?.status).toBe("ready");
+    expect((resumed?.provider_metadata as Record<string, unknown>).costBaselineMicrousd).toBe(
+      accruedMicrousd.toString(),
+    );
+
+    // The resume-triggered sync bills the whole accrued tail exactly once.
+    const [syncJob] = await database.sql`
+      select id from metal.outbox_jobs
+      where job_type = 'sandbox.cost.sync' and payload->>'sandbox_id' = ${sandboxId}
+      order by created_at asc
+      limit 1
+    `;
+    expect(syncJob?.id).toBeTruthy();
+    await database.sql`
+      update metal.outbox_jobs set available_at = now() where id = ${syncJob!.id}
+    `;
+    await processUntilJob(String(syncJob!.id), { codesandbox: realCost });
+
+    const segmentMicrousd = (80_000_000n + 30n) / 60n;
+    const [account] = await database.sql`
+      select balance_microusd from metal.billing_accounts where organization_id = ${orgId}
+    `;
+    expect(BigInt(account!.balance_microusd)).toBe(
+      100_000_000n - accruedMicrousd - segmentMicrousd,
+    );
+    const [corrections] = await database.sql`
+      select count(*)::int as count from metal.ledger_transactions
+      where organization_id = ${orgId} and kind = 'usage_correction'
+    `;
+    expect(corrections?.count).toBe(0);
+  });
 });

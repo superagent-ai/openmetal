@@ -682,6 +682,21 @@ async function resumeSandbox(
     throw new ProviderError("provider does not support resume", "unsupported", false);
   }
   const remote = await provider.resume(sandbox.providerResourceId);
+  let providerMetadata = remote?.providerMetadata ?? sandbox.providerMetadata;
+  if (provider.name === "codesandbox" && provider.capabilities.cost) {
+    // CodeSandbox restarts its cost timer on resume (startedAt = now). Carry the
+    // already-accrued cost forward as a cumulative baseline and keep the prior
+    // rate-card fields, otherwise the next cost sync sees a collapsed amount and
+    // posts a negative delta that credits back every prior usage charge.
+    const merged: Record<string, unknown> = {
+      ...(sandbox.providerMetadata ?? {}),
+      ...(remote?.providerMetadata ?? {}),
+    };
+    if (sandbox.providerCostMicrousd != null) {
+      merged.costBaselineMicrousd = sandbox.providerCostMicrousd.toString();
+    }
+    providerMetadata = merged;
+  }
   await withTransaction(db, async (tx) => {
     const [updated] = await tx
       .update(sandboxes)
@@ -689,7 +704,7 @@ async function resumeSandbox(
         status: "ready",
         providerResourceId: remote?.providerResourceId ?? sandbox.providerResourceId,
         providerOrganizationId: remote?.providerOrganizationId ?? sandbox.providerOrganizationId,
-        providerMetadata: remote?.providerMetadata ?? sandbox.providerMetadata,
+        providerMetadata,
         pausedAt: null,
         updatedAt: new Date(),
       })

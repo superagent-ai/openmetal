@@ -287,8 +287,17 @@ export class CodeSandboxProvider implements SandboxProvider {
       Math.ceil((input.to.getTime() - startedAt.getTime()) / 1_000),
     );
     const billedMinutes = Math.ceil(elapsedSeconds / 60);
+    // The startedAt timer only covers the current running segment: resume()
+    // restarts it. The worker persists the cost accrued before each resume as
+    // costBaselineMicrousd so the reported amount stays monotonic-cumulative
+    // and pause/resume cycles cannot erase already-billed usage.
+    const metadataBaseline = input.providerMetadata?.costBaselineMicrousd;
+    const cumulativeBaseline =
+      typeof metadataBaseline === "string" && /^\d+$/.test(metadataBaseline)
+        ? BigInt(metadataBaseline)
+        : 0n;
     return {
-      amountMicrousd: (BigInt(billedMinutes) * hourlyRate + 30n) / 60n,
+      amountMicrousd: cumulativeBaseline + (BigInt(billedMinutes) * hourlyRate + 30n) / 60n,
       providerOrganizationId: input.providerOrganizationId ?? this.workspaceId,
       measuredThrough: input.to,
       provenance: "estimated_rate_card",
@@ -298,6 +307,7 @@ export class CodeSandboxProvider implements SandboxProvider {
         source: "codesandbox-vm-runtime-published-credit-rate",
         vmTier: input.providerMetadata?.vmTier ?? this.vmTier,
         hourlyRateMicrousd: hourlyRate.toString(),
+        costBaselineMicrousd: cumulativeBaseline.toString(),
         elapsedSeconds,
         billedMinutes,
         startedAt: startedAt.toISOString(),

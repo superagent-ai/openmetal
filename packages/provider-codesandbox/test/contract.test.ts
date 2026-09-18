@@ -57,3 +57,37 @@ it("marks CodeSandbox runtime calculations as rate-card estimated", async () => 
     raw: { startedAt },
   });
 });
+
+it("adds the persisted cumulative baseline so resume cannot collapse reported cost", async () => {
+  const provider = new CodeSandboxProvider({ apiKey: "test" });
+  // Metadata as persisted by the worker after a resume: the provider restarted
+  // the cost timer (startedAt = resume time) and the worker carried the $500
+  // already accrued before the pause forward as costBaselineMicrousd.
+  const startedAt = "2026-08-27T10:00:00.000Z";
+
+  const cost = await provider.getCost({
+    providerResourceId: "sandbox-1",
+    providerMetadata: { startedAt, costBaselineMicrousd: "500000000" },
+    from: new Date("2026-08-27T09:00:00.000Z"),
+    to: new Date("2026-08-27T10:01:00.000Z"),
+  });
+
+  // 1 billed minute at the default Nano rate on top of the $500 baseline.
+  expect(cost?.amountMicrousd).toBe(500_000_000n + 2_477n);
+  expect(cost?.raw).toMatchObject({ costBaselineMicrousd: "500000000" });
+});
+
+it("ignores a missing or malformed cumulative baseline", async () => {
+  const provider = new CodeSandboxProvider({ apiKey: "test" });
+  const startedAt = "2026-08-27T10:00:00.000Z";
+
+  for (const costBaselineMicrousd of [undefined, "not-a-number", "-100", "1.5", 500_000_000]) {
+    const cost = await provider.getCost({
+      providerResourceId: "sandbox-1",
+      providerMetadata: { startedAt, costBaselineMicrousd },
+      from: new Date(startedAt),
+      to: new Date("2026-08-27T10:01:00.000Z"),
+    });
+    expect(cost?.amountMicrousd).toBe(2_477n);
+  }
+});

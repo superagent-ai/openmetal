@@ -682,6 +682,37 @@ async function resumeSandbox(
     throw new ProviderError("provider does not support resume", "unsupported", false);
   }
   const remote = await provider.resume(sandbox.providerResourceId);
+  let providerMetadata = remote?.providerMetadata ?? sandbox.providerMetadata;
+  if (provider.name === "codesandbox" && provider.capabilities.cost) {
+    // CodeSandbox restarts its cost timer on resume (startedAt = now). Carry the
+    // cost accrued through the pause forward as a cumulative baseline and keep
+    // the prior rate-card fields, otherwise the next cost sync sees a collapsed
+    // amount and posts a negative delta that credits back every prior usage
+    // charge. The baseline is recomputed from the pre-resume metadata rather
+    // than copied from providerCostMicrousd, which can lag the true accrued
+    // amount while the pause-time final cost sync is still pending.
+    const merged: Record<string, unknown> = {
+      ...(sandbox.providerMetadata ?? {}),
+      ...(remote?.providerMetadata ?? {}),
+    };
+    let baselineMicrousd = sandbox.providerCostMicrousd ?? 0n;
+    const accrued = await provider
+      .getCost({
+        providerResourceId: sandbox.providerResourceId,
+        providerOrganizationId: sandbox.providerOrganizationId ?? undefined,
+        providerMetadata: sandbox.providerMetadata,
+        from: sandbox.readyAt ?? sandbox.createdAt,
+        to: sandbox.pausedAt ?? new Date(),
+      })
+      .catch(() => null);
+    if (accrued && accrued.amountMicrousd > baselineMicrousd) {
+      baselineMicrousd = accrued.amountMicrousd;
+    }
+    if (baselineMicrousd > 0n) {
+      merged.costBaselineMicrousd = baselineMicrousd.toString();
+    }
+    providerMetadata = merged;
+  }
   await withTransaction(db, async (tx) => {
     const [updated] = await tx
       .update(sandboxes)
@@ -689,7 +720,7 @@ async function resumeSandbox(
         status: "ready",
         providerResourceId: remote?.providerResourceId ?? sandbox.providerResourceId,
         providerOrganizationId: remote?.providerOrganizationId ?? sandbox.providerOrganizationId,
-        providerMetadata: remote?.providerMetadata ?? sandbox.providerMetadata,
+        providerMetadata,
         pausedAt: null,
         updatedAt: new Date(),
       })

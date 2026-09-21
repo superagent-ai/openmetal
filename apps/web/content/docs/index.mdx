@@ -5,7 +5,7 @@ description: Give your agent access to OpenMetal with one skill, one CLI, and on
 
 <section className="not-prose flex flex-col items-center py-16 text-center">
   <h1 className="max-w-2xl bg-linear-to-r from-black to-[#666666] bg-clip-text text-5xl font-semibold tracking-tight text-balance text-transparent dark:from-white dark:to-[#9B9B9B]">
-    One interface for all agent compute.
+    One API for all agent compute.
   </h1>
   <p className="mt-6 max-w-2xl text-lg text-pretty text-muted-foreground">
     {
@@ -138,6 +138,28 @@ Describe CPU, memory, region, and lifecycle once. OpenMetal selects eligible cap
     icon={<ControlIcon />}
     title="Total control"
     description="Pin a provider, order fallback candidates, set resource limits, and retain every operation ID."
+  />
+</Cards>
+
+## See all costs in one place
+
+Stop reconciling provider invoices, prepaid balances, and usage dashboards. OpenMetal records compute cost by day, provider, project, and sandbox in one organization view.
+
+<Cards className="home-icon-cards grid-cols-1 md:grid-cols-3">
+  <Card
+    icon={<CostCompareIcon />}
+    title="Compare every provider"
+    description="See spend across Blaxel, E2B, Modal, and the rest without logging into each console."
+  />
+  <Card
+    icon={<CostAttributeIcon />}
+    title="Attribute every workload"
+    description="Break cost down by day, project, and sandbox so agent usage stays accountable."
+  />
+  <Card
+    icon={<CostLedgerIcon />}
+    title="Managed and BYOK together"
+    description="Credit deductions and observational BYOK cost appear in the same usage report."
   />
 </Cards>
 

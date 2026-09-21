@@ -1,8 +1,11 @@
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import {
+  Analytics01Icon,
   ApiIcon,
   BookOpen01Icon,
+  FolderCodeIcon,
+  Invoice01Icon,
   Key02Icon,
   Rocket02Icon,
   Route02Icon,
@@ -34,6 +37,9 @@ export function getMDXComponents(components?: MDXComponents) {
     ByokIcon: () => <HugeiconsIcon icon={Key02Icon} strokeWidth={2} />,
     BalanceIcon: () => <HugeiconsIcon icon={Wallet02Icon} strokeWidth={2} />,
     ControlIcon: () => <HugeiconsIcon icon={SlidersHorizontalIcon} strokeWidth={2} />,
+    CostCompareIcon: () => <HugeiconsIcon icon={Analytics01Icon} strokeWidth={2} />,
+    CostAttributeIcon: () => <HugeiconsIcon icon={FolderCodeIcon} strokeWidth={2} />,
+    CostLedgerIcon: () => <HugeiconsIcon icon={Invoice01Icon} strokeWidth={2} />,
     ClaudeCodeMark: AnthropicMark,
     CursorMark,
     CodexMark,

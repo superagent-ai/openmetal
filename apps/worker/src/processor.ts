@@ -686,31 +686,74 @@ async function provisionSandbox(
             continue;
           }
           const capabilitySnapshot = runtimeCapabilities(provider, discoveredRuntime);
-          await db
-            .update(providerAttempts)
-            .set({
-              state: "succeeded",
-              providerResourceId: reconciled.providerResourceId,
-              providerMetadata: reconciled.providerMetadata ?? {},
-              outcome: "found",
-              completedAt: new Date(),
-            })
-            .where(eq(providerAttempts.id, attempt!.id));
-          await db
-            .update(sandboxes)
-            .set({
-              provider: providerName,
-              providerCredentialId,
-              billingMode: providerCredentialId ? "byok" : "managed",
-              status: "ready",
-              providerResourceId: reconciled.providerResourceId,
-              providerOrganizationId: reconciled.providerOrganizationId,
-              providerMetadata: reconciled.providerMetadata ?? {},
-              providerCapabilities: capabilitySnapshot,
-              readyAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(sandboxes.id, sandbox.id));
+          const reconciledResources =
+            reconciled.resolvedResources ??
+            resolveProviderResources(
+              providerName,
+              {
+                vcpu: requested.vcpu,
+                memoryMb: requested.memory_mb,
+                diskMb: requested.disk_mb,
+                architecture: requested.architecture ?? "any",
+              },
+              options,
+            );
+          await withTransaction(db, async (tx) => {
+            await tx
+              .update(providerAttempts)
+              .set({
+                state: "succeeded",
+                providerResourceId: reconciled.providerResourceId,
+                providerMetadata: reconciled.providerMetadata ?? {},
+                resolvedResources: reconciledResources,
+                outcome: "found",
+                completedAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(eq(providerAttempts.id, attempt!.id));
+            const [updated] = await tx
+              .update(sandboxes)
+              .set({
+                provider: providerName,
+                providerCredentialId,
+                billingMode: providerCredentialId ? "byok" : "managed",
+                status: "ready",
+                providerResourceId: reconciled.providerResourceId,
+                providerOrganizationId: reconciled.providerOrganizationId,
+                providerMetadata: reconciled.providerMetadata ?? {},
+                providerCapabilities: capabilitySnapshot,
+                resolvedResources: {
+                  vcpu: reconciledResources.vcpu,
+                  memory_mb: reconciledResources.memoryMb,
+                  disk_mb: reconciledResources.diskMb,
+                  architecture: reconciledResources.architecture,
+                  provider_size: reconciledResources.providerSize,
+                },
+                readyAt: new Date(),
+                updatedAt: new Date(),
+                errorCode: null,
+                errorMessage: null,
+              })
+              .where(eq(sandboxes.id, sandbox.id))
+              .returning();
+            if (updated) {
+              await recordSandboxEvent(tx, updated, "sandbox.ready", {
+                provider: providerName,
+              });
+              if (provider.capabilities.cost && provider.name !== "northflank") {
+                await scheduleCostSync(tx, updated.id, new Date(Date.now() + 5_000), false);
+              }
+              await tx
+                .insert(outboxJobs)
+                .values({
+                  jobType: "sandbox.destroy",
+                  dedupeKey: `sandbox:destroy:${updated.id}`,
+                  payload: { job_type: "sandbox.destroy", sandbox_id: updated.id },
+                  availableAt: new Date(Date.now() + lifecycle.runtime_timeout_seconds * 1_000),
+                })
+                .onConflictDoNothing();
+            }
+          });
           await setOperationState(db, operationId, "succeeded");
           return;
         }
@@ -726,7 +769,11 @@ async function provisionSandbox(
           message: safeError(error),
           retryable: true,
         });
-        return;
+        throw new ProviderError(
+          "provider create reconciliation did not complete",
+          "unknown_outcome",
+          true,
+        );
       }
       if (!classification.fallbackSafe) {
         break;

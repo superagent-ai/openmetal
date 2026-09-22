@@ -573,7 +573,15 @@ export class DaytonaSandboxProvider implements SandboxProvider {
           method: "GET",
           signal: requestSignal,
         });
-        return this.capabilities.runtime ?? {};
+        const runtime = this.capabilities.runtime ?? {};
+        if (
+          !runtime.computer?.recording ||
+          (await this.hasRecordingPrerequisites(providerResourceId, requestSignal))
+        ) {
+          return runtime;
+        }
+        const { recording: _recording, ...computer } = runtime.computer;
+        return { ...runtime, computer };
       } catch (error) {
         if (error instanceof DaytonaRequestError && error.status === 404) {
           const { computer: _computer, ...runtime } = this.capabilities.runtime ?? {};
@@ -591,6 +599,22 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       }
     }
     return this.capabilities.runtime ?? {};
+  }
+
+  private async hasRecordingPrerequisites(
+    providerResourceId: string,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const execution = await this.exec({
+      providerResourceId,
+      command: ["sh", "-lc", "command -v ffmpeg >/dev/null 2>&1"],
+      maxOutputBytes: 1_024,
+      signal,
+    });
+    for await (const event of execution.events) {
+      if (event.type === "exit") return event.exitCode === 0;
+    }
+    return false;
   }
 
   async executeComputerAction(input: ProviderComputerActionInput): Promise<void> {

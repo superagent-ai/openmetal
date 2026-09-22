@@ -1086,7 +1086,12 @@ export class MetalClient {
       const sandboxId =
         typeof recordingOrId === "string" ? options.sandboxId : recordingOrId.sandbox_id;
       if (!sandboxId) throw new Error("sandboxId is required when waiting by recording ID");
-      const target = options.state ?? "recording";
+      const target =
+        options.state ??
+        (typeof recordingOrId !== "string" &&
+        (recordingOrId.state === "stopping" || recordingOrId.state === "stopped")
+          ? "stopped"
+          : "recording");
       const deadline = Date.now() + (options.timeoutMs ?? 180_000);
       while (Date.now() < deadline) {
         if (options.signal?.aborted) {

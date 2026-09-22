@@ -692,6 +692,9 @@ describe("MetalClient runtime namespaces", () => {
         if (path.endsWith("/recordings") && init?.method === "GET") {
           return jsonResponse(200, { recordings: [recording()], next_cursor: null });
         }
+        if (path.endsWith("/recordings/rec_test") && init?.method === "GET") {
+          return jsonResponse(200, recording("stopped"));
+        }
         return jsonResponse(
           202,
           recording(path.endsWith("/actions/stop") ? "stopped" : "recording"),
@@ -707,7 +710,12 @@ describe("MetalClient runtime namespaces", () => {
     await client.computer.screenshot("sbx_test");
     await client.recordings.start("sbx_test", {}, { idempotencyKey: "recording-key" });
     await client.recordings.list("sbx_test");
-    await client.recordings.stop("sbx_test", "rec_test", { idempotencyKey: "stop-key" });
+    const stopped = await client.recordings.stop("sbx_test", "rec_test", {
+      idempotencyKey: "stop-key",
+    });
+    await expect(client.recordings.wait(stopped, { pollIntervalMs: 0 })).resolves.toMatchObject({
+      state: "stopped",
+    });
 
     expect(requests.map(({ method, url, key }) => [method, url, key])).toEqual([
       ["POST", "http://localhost:4000/v1/sandboxes/sbx_test/computer/actions", "action-key"],
@@ -719,6 +727,7 @@ describe("MetalClient runtime namespaces", () => {
         "http://localhost:4000/v1/sandboxes/sbx_test/recordings/rec_test/actions/stop",
         "stop-key",
       ],
+      ["GET", "http://localhost:4000/v1/sandboxes/sbx_test/recordings/rec_test", null],
     ]);
   });
 });

@@ -99,6 +99,21 @@ function deadlineSignal(
   return AbortSignal.any(signals);
 }
 
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
+}
+
 export type DaytonaProviderOptions = {
   apiKey: string;
   apiUrl?: string;
@@ -552,19 +567,30 @@ export class DaytonaSandboxProvider implements SandboxProvider {
 
   async discoverRuntimeCapabilities(providerResourceId: string, signal?: AbortSignal) {
     const requestSignal = deadlineSignal(signal, undefined, this.requestTimeoutMs);
-    try {
-      await this.toolboxJson(providerResourceId, "/computeruse/status", {
-        method: "GET",
-        signal: requestSignal,
-      });
-      return this.capabilities.runtime ?? {};
-    } catch (error) {
-      if (error instanceof DaytonaRequestError && (error.status === 404 || error.status === 503)) {
-        const { computer: _computer, ...runtime } = this.capabilities.runtime ?? {};
-        return runtime;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await this.toolboxJson(providerResourceId, "/computeruse/status", {
+          method: "GET",
+          signal: requestSignal,
+        });
+        return this.capabilities.runtime ?? {};
+      } catch (error) {
+        if (error instanceof DaytonaRequestError && error.status === 404) {
+          const { computer: _computer, ...runtime } = this.capabilities.runtime ?? {};
+          return runtime;
+        }
+        if (error instanceof DaytonaRequestError && error.status === 503) {
+          if (attempt < 4) {
+            await abortableDelay(250 * 2 ** attempt, requestSignal);
+            continue;
+          }
+          const { computer: _computer, ...runtime } = this.capabilities.runtime ?? {};
+          return runtime;
+        }
+        throw error;
       }
-      throw error;
     }
+    return this.capabilities.runtime ?? {};
   }
 
   async executeComputerAction(input: ProviderComputerActionInput): Promise<void> {

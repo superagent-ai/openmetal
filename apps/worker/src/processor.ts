@@ -436,13 +436,52 @@ async function provisionSandbox(
       const cleanupCreatedResource = async () => {
         try {
           await provider.destroy(remote.providerResourceId);
+          return true;
         } catch {
-          throw new ProviderError(
-            `${providerName} capability discovery failed and cleanup was unconfirmed`,
-            "unknown_outcome",
-            true,
-          );
+          return false;
         }
+      };
+      const markCleanupPending = async (message: string) => {
+        await withTransaction(db, async (tx) => {
+          await tx
+            .update(providerAttempts)
+            .set({
+              state: "reconciling",
+              providerResourceId: remote.providerResourceId,
+              providerMetadata: remote.providerMetadata ?? {},
+              errorCode: "provider_unknown_outcome",
+              errorMessage: message,
+              outcome: "unknown",
+              updatedAt: new Date(),
+            })
+            .where(eq(providerAttempts.id, attempt!.id));
+          await tx
+            .update(sandboxes)
+            .set({
+              status: "cleanup_pending",
+              provider: providerName,
+              providerCredentialId,
+              billingMode: providerCredentialId ? "byok" : "managed",
+              providerResourceId: remote.providerResourceId,
+              providerOrganizationId: remote.providerOrganizationId,
+              providerMetadata: remote.providerMetadata ?? {},
+              updatedAt: new Date(),
+            })
+            .where(eq(sandboxes.id, sandbox.id));
+          await tx
+            .insert(outboxJobs)
+            .values({
+              jobType: "sandbox.destroy",
+              dedupeKey: `sandbox:destroy:${sandbox.id}`,
+              payload: { job_type: "sandbox.destroy", sandbox_id: sandbox.id },
+            })
+            .onConflictDoNothing();
+        });
+        await setOperationState(db, operationId, "failed", {
+          code: "provider_cleanup_pending",
+          message,
+          retryable: true,
+        });
       };
       let discoveredRuntime: ProviderRuntimeCapabilities | undefined;
       try {
@@ -450,8 +489,31 @@ async function provisionSandbox(
           (await provider.discoverRuntimeCapabilities?.(remote.providerResourceId)) ??
           provider.capabilities.runtime;
       } catch (error) {
-        await cleanupCreatedResource();
-        throw error;
+        if (!(await cleanupCreatedResource())) {
+          await markCleanupPending(
+            `${providerName} capability discovery failed and cleanup was unconfirmed`,
+          );
+          return;
+        }
+        await db
+          .update(providerAttempts)
+          .set({
+            state: "failed",
+            providerResourceId: remote.providerResourceId,
+            providerMetadata: remote.providerMetadata ?? {},
+            errorCode: "capability_discovery_failed",
+            errorMessage: safeError(error),
+            outcome: "absent",
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(providerAttempts.id, attempt!.id));
+        await appendOperationEvent(db, operationId, "attempt_failed", {
+          attempt_index: attemptIndex,
+          provider: providerName,
+          code: "capability_discovery_failed",
+        });
+        continue;
       }
       if (
         !supportsRequestedFeatures(
@@ -460,7 +522,12 @@ async function provisionSandbox(
           provider.capabilities.resume === true,
         )
       ) {
-        await cleanupCreatedResource();
+        if (!(await cleanupCreatedResource())) {
+          await markCleanupPending(
+            `${providerName} lacked requested capabilities and cleanup was unconfirmed`,
+          );
+          return;
+        }
         await db
           .update(providerAttempts)
           .set({
@@ -573,20 +640,31 @@ async function provisionSandbox(
             try {
               await provider.destroy(reconciled.providerResourceId);
             } catch {
-              await db
-                .update(sandboxes)
-                .set({
-                  status: "provision_unknown",
-                  provider: providerName,
-                  providerCredentialId,
-                  providerResourceId: reconciled.providerResourceId,
-                  providerOrganizationId: reconciled.providerOrganizationId,
-                  providerMetadata: reconciled.providerMetadata ?? {},
-                  updatedAt: new Date(),
-                })
-                .where(eq(sandboxes.id, sandbox.id));
-              await setOperationState(db, operationId, "reconciling", {
-                code: "provider_unknown_outcome",
+              await withTransaction(db, async (tx) => {
+                await tx
+                  .update(sandboxes)
+                  .set({
+                    status: "cleanup_pending",
+                    provider: providerName,
+                    providerCredentialId,
+                    billingMode: providerCredentialId ? "byok" : "managed",
+                    providerResourceId: reconciled.providerResourceId,
+                    providerOrganizationId: reconciled.providerOrganizationId,
+                    providerMetadata: reconciled.providerMetadata ?? {},
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(sandboxes.id, sandbox.id));
+                await tx
+                  .insert(outboxJobs)
+                  .values({
+                    jobType: "sandbox.destroy",
+                    dedupeKey: `sandbox:destroy:${sandbox.id}`,
+                    payload: { job_type: "sandbox.destroy", sandbox_id: sandbox.id },
+                  })
+                  .onConflictDoNothing();
+              });
+              await setOperationState(db, operationId, "failed", {
+                code: "provider_cleanup_pending",
                 message: "reconciled resource lacks requested features and cleanup was unconfirmed",
                 retryable: true,
               });
@@ -762,6 +840,24 @@ async function pauseSandbox(
   if (!sandbox.providerResourceId) {
     throw new Error("sandbox has no provider resource");
   }
+  const activeRecording = await db
+    .select({ id: sandboxRecordings.id })
+    .from(sandboxRecordings)
+    .where(
+      and(
+        eq(sandboxRecordings.sandboxId, sandbox.id),
+        inArray(sandboxRecordings.state, ["starting", "recording", "stopping"]),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0]);
+  if (activeRecording) {
+    throw new ProviderError(
+      "stop active computer recordings before pausing the sandbox",
+      "customer",
+      false,
+    );
+  }
   await provider.pause(sandbox.providerResourceId);
   await withTransaction(db, async (tx) => {
     const pausedAt = new Date();
@@ -776,25 +872,6 @@ async function pauseSandbox(
       })
       .where(eq(sandboxes.id, sandbox.id))
       .returning();
-    await tx
-      .update(sandboxRecordings)
-      .set({
-        state: "failed",
-        error: {
-          code: "sandbox_paused",
-          message: "sandbox paused before the recording completed",
-          retryable: false,
-        },
-        operationToken: null,
-        stoppedAt: pausedAt,
-        updatedAt: pausedAt,
-      })
-      .where(
-        and(
-          eq(sandboxRecordings.sandboxId, sandbox.id),
-          inArray(sandboxRecordings.state, ["starting", "recording", "stopping"]),
-        ),
-      );
     if (updated) {
       await recordSandboxEvent(tx, updated, "sandbox.paused", {
         provider: provider.name,
@@ -2127,6 +2204,10 @@ async function executeRecordingOperation(
       );
   } catch (error) {
     if (error instanceof OutboxLeaseLostError) throw error;
+    const classification = classifyProviderFailure(error);
+    if (classification.retryable || classification.unknown) {
+      throw error;
+    }
     await db
       .update(sandboxRecordings)
       .set({

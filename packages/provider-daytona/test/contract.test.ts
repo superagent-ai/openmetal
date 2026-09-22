@@ -157,6 +157,7 @@ it("reconciles a missing Daytona sandbox as absent", async () => {
 });
 
 it("treats an unavailable computer-use service as an absent sandbox capability", async () => {
+  vi.useFakeTimers();
   const fetchImpl = vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
     if (url.endsWith("/sandbox/sandbox-1")) {
@@ -170,12 +171,16 @@ it("treats an unavailable computer-use service as an absent sandbox capability",
     throw new Error(`Unexpected URL: ${url}`);
   });
   const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
-
-  await expect(provider.discoverRuntimeCapabilities("sandbox-1")).resolves.toMatchObject({
+  const discovery = provider.discoverRuntimeCapabilities("sandbox-1");
+  await vi.advanceTimersByTimeAsync(4_000);
+  const capabilities = await discovery;
+  expect(capabilities).toMatchObject({
     process: { exec: true },
     files: { read: true },
   });
-  expect((await provider.discoverRuntimeCapabilities("sandbox-1")).computer).toBeUndefined();
+  expect(capabilities.computer).toBeUndefined();
+  expect(fetchImpl).toHaveBeenCalledTimes(6);
+  vi.useRealTimers();
 });
 
 it("marks Daytona analytics prices as provider reported", async () => {

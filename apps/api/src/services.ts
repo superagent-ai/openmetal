@@ -850,7 +850,10 @@ export async function requestSandboxResume(
 ) {
   return withTransaction(db, async (tx) => {
     const sandbox = await getSandbox(tx, input);
-    if (!["codesandbox", "e2b", "freestyle", "northflank", "runloop"].includes(sandbox.provider)) {
+    const capabilities = sandbox.providerCapabilities as {
+      lifecycle?: { resume?: boolean };
+    } | null;
+    if (capabilities?.lifecycle?.resume === false) {
       throw new ApiError(
         409,
         "capability_unsupported",

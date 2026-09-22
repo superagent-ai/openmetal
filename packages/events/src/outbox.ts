@@ -16,6 +16,10 @@ export const OutboxJobTypeSchema = z.enum([
   "filesystem.write",
   "filesystem.list",
   "filesystem.delete",
+  "computer.action",
+  "computer.screenshot",
+  "recording.start",
+  "recording.stop",
   "endpoint.create",
   "endpoint.revoke",
   "billing.auto_topup.evaluate",
@@ -87,6 +91,22 @@ export const FilesystemDeleteJobPayloadSchema = z.object({
   job_type: z.literal("filesystem.delete"),
   runtime_operation_id: z.uuid(),
 });
+export const ComputerActionJobPayloadSchema = z.object({
+  job_type: z.literal("computer.action"),
+  runtime_operation_id: z.uuid(),
+});
+export const ComputerScreenshotJobPayloadSchema = z.object({
+  job_type: z.literal("computer.screenshot"),
+  runtime_operation_id: z.uuid(),
+});
+export const RecordingStartJobPayloadSchema = z.object({
+  job_type: z.literal("recording.start"),
+  recording_id: z.uuid(),
+});
+export const RecordingStopJobPayloadSchema = z.object({
+  job_type: z.literal("recording.stop"),
+  recording_id: z.uuid(),
+});
 export const EndpointCreateJobPayloadSchema = z.object({
   job_type: z.literal("endpoint.create"),
   endpoint_id: z.uuid(),
@@ -120,6 +140,10 @@ export const OutboxJobPayloadSchema = z.discriminatedUnion("job_type", [
   FilesystemWriteJobPayloadSchema,
   FilesystemListJobPayloadSchema,
   FilesystemDeleteJobPayloadSchema,
+  ComputerActionJobPayloadSchema,
+  ComputerScreenshotJobPayloadSchema,
+  RecordingStartJobPayloadSchema,
+  RecordingStopJobPayloadSchema,
   EndpointCreateJobPayloadSchema,
   EndpointRevokeJobPayloadSchema,
   BillingAutoTopupEvaluateJobPayloadSchema,

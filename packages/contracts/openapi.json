@@ -1435,6 +1435,23 @@
                   "minimum": 1,
                   "maximum": 65535
                 }
+              },
+              "computer_use": {
+                "type": "boolean"
+              },
+              "recording": {
+                "type": "object",
+                "properties": {
+                  "format": {
+                    "default": "mp4",
+                    "type": "string",
+                    "const": "mp4"
+                  }
+                },
+                "required": [
+                  "format"
+                ],
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -1922,6 +1939,23 @@
                       "minimum": 1,
                       "maximum": 65535
                     }
+                  },
+                  "computer_use": {
+                    "type": "boolean"
+                  },
+                  "recording": {
+                    "type": "object",
+                    "properties": {
+                      "format": {
+                        "default": "mp4",
+                        "type": "string",
+                        "const": "mp4"
+                      }
+                    },
+                    "required": [
+                      "format"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -2773,6 +2807,22 @@
                 "minLength": 1,
                 "maxLength": 100
               },
+              "lifecycle": {
+                "type": "object",
+                "properties": {
+                  "pause": {
+                    "type": "boolean"
+                  },
+                  "resume": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "pause",
+                  "resume"
+                ],
+                "additionalProperties": false
+              },
               "process": {
                 "type": "object",
                 "properties": {
@@ -2871,6 +2921,84 @@
                 "required": [
                   "create",
                   "revoke"
+                ],
+                "additionalProperties": false
+              },
+              "computer": {
+                "type": "object",
+                "properties": {
+                  "implementation": {
+                    "type": "string",
+                    "enum": [
+                      "native",
+                      "emulated"
+                    ]
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "mouse_move",
+                        "mouse_click",
+                        "mouse_drag",
+                        "mouse_scroll",
+                        "keyboard_type",
+                        "keyboard_key",
+                        "keyboard_hotkey"
+                      ]
+                    }
+                  },
+                  "screenshot": {
+                    "type": "object",
+                    "properties": {
+                      "formats": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "png",
+                            "jpeg"
+                          ]
+                        }
+                      },
+                      "max_bytes": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "formats",
+                      "max_bytes"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "recording": {
+                    "type": "object",
+                    "properties": {
+                      "formats": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "mp4",
+                            "webm"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "formats"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "implementation",
+                  "actions"
                 ],
                 "additionalProperties": false
               }
@@ -3436,7 +3564,9 @@
               "filesystem_read",
               "filesystem_write",
               "filesystem_list",
-              "filesystem_delete"
+              "filesystem_delete",
+              "computer_action",
+              "computer_screenshot"
             ]
           },
           "state": {
@@ -3623,6 +3753,77 @@
                       "deleted"
                     ],
                     "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "computer_action"
+                      },
+                      "performed": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "performed"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "computer_screenshot"
+                      },
+                      "format": {
+                        "type": "string",
+                        "enum": [
+                          "png",
+                          "jpeg"
+                        ]
+                      },
+                      "data_base64": {
+                        "type": "string",
+                        "maxLength": 13981016,
+                        "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+                      },
+                      "byte_length": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "cursor_position": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "format",
+                      "data_base64",
+                      "byte_length"
+                    ],
+                    "additionalProperties": false
                   }
                 ]
               },
@@ -3715,6 +3916,22 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 100
+              },
+              "lifecycle": {
+                "type": "object",
+                "properties": {
+                  "pause": {
+                    "type": "boolean"
+                  },
+                  "resume": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "pause",
+                  "resume"
+                ],
+                "additionalProperties": false
               },
               "process": {
                 "type": "object",
@@ -3816,6 +4033,84 @@
                   "revoke"
                 ],
                 "additionalProperties": false
+              },
+              "computer": {
+                "type": "object",
+                "properties": {
+                  "implementation": {
+                    "type": "string",
+                    "enum": [
+                      "native",
+                      "emulated"
+                    ]
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "mouse_move",
+                        "mouse_click",
+                        "mouse_drag",
+                        "mouse_scroll",
+                        "keyboard_type",
+                        "keyboard_key",
+                        "keyboard_hotkey"
+                      ]
+                    }
+                  },
+                  "screenshot": {
+                    "type": "object",
+                    "properties": {
+                      "formats": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "png",
+                            "jpeg"
+                          ]
+                        }
+                      },
+                      "max_bytes": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "formats",
+                      "max_bytes"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "recording": {
+                    "type": "object",
+                    "properties": {
+                      "formats": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "mp4",
+                            "webm"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "formats"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "implementation",
+                  "actions"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -3837,6 +4132,527 @@
           "created_at",
           "started_at",
           "completed_at"
+        ],
+        "additionalProperties": false
+      },
+      "SandboxCapabilities": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "blaxel",
+              "cloudflare",
+              "codesandbox",
+              "daytona",
+              "e2b",
+              "freestyle",
+              "modal",
+              "northflank",
+              "runloop",
+              "vercel"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "lifecycle": {
+            "type": "object",
+            "properties": {
+              "pause": {
+                "type": "boolean"
+              },
+              "resume": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "pause",
+              "resume"
+            ],
+            "additionalProperties": false
+          },
+          "process": {
+            "type": "object",
+            "properties": {
+              "execute": {
+                "type": "boolean"
+              },
+              "cancel": {
+                "type": "boolean"
+              },
+              "ordered_output": {
+                "type": "boolean"
+              },
+              "max_timeout_seconds": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "max_output_bytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "execute",
+              "cancel",
+              "ordered_output"
+            ],
+            "additionalProperties": false
+          },
+          "filesystem": {
+            "type": "object",
+            "properties": {
+              "read": {
+                "type": "boolean"
+              },
+              "write": {
+                "type": "boolean"
+              },
+              "write_modes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "overwrite",
+                    "append"
+                  ]
+                }
+              },
+              "create_parents": {
+                "type": "boolean"
+              },
+              "list": {
+                "type": "boolean"
+              },
+              "delete": {
+                "type": "boolean"
+              },
+              "max_read_bytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "max_write_bytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "read",
+              "write",
+              "write_modes",
+              "create_parents",
+              "list",
+              "delete"
+            ],
+            "additionalProperties": false
+          },
+          "http_endpoints": {
+            "type": "object",
+            "properties": {
+              "create": {
+                "type": "boolean"
+              },
+              "revoke": {
+                "type": "boolean"
+              },
+              "max_lease_seconds": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "create",
+              "revoke"
+            ],
+            "additionalProperties": false
+          },
+          "computer": {
+            "type": "object",
+            "properties": {
+              "implementation": {
+                "type": "string",
+                "enum": [
+                  "native",
+                  "emulated"
+                ]
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "mouse_move",
+                    "mouse_click",
+                    "mouse_drag",
+                    "mouse_scroll",
+                    "keyboard_type",
+                    "keyboard_key",
+                    "keyboard_hotkey"
+                  ]
+                }
+              },
+              "screenshot": {
+                "type": "object",
+                "properties": {
+                  "formats": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "png",
+                        "jpeg"
+                      ]
+                    }
+                  },
+                  "max_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "formats",
+                  "max_bytes"
+                ],
+                "additionalProperties": false
+              },
+              "recording": {
+                "type": "object",
+                "properties": {
+                  "formats": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "mp4",
+                        "webm"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "formats"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "implementation",
+              "actions"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "provider",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "ComputerActionRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "mouse_move"
+              },
+              "x": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "y": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "type",
+              "x",
+              "y"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "mouse_click"
+              },
+              "x": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "y": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "button": {
+                "default": "left",
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right",
+                  "middle"
+                ]
+              },
+              "double": {
+                "default": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "x",
+              "y",
+              "button",
+              "double"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "mouse_drag"
+              },
+              "start_x": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "start_y": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "end_x": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "end_y": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "button": {
+                "default": "left",
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right",
+                  "middle"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "start_x",
+              "start_y",
+              "end_x",
+              "end_y",
+              "button"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "mouse_scroll"
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "up",
+                  "down"
+                ]
+              },
+              "amount": {
+                "default": 1,
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "x": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "y": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "type",
+              "direction",
+              "amount"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "keyboard_type"
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 100000
+              },
+              "delay_ms": {
+                "default": 0,
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 60000
+              }
+            },
+            "required": [
+              "type",
+              "text",
+              "delay_ms"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "keyboard_key"
+              },
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "modifiers": {
+                "default": [],
+                "maxItems": 4,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "ctrl",
+                    "alt",
+                    "shift",
+                    "cmd"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "key",
+              "modifiers"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "keyboard_hotkey"
+              },
+              "keys": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "type",
+              "keys"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ComputerScreenshotRequest": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "default": "png",
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ]
+          },
+          "show_cursor": {
+            "default": false,
+            "type": "boolean"
+          },
+          "quality": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 1
+          },
+          "region": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "y": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "width": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "height": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "format",
+          "show_cursor"
         ],
         "additionalProperties": false
       },
@@ -4000,6 +4816,22 @@
                 "minLength": 1,
                 "maxLength": 100
               },
+              "lifecycle": {
+                "type": "object",
+                "properties": {
+                  "pause": {
+                    "type": "boolean"
+                  },
+                  "resume": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "pause",
+                  "resume"
+                ],
+                "additionalProperties": false
+              },
               "process": {
                 "type": "object",
                 "properties": {
@@ -4100,6 +4932,84 @@
                   "revoke"
                 ],
                 "additionalProperties": false
+              },
+              "computer": {
+                "type": "object",
+                "properties": {
+                  "implementation": {
+                    "type": "string",
+                    "enum": [
+                      "native",
+                      "emulated"
+                    ]
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "mouse_move",
+                        "mouse_click",
+                        "mouse_drag",
+                        "mouse_scroll",
+                        "keyboard_type",
+                        "keyboard_key",
+                        "keyboard_hotkey"
+                      ]
+                    }
+                  },
+                  "screenshot": {
+                    "type": "object",
+                    "properties": {
+                      "formats": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "png",
+                            "jpeg"
+                          ]
+                        }
+                      },
+                      "max_bytes": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "formats",
+                      "max_bytes"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "recording": {
+                    "type": "object",
+                    "properties": {
+                      "formats": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "mp4",
+                            "webm"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "formats"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "implementation",
+                  "actions"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -4150,6 +5060,463 @@
         },
         "required": [
           "endpoints",
+          "next_cursor"
+        ],
+        "additionalProperties": false
+      },
+      "CreateSandboxRecordingRequest": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "default": "mp4",
+            "type": "string",
+            "const": "mp4"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "format"
+        ],
+        "additionalProperties": false
+      },
+      "SandboxRecording": {
+        "title": "SandboxRecording",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^rec_[A-Za-z0-9]+$"
+          },
+          "type": {
+            "type": "string",
+            "const": "sandbox_recording"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^prj_[A-Za-z0-9]+$"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]+$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "starting",
+              "recording",
+              "stopping",
+              "stopped",
+              "failed"
+            ]
+          },
+          "format": {
+            "type": "string",
+            "const": "mp4"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artifact": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "sandbox_file"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^\\/(?:[^/\\0]+(?:\\/[^/\\0]+)*)?$"
+                  },
+                  "media_type": {
+                    "type": "string",
+                    "const": "video/mp4"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "path",
+                  "media_type"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "retryable": {
+                    "type": "boolean"
+                  },
+                  "details": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "retryable"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stopped_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "provider_capabilities": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "blaxel",
+                  "cloudflare",
+                  "codesandbox",
+                  "daytona",
+                  "e2b",
+                  "freestyle",
+                  "modal",
+                  "northflank",
+                  "runloop",
+                  "vercel"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "lifecycle": {
+                "type": "object",
+                "properties": {
+                  "pause": {
+                    "type": "boolean"
+                  },
+                  "resume": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "pause",
+                  "resume"
+                ],
+                "additionalProperties": false
+              },
+              "process": {
+                "type": "object",
+                "properties": {
+                  "execute": {
+                    "type": "boolean"
+                  },
+                  "cancel": {
+                    "type": "boolean"
+                  },
+                  "ordered_output": {
+                    "type": "boolean"
+                  },
+                  "max_timeout_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_output_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "execute",
+                  "cancel",
+                  "ordered_output"
+                ],
+                "additionalProperties": false
+              },
+              "filesystem": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "boolean"
+                  },
+                  "write": {
+                    "type": "boolean"
+                  },
+                  "write_modes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "create",
+                        "overwrite",
+                        "append"
+                      ]
+                    }
+                  },
+                  "create_parents": {
+                    "type": "boolean"
+                  },
+                  "list": {
+                    "type": "boolean"
+                  },
+                  "delete": {
+                    "type": "boolean"
+                  },
+                  "max_read_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_write_bytes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "read",
+                  "write",
+                  "write_modes",
+                  "create_parents",
+                  "list",
+                  "delete"
+                ],
+                "additionalProperties": false
+              },
+              "http_endpoints": {
+                "type": "object",
+                "properties": {
+                  "create": {
+                    "type": "boolean"
+                  },
+                  "revoke": {
+                    "type": "boolean"
+                  },
+                  "max_lease_seconds": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "create",
+                  "revoke"
+                ],
+                "additionalProperties": false
+              },
+              "computer": {
+                "type": "object",
+                "properties": {
+                  "implementation": {
+                    "type": "string",
+                    "enum": [
+                      "native",
+                      "emulated"
+                    ]
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "mouse_move",
+                        "mouse_click",
+                        "mouse_drag",
+                        "mouse_scroll",
+                        "keyboard_type",
+                        "keyboard_key",
+                        "keyboard_hotkey"
+                      ]
+                    }
+                  },
+                  "screenshot": {
+                    "type": "object",
+                    "properties": {
+                      "formats": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "png",
+                            "jpeg"
+                          ]
+                        }
+                      },
+                      "max_bytes": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "formats",
+                      "max_bytes"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "recording": {
+                    "type": "object",
+                    "properties": {
+                      "formats": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "mp4",
+                            "webm"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "formats"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "implementation",
+                  "actions"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "provider",
+              "version"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "project_id",
+          "sandbox_id",
+          "state",
+          "format",
+          "label",
+          "artifact",
+          "size_bytes",
+          "duration_seconds",
+          "error",
+          "created_at",
+          "started_at",
+          "stopped_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "SandboxRecordingListResponse": {
+        "type": "object",
+        "properties": {
+          "recordings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SandboxRecording"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "recordings",
           "next_cursor"
         ],
         "additionalProperties": false
@@ -5680,6 +7047,10 @@
       "SandboxEndpointId": {
         "type": "string",
         "pattern": "^ep_[A-Za-z0-9]+$"
+      },
+      "SandboxRecordingId": {
+        "type": "string",
+        "pattern": "^rec_[A-Za-z0-9]+$"
       },
       "Cursor": {
         "type": "string",
@@ -9436,6 +10807,79 @@
         }
       }
     },
+    "/v1/sandboxes/{sandbox_id}/capabilities": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "get": {
+        "operationId": "getSandboxCapabilities",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Observed sandbox capability manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxCapabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Capabilities are not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sandboxes/{sandbox_id}/actions/resume": {
       "parameters": [
         {
@@ -10253,6 +11697,543 @@
           },
           "404": {
             "description": "Runtime operation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/computer/actions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "post": {
+        "operationId": "performSandboxComputerAction",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComputerActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Computer action accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Idempotency-Key is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox or capability unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid computer action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/computer/screenshots": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "post": {
+        "operationId": "captureSandboxScreenshot",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComputerScreenshotRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Screenshot capture accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeOperation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox or capability unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid screenshot request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/recordings": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        }
+      ],
+      "get": {
+        "operationId": "listSandboxRecordings",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CursorQuery"
+          },
+          {
+            "$ref": "#/components/parameters/LimitQuery"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sandbox recording page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxRecordingListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "startSandboxRecording",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSandboxRecordingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Recording start accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxRecording"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Idempotency-Key is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox or recording capability unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid recording request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/recordings/{recording_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        },
+        {
+          "name": "recording_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/SandboxRecordingId"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getSandboxRecording",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sandbox recording",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxRecording"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recording not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandbox_id}/recordings/{recording_id}/actions/stop": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SandboxIdPath"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectScopeHeader"
+        },
+        {
+          "name": "recording_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/SandboxRecordingId"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "stopSandboxRecording",
+        "tags": [
+          "runtime"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OptionalIdempotencyKeyHeader"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Recording stop accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxRecording"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recording not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Recording cannot be stopped",
             "content": {
               "application/json": {
                 "schema": {

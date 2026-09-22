@@ -987,6 +987,80 @@ export type Database = {
           },
         ]
       }
+      sandbox_recordings: {
+        Row: {
+          created_at: string
+          duration_seconds: number | null
+          error: Json | null
+          file_path: string | null
+          format: string
+          id: string
+          label: string | null
+          operation_token: string | null
+          organization_id: string
+          project_id: string
+          provider_capabilities: Json | null
+          provider_recording_id: string | null
+          public_id: string
+          sandbox_id: string
+          size_bytes: number | null
+          started_at: string | null
+          state: Database["metal"]["Enums"]["sandbox_recording_state"]
+          stopped_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          duration_seconds?: number | null
+          error?: Json | null
+          file_path?: string | null
+          format?: string
+          id?: string
+          label?: string | null
+          operation_token?: string | null
+          organization_id: string
+          project_id: string
+          provider_capabilities?: Json | null
+          provider_recording_id?: string | null
+          public_id?: string
+          sandbox_id: string
+          size_bytes?: number | null
+          started_at?: string | null
+          state?: Database["metal"]["Enums"]["sandbox_recording_state"]
+          stopped_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          duration_seconds?: number | null
+          error?: Json | null
+          file_path?: string | null
+          format?: string
+          id?: string
+          label?: string | null
+          operation_token?: string | null
+          organization_id?: string
+          project_id?: string
+          provider_capabilities?: Json | null
+          provider_recording_id?: string | null
+          public_id?: string
+          sandbox_id?: string
+          size_bytes?: number | null
+          started_at?: string | null
+          state?: Database["metal"]["Enums"]["sandbox_recording_state"]
+          stopped_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sandbox_recordings_sandbox_id_fkey"
+            columns: ["sandbox_id"]
+            isOneToOne: false
+            referencedRelation: "sandboxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sandboxes: {
         Row: {
           billing_mode: string
@@ -1014,6 +1088,7 @@ export type Database = {
           provider_cost_microusd: number | null
           provider_cost_updated_at: string | null
           provider_credential_id: string | null
+          provider_capabilities: Json | null
           provider_metadata: Json
           provider_options: Json
           provider_organization_id: string | null
@@ -1055,6 +1130,7 @@ export type Database = {
           provider_cost_microusd?: number | null
           provider_cost_updated_at?: string | null
           provider_credential_id?: string | null
+          provider_capabilities?: Json | null
           provider_metadata?: Json
           provider_options: Json
           provider_organization_id?: string | null
@@ -1096,6 +1172,7 @@ export type Database = {
           provider_cost_microusd?: number | null
           provider_cost_updated_at?: string | null
           provider_credential_id?: string | null
+          provider_capabilities?: Json | null
           provider_metadata?: Json
           provider_options?: Json
           provider_organization_id?: string | null
@@ -1445,6 +1522,8 @@ export type Database = {
         | "filesystem_write"
         | "filesystem_list"
         | "filesystem_delete"
+        | "computer_action"
+        | "computer_screenshot"
       runtime_operation_state:
         | "queued"
         | "running"
@@ -1458,6 +1537,7 @@ export type Database = {
         | "revoked"
         | "expired"
         | "failed"
+      sandbox_recording_state: "starting" | "recording" | "stopping" | "stopped" | "failed"
       sandbox_status:
         | "requested"
         | "provisioning"
@@ -1803,6 +1883,8 @@ export const Constants = {
         "filesystem_write",
         "filesystem_list",
         "filesystem_delete",
+        "computer_action",
+        "computer_screenshot",
       ],
       runtime_operation_state: [
         "queued",
@@ -1819,6 +1901,7 @@ export const Constants = {
         "expired",
         "failed",
       ],
+      sandbox_recording_state: ["starting", "recording", "stopping", "stopped", "failed"],
       sandbox_status: [
         "requested",
         "provisioning",

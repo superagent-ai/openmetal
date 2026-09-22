@@ -16,9 +16,101 @@ it("declares the Daytona provider contract", () => {
       delete: true,
     },
     httpEndpoints: { expose: false, revoke: false },
+    computer: {
+      implementation: "native",
+      screenshot: { formats: ["png", "jpeg"] },
+      recording: { formats: ["mp4"] },
+    },
   });
   expect(provider.exposeHttpEndpoint).toBeUndefined();
   expect(provider.revokeHttpEndpoint).toBeUndefined();
+});
+
+it("uses Daytona native computer actions, screenshots, and recordings", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.endsWith("/computeruse/start")) return Response.json({ status: {} });
+    if (url.endsWith("/computeruse/mouse/click")) {
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        x: 10,
+        y: 20,
+        button: "left",
+      });
+      return Response.json({ x: 10, y: 20 });
+    }
+    if (url.includes("/computeruse/screenshot?")) {
+      return Response.json({
+        screenshot: Buffer.from("png-bytes").toString("base64"),
+        cursorPosition: { x: 1, y: 2 },
+      });
+    }
+    if (url.endsWith("/computeruse/recordings/start")) {
+      return Response.json({
+        id: "recording-1",
+        status: "recording",
+        fileName: "recording-1.mp4",
+        filePath: "/workspace/recording-1.mp4",
+        startTime: "2026-09-22T12:00:00.000Z",
+      });
+    }
+    if (url.endsWith("/computeruse/recordings/stop")) {
+      expect(JSON.parse(String(init?.body))).toEqual({ id: "recording-1" });
+      return Response.json({
+        id: "recording-1",
+        status: "stopped",
+        fileName: "recording-1.mp4",
+        filePath: "/workspace/recording-1.mp4",
+        startTime: "2026-09-22T12:00:00.000Z",
+        endTime: "2026-09-22T12:00:01.000Z",
+        durationSeconds: 1,
+        sizeBytes: 1024,
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await provider.executeComputerAction({
+    providerResourceId: "sandbox-1",
+    action: { type: "mouse_click", x: 10, y: 20, button: "left" },
+  });
+  await expect(
+    provider.captureComputerScreenshot({
+      providerResourceId: "sandbox-1",
+      format: "png",
+    }),
+  ).resolves.toMatchObject({
+    format: "png",
+    data: new Uint8Array(Buffer.from("png-bytes")),
+    cursorPosition: { x: 1, y: 2 },
+  });
+  const recording = await provider.startComputerRecording({
+    providerResourceId: "sandbox-1",
+    format: "mp4",
+    label: "demo",
+  });
+  expect(recording).toMatchObject({
+    recordingId: "recording-1",
+    state: "recording",
+    filePath: "/workspace/recording-1.mp4",
+  });
+  await expect(
+    provider.stopComputerRecording({
+      providerResourceId: "sandbox-1",
+      recordingId: recording.recordingId,
+    }),
+  ).resolves.toMatchObject({
+    state: "stopped",
+    sizeBytes: 1024,
+    durationSeconds: 1,
+  });
 });
 
 it("treats repeated destroy conflicts as idempotent success", async () => {

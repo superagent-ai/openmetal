@@ -235,10 +235,68 @@ export type ProviderHttpEndpointCapabilities = {
   maxLeaseDurationSeconds?: number;
 };
 
+export type ProviderComputerAction =
+  | {
+      type: "mouse_move";
+      x: number;
+      y: number;
+    }
+  | {
+      type: "mouse_click";
+      x: number;
+      y: number;
+      button?: "left" | "right" | "middle";
+      double?: boolean;
+    }
+  | {
+      type: "mouse_drag";
+      startX: number;
+      startY: number;
+      endX: number;
+      endY: number;
+      button?: "left" | "right" | "middle";
+    }
+  | {
+      type: "mouse_scroll";
+      direction: "up" | "down";
+      amount?: number;
+      x?: number;
+      y?: number;
+    }
+  | {
+      type: "keyboard_type";
+      text: string;
+      delayMs?: number;
+    }
+  | {
+      type: "keyboard_key";
+      key: string;
+      modifiers?: readonly ("ctrl" | "alt" | "shift" | "cmd")[];
+    }
+  | {
+      type: "keyboard_hotkey";
+      keys: string;
+    };
+
+export type ProviderComputerActionKind = ProviderComputerAction["type"];
+
+export type ProviderComputerCapabilities = {
+  implementation: "native" | "emulated";
+  actions: readonly ProviderComputerActionKind[];
+  screenshot?: {
+    formats: readonly ("png" | "jpeg")[];
+    maxBytes: number;
+  };
+  recording?: {
+    formats: readonly ("mp4" | "webm")[];
+  };
+};
+
 export type ProviderRuntimeCapabilities = {
   process?: ProviderProcessCapabilities;
   files?: ProviderFileCapabilities;
   httpEndpoints?: ProviderHttpEndpointCapabilities;
+  computer?: ProviderComputerCapabilities;
 };
 
 export interface ProviderProcessRuntime {
@@ -260,8 +318,68 @@ export interface ProviderHttpEndpointRuntime {
   ): Promise<ProviderRevokeHttpEndpointResult>;
 }
 
+export type ProviderComputerOperation = ProviderRuntimeOperation & {
+  providerResourceId: string;
+};
+
+export type ProviderComputerActionInput = ProviderComputerOperation & {
+  action: ProviderComputerAction;
+};
+
+export type ProviderComputerScreenshotInput = ProviderComputerOperation & {
+  format?: "png" | "jpeg";
+  showCursor?: boolean;
+  quality?: number;
+  scale?: number;
+  region?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
+
+export type ProviderComputerScreenshot = {
+  format: "png" | "jpeg";
+  data: Uint8Array;
+  cursorPosition?: { x: number; y: number };
+};
+
+export type ProviderStartRecordingInput = ProviderComputerOperation & {
+  label?: string;
+  format: "mp4";
+};
+
+export type ProviderStopRecordingInput = ProviderComputerOperation & {
+  recordingId: string;
+};
+
+export type ProviderComputerRecording = {
+  recordingId: string;
+  state: "recording" | "stopped";
+  format: "mp4";
+  filePath?: string;
+  sizeBytes?: number;
+  durationSeconds?: number;
+  startedAt?: Date;
+  stoppedAt?: Date;
+};
+
+export interface ProviderComputerRuntime {
+  executeComputerAction?(input: ProviderComputerActionInput): Promise<void>;
+  captureComputerScreenshot?(
+    input: ProviderComputerScreenshotInput,
+  ): Promise<ProviderComputerScreenshot>;
+  startComputerRecording?(input: ProviderStartRecordingInput): Promise<ProviderComputerRecording>;
+  stopComputerRecording?(input: ProviderStopRecordingInput): Promise<ProviderComputerRecording>;
+}
+
 export interface SandboxRuntimeProvider
-  extends Partial<ProviderProcessRuntime>, ProviderFileRuntime, ProviderHttpEndpointRuntime {}
+  extends
+    Partial<ProviderProcessRuntime>,
+    ProviderFileRuntime,
+    ProviderHttpEndpointRuntime,
+    ProviderComputerRuntime {}
 
 export type SandboxProviderName =
   | "blaxel"
@@ -287,6 +405,10 @@ export type SandboxProviderCapabilities = {
 export interface SandboxProvider extends SandboxRuntimeProvider {
   readonly name: SandboxProviderName;
   readonly capabilities: SandboxProviderCapabilities;
+  discoverRuntimeCapabilities?(
+    providerResourceId: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderRuntimeCapabilities>;
   create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox>;
   getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost | null>;
   pause(providerResourceId: string, signal?: AbortSignal): Promise<void>;

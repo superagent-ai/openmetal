@@ -2,6 +2,10 @@ import { z } from "zod";
 import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
   ProviderCreateSandboxInput,
+  ProviderComputerActionInput,
+  ProviderComputerRecording,
+  ProviderComputerScreenshot,
+  ProviderComputerScreenshotInput,
   ProviderDeleteFileInput,
   ProviderDeleteFileResult,
   ProviderExecEvent,
@@ -15,6 +19,8 @@ import type {
   ProviderSandbox,
   ProviderSandboxCost,
   ProviderSandboxCostInput,
+  ProviderStartRecordingInput,
+  ProviderStopRecordingInput,
   ProviderWriteFileInput,
   ProviderWriteFileResult,
   SandboxProvider,
@@ -41,6 +47,31 @@ const DaytonaFileInfoSchema = z
     modTime: z.string().optional(),
     modifiedAt: z.string().optional(),
     mode: z.string().optional(),
+  })
+  .passthrough();
+
+const DaytonaScreenshotSchema = z
+  .object({
+    screenshot: z.string(),
+    sizeBytes: z.number().int().nonnegative().optional(),
+    cursorPosition: z
+      .object({
+        x: z.number().int().nonnegative(),
+        y: z.number().int().nonnegative(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+const DaytonaRecordingSchema = z
+  .object({
+    id: z.string().min(1),
+    status: z.string().min(1),
+    filePath: z.string().optional(),
+    sizeBytes: z.number().int().nonnegative().optional(),
+    durationSeconds: z.number().nonnegative().optional(),
+    startTime: z.string().optional(),
+    endTime: z.string().optional(),
   })
   .passthrough();
 
@@ -115,6 +146,25 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         httpEndpoints: {
           expose: false,
           revoke: false,
+        },
+        computer: {
+          implementation: "native",
+          actions: [
+            "mouse_move",
+            "mouse_click",
+            "mouse_drag",
+            "mouse_scroll",
+            "keyboard_type",
+            "keyboard_key",
+            "keyboard_hotkey",
+          ],
+          screenshot: {
+            formats: ["png", "jpeg"],
+            maxBytes: MAX_FILE_BYTES,
+          },
+          recording: {
+            formats: ["mp4"],
+          },
         },
       },
     };
@@ -491,6 +541,126 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     });
   }
 
+  async discoverRuntimeCapabilities(providerResourceId: string, signal?: AbortSignal) {
+    const requestSignal = deadlineSignal(signal, undefined, this.requestTimeoutMs);
+    try {
+      await this.toolboxJson(providerResourceId, "/computeruse/status", {
+        method: "GET",
+        signal: requestSignal,
+      });
+      return this.capabilities.runtime ?? {};
+    } catch (error) {
+      if (error instanceof DaytonaRequestError && error.status === 404) {
+        const { computer: _computer, ...runtime } = this.capabilities.runtime ?? {};
+        return runtime;
+      }
+      throw error;
+    }
+  }
+
+  async executeComputerAction(input: ProviderComputerActionInput): Promise<void> {
+    const signal = deadlineSignal(input.signal, input.deadline, this.requestTimeoutMs);
+    await this.ensureComputerUse(input.providerResourceId, signal);
+    const action = input.action;
+    const routes = {
+      mouse_move: "/computeruse/mouse/move",
+      mouse_click: "/computeruse/mouse/click",
+      mouse_drag: "/computeruse/mouse/drag",
+      mouse_scroll: "/computeruse/mouse/scroll",
+      keyboard_type: "/computeruse/keyboard/type",
+      keyboard_key: "/computeruse/keyboard/key",
+      keyboard_hotkey: "/computeruse/keyboard/hotkey",
+    } as const;
+    const body =
+      action.type === "keyboard_type"
+        ? { text: action.text, delay: action.delayMs }
+        : action.type === "keyboard_key"
+          ? { key: action.key, modifiers: action.modifiers }
+          : action.type === "keyboard_hotkey"
+            ? { keys: action.keys }
+            : action.type === "mouse_drag"
+              ? {
+                  startX: action.startX,
+                  startY: action.startY,
+                  endX: action.endX,
+                  endY: action.endY,
+                  button: action.button,
+                }
+              : action;
+    await this.toolboxJson(input.providerResourceId, routes[action.type], {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+    });
+  }
+
+  async captureComputerScreenshot(
+    input: ProviderComputerScreenshotInput,
+  ): Promise<ProviderComputerScreenshot> {
+    const signal = deadlineSignal(input.signal, input.deadline, this.requestTimeoutMs);
+    await this.ensureComputerUse(input.providerResourceId, signal);
+    const compressed =
+      input.format === "jpeg" || input.quality !== undefined || input.scale !== undefined;
+    const path = `/computeruse/screenshot${input.region ? "/region" : ""}${
+      compressed ? "/compressed" : ""
+    }`;
+    const query = new URLSearchParams();
+    query.set("showCursor", String(input.showCursor ?? false));
+    if (input.format) query.set("format", input.format);
+    if (input.quality !== undefined) query.set("quality", String(input.quality));
+    if (input.scale !== undefined) query.set("scale", String(input.scale));
+    if (input.region) {
+      query.set("x", String(input.region.x));
+      query.set("y", String(input.region.y));
+      query.set("width", String(input.region.width));
+      query.set("height", String(input.region.height));
+    }
+    const screenshot = DaytonaScreenshotSchema.parse(
+      await this.toolboxJson(input.providerResourceId, `${path}?${query}`, {
+        method: "GET",
+        signal,
+      }),
+    );
+    const data = Uint8Array.from(Buffer.from(screenshot.screenshot, "base64"));
+    if (data.byteLength > MAX_FILE_BYTES) {
+      throw new ProviderError("Daytona screenshot exceeds provider limit", "unsupported", false);
+    }
+    return {
+      format: input.format ?? "png",
+      data,
+      cursorPosition: screenshot.cursorPosition,
+    };
+  }
+
+  async startComputerRecording(
+    input: ProviderStartRecordingInput,
+  ): Promise<ProviderComputerRecording> {
+    const signal = deadlineSignal(input.signal, input.deadline, this.requestTimeoutMs);
+    await this.ensureComputerUse(input.providerResourceId, signal);
+    const recording = DaytonaRecordingSchema.parse(
+      await this.toolboxJson(input.providerResourceId, "/computeruse/recordings/start", {
+        method: "POST",
+        body: JSON.stringify(input.label ? { label: input.label } : {}),
+        signal,
+      }),
+    );
+    return daytonaRecording(recording, "recording");
+  }
+
+  async stopComputerRecording(
+    input: ProviderStopRecordingInput,
+  ): Promise<ProviderComputerRecording> {
+    const signal = deadlineSignal(input.signal, input.deadline, this.requestTimeoutMs);
+    const recording = DaytonaRecordingSchema.parse(
+      await this.toolboxJson(input.providerResourceId, "/computeruse/recordings/stop", {
+        method: "POST",
+        body: JSON.stringify({ id: input.recordingId }),
+        signal,
+      }),
+    );
+    return daytonaRecording(recording, "stopped");
+  }
+
   private resolveToolboxUrl(proxyUrl: string, providerResourceId: string): string {
     if (proxyUrl.includes("{sandboxId}")) {
       return proxyUrl
@@ -546,6 +716,13 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     if (!response.ok) throw new DaytonaRequestError(response.status);
     const text = await response.text();
     return text ? JSON.parse(text) : {};
+  }
+
+  private async ensureComputerUse(providerResourceId: string, signal: AbortSignal): Promise<void> {
+    await this.toolboxJson(providerResourceId, "/computeruse/start", {
+      method: "POST",
+      signal,
+    });
   }
 
   private async toolboxExists(
@@ -637,6 +814,22 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     this.organizationId = organizationId;
     return organizationId;
   }
+}
+
+function daytonaRecording(
+  recording: z.infer<typeof DaytonaRecordingSchema>,
+  state: "recording" | "stopped",
+): ProviderComputerRecording {
+  return {
+    recordingId: recording.id,
+    state,
+    format: "mp4",
+    filePath: recording.filePath?.startsWith("/") ? recording.filePath : undefined,
+    sizeBytes: recording.sizeBytes,
+    durationSeconds: recording.durationSeconds,
+    startedAt: recording.startTime ? new Date(recording.startTime) : undefined,
+    stoppedAt: recording.endTime ? new Date(recording.endTime) : undefined,
+  };
 }
 
 function daytonaSessionCommand(input: ProviderExecInput): string {

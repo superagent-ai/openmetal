@@ -6,14 +6,20 @@ import {
   runtimeOperations,
   sandboxEndpoints,
   sandboxProcesses,
+  sandboxRecordings,
   sandboxes,
   withTransaction,
   type MetalDb,
 } from "@openmetal/db";
 import {
   ProcessSchema,
+  ProviderRuntimeCapabilitiesSchema,
   RuntimeOperationSchema,
   SandboxEndpointSchema,
+  SandboxRecordingSchema,
+  type ComputerActionRequest,
+  type ComputerScreenshotRequest,
+  type CreateSandboxRecordingRequest,
   type CreateProcessRequest,
   type CreateSandboxEndpointRequest,
   type DeleteFileRequest,
@@ -43,6 +49,15 @@ function exposedCapabilities(
   if (!value) return undefined;
   const parsed = value as unknown as ProviderRuntimeCapabilities;
   return parsed.provider && parsed.version ? parsed : undefined;
+}
+
+export async function getSandboxCapabilities(db: MetalDb, scope: Scope) {
+  const sandbox = await requireRuntimeSandbox(db, scope);
+  const parsed = ProviderRuntimeCapabilitiesSchema.safeParse(sandbox.providerCapabilities);
+  if (!parsed.success) {
+    throw new ApiError(409, "capabilities_unavailable", "sandbox capabilities are unavailable");
+  }
+  return parsed.data;
 }
 
 function serializeProcessWithSandbox(
@@ -115,6 +130,36 @@ export function serializeEndpoint(
     revoked_at: row.revokedAt?.toISOString() ?? null,
     error: row.error,
     created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+    provider_capabilities: exposedCapabilities(row.providerCapabilities),
+  });
+}
+
+export function serializeRecording(
+  row: typeof sandboxRecordings.$inferSelect,
+  sandboxPublicId: string,
+) {
+  return SandboxRecordingSchema.parse({
+    id: row.publicId,
+    type: "sandbox_recording",
+    project_id: publicProjectId(row.projectId),
+    sandbox_id: sandboxPublicId,
+    state: row.state,
+    format: row.format,
+    label: row.label,
+    artifact: row.filePath
+      ? {
+          kind: "sandbox_file",
+          path: row.filePath,
+          media_type: "video/mp4",
+        }
+      : null,
+    size_bytes: row.sizeBytes,
+    duration_seconds: row.durationSeconds,
+    error: row.error,
+    created_at: row.createdAt.toISOString(),
+    started_at: row.startedAt?.toISOString() ?? null,
+    stopped_at: row.stoppedAt?.toISOString() ?? null,
     updated_at: row.updatedAt.toISOString(),
     provider_capabilities: exposedCapabilities(row.providerCapabilities),
   });
@@ -337,7 +382,13 @@ export async function createRuntimeOperation(
   db: MetalDb,
   input: Scope & {
     kind: RuntimeOperationKind;
-    request: ReadFileRequest | WriteFileRequest | ListFilesRequest | DeleteFileRequest;
+    request:
+      | ReadFileRequest
+      | WriteFileRequest
+      | ListFilesRequest
+      | DeleteFileRequest
+      | ComputerActionRequest
+      | ComputerScreenshotRequest;
   },
 ) {
   return withTransaction(db, async (tx) => {
@@ -353,13 +404,123 @@ export async function createRuntimeOperation(
       })
       .returning();
     if (!operation) throw new ApiError(500, "internal_error", "failed to create runtime operation");
-    const jobType = input.kind.replace("filesystem_", "filesystem.");
+    const jobType = input.kind.replace("_", ".");
     await tx.insert(outboxJobs).values({
       jobType,
       dedupeKey: `runtime:${input.kind}:${operation.id}`,
       payload: { job_type: jobType, runtime_operation_id: operation.id },
     });
     return serializeRuntimeOperation(operation, sandbox.publicId);
+  });
+}
+
+export async function createRecording(
+  db: MetalDb,
+  input: Scope & { request: CreateSandboxRecordingRequest },
+) {
+  return withTransaction(db, async (tx) => {
+    const sandbox = await requireRuntimeSandbox(tx, input);
+    const capabilities = ProviderRuntimeCapabilitiesSchema.safeParse(sandbox.providerCapabilities);
+    if (
+      capabilities.success &&
+      !capabilities.data.computer?.recording?.formats.includes(input.request.format)
+    ) {
+      throw new ApiError(
+        409,
+        "capability_unsupported",
+        "the sandbox does not support MP4 recording",
+      );
+    }
+    const [recording] = await tx
+      .insert(sandboxRecordings)
+      .values({
+        organizationId: sandbox.organizationId,
+        projectId: sandbox.projectId,
+        sandboxId: sandbox.id,
+        format: input.request.format,
+        label: input.request.label,
+      })
+      .returning();
+    if (!recording) throw new ApiError(500, "internal_error", "failed to create recording");
+    await tx.insert(outboxJobs).values({
+      jobType: "recording.start",
+      dedupeKey: `recording:start:${recording.id}`,
+      payload: { job_type: "recording.start", recording_id: recording.id },
+    });
+    return serializeRecording(recording, sandbox.publicId);
+  });
+}
+
+export async function getRecording(db: MetalDb, scope: Scope & { recordingId: string }) {
+  const sandbox = await getSandbox(db, scope);
+  const recording = await db
+    .select()
+    .from(sandboxRecordings)
+    .where(
+      and(
+        eq(sandboxRecordings.publicId, scope.recordingId),
+        eq(sandboxRecordings.organizationId, scope.organizationId),
+        eq(sandboxRecordings.projectId, scope.projectId),
+        eq(sandboxRecordings.sandboxId, sandbox.id),
+      ),
+    )
+    .then((rows) => rows[0]);
+  if (!recording) throw new ApiError(404, "not_found", "recording not found");
+  return { row: recording, serialized: serializeRecording(recording, sandbox.publicId) };
+}
+
+export async function listRecordings(
+  db: MetalDb,
+  scope: Scope & { cursor?: string; limit: number },
+) {
+  const sandbox = await getSandbox(db, scope);
+  const rows = await db
+    .select()
+    .from(sandboxRecordings)
+    .where(
+      and(
+        eq(sandboxRecordings.organizationId, scope.organizationId),
+        eq(sandboxRecordings.projectId, scope.projectId),
+        eq(sandboxRecordings.sandboxId, sandbox.id),
+      ),
+    )
+    .orderBy(desc(sandboxRecordings.createdAt), desc(sandboxRecordings.id));
+  const start = scope.cursor
+    ? rows.findIndex((recording) => recording.publicId === scope.cursor) + 1
+    : 0;
+  if (scope.cursor && start === 0) {
+    throw new ApiError(422, "validation_error", "invalid recording cursor");
+  }
+  const page = rows.slice(start, start + scope.limit);
+  return {
+    recordings: page.map((recording) => serializeRecording(recording, sandbox.publicId)),
+    next_cursor: rows.length > start + scope.limit ? (page.at(-1)?.publicId ?? null) : null,
+  };
+}
+
+export async function stopRecording(db: MetalDb, scope: Scope & { recordingId: string }) {
+  return withTransaction(db, async (tx) => {
+    const recording = await getRecording(tx, scope);
+    if (recording.row.state === "stopped" || recording.row.state === "failed") {
+      return recording.serialized;
+    }
+    if (recording.row.state === "starting") {
+      throw new ApiError(409, "invalid_recording_state", "recording has not started");
+    }
+    const [updated] = await tx
+      .update(sandboxRecordings)
+      .set({ state: "stopping", updatedAt: new Date() })
+      .where(eq(sandboxRecordings.id, recording.row.id))
+      .returning();
+    await tx
+      .insert(outboxJobs)
+      .values({
+        jobType: "recording.stop",
+        dedupeKey: `recording:stop:${recording.row.id}`,
+        payload: { job_type: "recording.stop", recording_id: recording.row.id },
+      })
+      .onConflictDoNothing();
+    return serializeRecording(updated ?? recording.row, scope.sandboxId);
   });
 }
 

@@ -6,17 +6,21 @@ import { API_SEMVER, API_VERSION, buildOpenApiDocument } from "@openmetal/contra
 import {
   CreateOrganizationInvitationRequestSchema,
   CreateOrganizationRequestSchema,
+  ComputerActionRequestSchema,
+  ComputerScreenshotRequestSchema,
   CreateProcessRequestSchema,
   CreateProjectApiKeyRequestSchema,
   CreateProjectRequestSchema,
   CreateSandboxEndpointRequestSchema,
   CreateSandboxRequestSchema,
+  CreateSandboxRecordingRequestSchema,
   CreateWebhookEndpointRequestSchema,
   DeleteOrganizationRequestSchema,
   DeleteFileRequestSchema,
   ListEventsQuerySchema,
   ListFilesRequestSchema,
   ListSandboxEndpointsQuerySchema,
+  ListSandboxRecordingsQuerySchema,
   ListSandboxesQuerySchema,
   OpaqueIdSchema,
   OperationIdSchema,
@@ -28,6 +32,7 @@ import {
   SandboxEndpointIdSchema,
   SandboxProviderSchema,
   SandboxIdSchema,
+  SandboxRecordingIdSchema,
   UpdateWebhookEndpointRequestSchema,
   UpdateOrganizationRequestSchema,
   UpdateProjectRequestSchema,
@@ -108,14 +113,19 @@ import {
 import { readOrganizationUsage } from "./usage.js";
 import {
   cancelProcess,
+  createRecording,
   createEndpoint,
   createProcess,
   createRuntimeOperation,
   getProcess,
+  getRecording,
   getRuntimeOperation,
+  getSandboxCapabilities,
   listEndpoints,
   listProcessEvents,
+  listRecordings,
   revokeEndpoint,
+  stopRecording,
 } from "./runtime-service.js";
 
 declare module "fastify" {
@@ -1313,6 +1323,16 @@ export async function buildApp(
     return reply.status(202).send(mutation);
   });
 
+  app.get(`/${API_VERSION}/sandboxes/:sandbox_id/capabilities`, async (request) => {
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    return getSandboxCapabilities(db.db, {
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+      sandboxId,
+    });
+  });
+
   app.post(`/${API_VERSION}/sandboxes/:sandbox_id/processes`, async (request, reply) => {
     const principal = await requireProjectScope(request);
     const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
@@ -1498,6 +1518,162 @@ export async function buildApp(
       },
     );
   }
+
+  const computerRoutes = [
+    {
+      path: "actions",
+      kind: "computer_action" as const,
+      schema: ComputerActionRequestSchema,
+      idempotent: true,
+    },
+    {
+      path: "screenshots",
+      kind: "computer_screenshot" as const,
+      schema: ComputerScreenshotRequestSchema,
+      idempotent: false,
+    },
+  ];
+  for (const route of computerRoutes) {
+    app.post(
+      `/${API_VERSION}/sandboxes/:sandbox_id/computer/${route.path}`,
+      async (request, reply) => {
+        const principal = await requireProjectScope(request);
+        const sandboxId = SandboxIdSchema.parse(
+          (request.params as { sandbox_id: string }).sandbox_id,
+        );
+        const parsed = route.schema.safeParse(request.body);
+        if (!parsed.success) {
+          throw new ApiError(422, "validation_error", "invalid computer operation payload", {
+            issues: parsed.error.issues,
+          });
+        }
+        const key = route.idempotent ? headerValue(request.headers["idempotency-key"]) : undefined;
+        if (route.idempotent && !key) {
+          throw new ApiError(400, "idempotency_key_required", "Idempotency-Key is required");
+        }
+        const result = await executeIdempotent(
+          db.db,
+          {
+            principalId: principal.keyId,
+            operation: `${route.kind}:${principal.projectId}:${sandboxId}`,
+            key,
+            body: parsed.data,
+          },
+          async (tx) => ({
+            status: 202,
+            body: await createRuntimeOperation(tx, {
+              organizationId: principal.organizationId,
+              projectId: principal.projectId,
+              sandboxId,
+              kind: route.kind,
+              request: parsed.data,
+            }),
+          }),
+        );
+        reply.header(
+          "location",
+          `/${API_VERSION}/sandboxes/${sandboxId}/runtime-operations/${result.body.id}`,
+        );
+        return reply.status(result.status).send(result.body);
+      },
+    );
+  }
+
+  app.get(`/${API_VERSION}/sandboxes/:sandbox_id/recordings`, async (request) => {
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    const parsed = ListSandboxRecordingsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid recording list query", {
+        issues: parsed.error.issues,
+      });
+    }
+    return listRecordings(db.db, {
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+      sandboxId,
+      cursor: parsed.data.cursor,
+      limit: parsed.data.limit,
+    });
+  });
+
+  app.post(`/${API_VERSION}/sandboxes/:sandbox_id/recordings`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
+    const sandboxId = SandboxIdSchema.parse((request.params as { sandbox_id: string }).sandbox_id);
+    const parsed = CreateSandboxRecordingRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid recording payload", {
+        issues: parsed.error.issues,
+      });
+    }
+    const key = headerValue(request.headers["idempotency-key"]);
+    if (!key) {
+      throw new ApiError(400, "idempotency_key_required", "Idempotency-Key is required");
+    }
+    const result = await executeIdempotent(
+      db.db,
+      {
+        principalId: principal.keyId,
+        operation: `recordings.create:${principal.projectId}:${sandboxId}`,
+        key,
+        body: parsed.data,
+      },
+      async (tx) => ({
+        status: 202,
+        body: await createRecording(tx, {
+          organizationId: principal.organizationId,
+          projectId: principal.projectId,
+          sandboxId,
+          request: parsed.data,
+        }),
+      }),
+    );
+    reply.header("location", `/${API_VERSION}/sandboxes/${sandboxId}/recordings/${result.body.id}`);
+    return reply.status(result.status).send(result.body);
+  });
+
+  app.get(`/${API_VERSION}/sandboxes/:sandbox_id/recordings/:recording_id`, async (request) => {
+    const principal = await requireProjectScope(request);
+    const params = request.params as { sandbox_id: string; recording_id: string };
+    return (
+      await getRecording(db.db, {
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+        sandboxId: SandboxIdSchema.parse(params.sandbox_id),
+        recordingId: SandboxRecordingIdSchema.parse(params.recording_id),
+      })
+    ).serialized;
+  });
+
+  app.post(
+    `/${API_VERSION}/sandboxes/:sandbox_id/recordings/:recording_id/actions/stop`,
+    async (request, reply) => {
+      const principal = await requireProjectScope(request);
+      const params = request.params as { sandbox_id: string; recording_id: string };
+      const sandboxId = SandboxIdSchema.parse(params.sandbox_id);
+      const recordingId = SandboxRecordingIdSchema.parse(params.recording_id);
+      const key = headerValue(request.headers["idempotency-key"]);
+      const result = await executeIdempotent(
+        db.db,
+        {
+          principalId: principal.keyId,
+          operation: `recordings.stop:${principal.projectId}:${sandboxId}:${recordingId}`,
+          key,
+          body: null,
+        },
+        async (tx) => ({
+          status: 202,
+          body: await stopRecording(tx, {
+            organizationId: principal.organizationId,
+            projectId: principal.projectId,
+            sandboxId,
+            recordingId,
+          }),
+        }),
+      );
+      return reply.status(result.status).send(result.body);
+    },
+  );
 
   app.get(
     `/${API_VERSION}/sandboxes/:sandbox_id/runtime-operations/:runtime_operation_id`,

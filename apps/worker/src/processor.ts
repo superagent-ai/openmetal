@@ -19,6 +19,7 @@ import {
   runtimeOperations,
   sandboxEndpoints,
   sandboxProcesses,
+  sandboxRecordings,
   sandboxes,
   withTransaction,
   type ClaimedJob,
@@ -33,6 +34,7 @@ import {
   resolveProviderResources,
   type ProviderCreateSandboxInput,
   type ProviderExecEvent,
+  type ProviderRuntimeCapabilities,
   type SandboxProvider,
   type SandboxProviderName,
 } from "@openmetal/provider-core";
@@ -374,6 +376,25 @@ async function provisionSandbox(
         .where(eq(providerAttempts.id, attempt!.id));
       continue;
     }
+    if (
+      !supportsRequestedFeatures(
+        provider.capabilities.runtime,
+        sandbox.features as Record<string, unknown>,
+        provider.capabilities.resume === true,
+      )
+    ) {
+      await db
+        .update(providerAttempts)
+        .set({
+          state: "failed",
+          errorCode: "capability_unsupported",
+          errorMessage: `${providerName} does not support the requested portable features`,
+          outcome: "ineligible",
+          completedAt: new Date(),
+        })
+        .where(eq(providerAttempts.id, attempt!.id));
+      continue;
+    }
     try {
       const resolved = resolveProviderResources(
         providerName,
@@ -411,6 +432,31 @@ async function provisionSandbox(
         metadata: sandbox.metadata,
       });
       const resolvedResources = remote.resolvedResources ?? resolved;
+      const discoveredRuntime =
+        (await provider.discoverRuntimeCapabilities?.(remote.providerResourceId)) ??
+        provider.capabilities.runtime;
+      if (
+        !supportsRequestedFeatures(
+          discoveredRuntime,
+          sandbox.features as Record<string, unknown>,
+          provider.capabilities.resume === true,
+        )
+      ) {
+        await provider.destroy(remote.providerResourceId).catch(() => undefined);
+        await db
+          .update(providerAttempts)
+          .set({
+            state: "failed",
+            providerResourceId: remote.providerResourceId,
+            errorCode: "capability_unsupported",
+            errorMessage: `${providerName} did not expose the requested features after provisioning`,
+            outcome: "absent",
+            completedAt: new Date(),
+          })
+          .where(eq(providerAttempts.id, attempt!.id));
+        continue;
+      }
+      const capabilitySnapshot = runtimeCapabilities(provider, discoveredRuntime);
       await withTransaction(db, async (tx) => {
         await tx
           .update(providerAttempts)
@@ -434,6 +480,7 @@ async function provisionSandbox(
             providerResourceId: remote.providerResourceId,
             providerOrganizationId: remote.providerOrganizationId,
             providerMetadata: remote.providerMetadata ?? {},
+            providerCapabilities: capabilitySnapshot,
             resolvedResources: {
               vcpu: resolvedResources.vcpu,
               memory_mb: resolvedResources.memoryMb,
@@ -495,6 +542,10 @@ async function provisionSandbox(
               .catch(() => null)
           : null;
         if (reconciled) {
+          const discoveredRuntime =
+            (await provider.discoverRuntimeCapabilities?.(reconciled.providerResourceId)) ??
+            provider.capabilities.runtime;
+          const capabilitySnapshot = runtimeCapabilities(provider, discoveredRuntime);
           await db
             .update(providerAttempts)
             .set({
@@ -515,6 +566,7 @@ async function provisionSandbox(
               providerResourceId: reconciled.providerResourceId,
               providerOrganizationId: reconciled.providerOrganizationId,
               providerMetadata: reconciled.providerMetadata ?? {},
+              providerCapabilities: capabilitySnapshot,
               readyAt: new Date(),
               updatedAt: new Date(),
             })
@@ -840,11 +892,37 @@ async function syncSandboxCost(
 const terminalProcessStates = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
 const terminalRuntimeOperationStates = new Set(["succeeded", "failed", "cancelled"]);
 
-function runtimeCapabilities(provider: SandboxProvider): Record<string, unknown> {
-  const runtime = provider.capabilities.runtime;
+function supportsRequestedFeatures(
+  runtime: ProviderRuntimeCapabilities | undefined,
+  features: Record<string, unknown>,
+  resume: boolean,
+): boolean {
+  if (features.pause_resume === true && !resume) return false;
+  if (features.computer_use === true) {
+    if (!runtime?.computer?.screenshot || runtime.computer.actions.length === 0) return false;
+  }
+  const recording = features.recording as { format?: string } | undefined;
+  if (
+    recording &&
+    (!runtime?.computer?.recording ||
+      !runtime.computer.recording.formats.includes((recording.format ?? "mp4") as "mp4" | "webm"))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function runtimeCapabilities(
+  provider: SandboxProvider,
+  runtime: ProviderRuntimeCapabilities | undefined = provider.capabilities.runtime,
+): Record<string, unknown> {
   return {
     provider: provider.name,
     version: "1",
+    lifecycle: {
+      pause: provider.capabilities.pause,
+      resume: provider.capabilities.resume === true,
+    },
     ...(runtime?.process
       ? {
           process: {
@@ -876,6 +954,29 @@ function runtimeCapabilities(provider: SandboxProvider): Record<string, unknown>
             revoke: runtime.httpEndpoints.revoke,
             ...(runtime.httpEndpoints.maxLeaseDurationSeconds
               ? { max_lease_seconds: runtime.httpEndpoints.maxLeaseDurationSeconds }
+              : {}),
+          },
+        }
+      : {}),
+    ...(runtime?.computer
+      ? {
+          computer: {
+            implementation: runtime.computer.implementation,
+            actions: [...runtime.computer.actions],
+            ...(runtime.computer.screenshot
+              ? {
+                  screenshot: {
+                    formats: [...runtime.computer.screenshot.formats],
+                    max_bytes: runtime.computer.screenshot.maxBytes,
+                  },
+                }
+              : {}),
+            ...(runtime.computer.recording
+              ? {
+                  recording: {
+                    formats: [...runtime.computer.recording.formats],
+                  },
+                }
               : {}),
           },
         }
@@ -1623,6 +1724,300 @@ async function executeFilesystemOperation(
   }
 }
 
+async function executeComputerOperation(
+  db: MetalDb,
+  provider: SandboxProvider,
+  operationId: string,
+  guard: JobLeaseGuard,
+) {
+  await guard.assertOwned();
+  const row = await db
+    .select({ operation: runtimeOperations, sandbox: sandboxes })
+    .from(runtimeOperations)
+    .innerJoin(sandboxes, eq(sandboxes.id, runtimeOperations.sandboxId))
+    .where(eq(runtimeOperations.id, operationId))
+    .then((rows) => rows[0]);
+  if (!row || terminalRuntimeOperationStates.has(row.operation.state)) return;
+  const snapshot = row.sandbox.providerCapabilities ?? runtimeCapabilities(provider);
+  const capabilities = provider.capabilities.runtime?.computer;
+  const observed = snapshot as {
+    computer?: {
+      actions?: string[];
+      screenshot?: { formats?: string[]; max_bytes?: number };
+    };
+  };
+  const request = row.operation.request;
+  const [claimed] = await db
+    .update(runtimeOperations)
+    .set({
+      state: "running",
+      startedAt: row.operation.startedAt ?? new Date(),
+      providerCapabilities: snapshot,
+      operationToken: guard.token,
+    })
+    .where(
+      row.operation.state === "queued"
+        ? and(eq(runtimeOperations.id, operationId), eq(runtimeOperations.state, "queued"))
+        : and(
+            eq(runtimeOperations.id, operationId),
+            eq(runtimeOperations.state, "running"),
+            sql`${runtimeOperations.operationToken} is not distinct from ${row.operation.operationToken}::uuid`,
+          ),
+    )
+    .returning();
+  if (!claimed) return;
+  try {
+    if (row.operation.state !== "queued") {
+      throw new ProviderError(
+        "computer operation was reclaimed without provider reconciliation support",
+        "unknown_outcome",
+        false,
+      );
+    }
+    if (row.sandbox.status !== "ready" || !row.sandbox.providerResourceId) {
+      throw new ProviderError("sandbox is not ready", "customer", false);
+    }
+    let result: Record<string, unknown>;
+    if (row.operation.kind === "computer_action") {
+      if (!capabilities || !observed.computer?.actions || !provider.executeComputerAction) {
+        throw new ProviderError("computer actions are unsupported", "unsupported", false);
+      }
+      const actionType = String(request.type);
+      if (
+        !capabilities.actions.includes(actionType as never) ||
+        !observed.computer.actions.includes(actionType)
+      ) {
+        throw new ProviderError(
+          `computer action ${actionType} is unsupported`,
+          "unsupported",
+          false,
+        );
+      }
+      const action =
+        actionType === "mouse_drag"
+          ? {
+              type: "mouse_drag" as const,
+              startX: Number(request.start_x),
+              startY: Number(request.start_y),
+              endX: Number(request.end_x),
+              endY: Number(request.end_y),
+              button: request.button as "left" | "right" | "middle",
+            }
+          : actionType === "keyboard_type"
+            ? {
+                type: "keyboard_type" as const,
+                text: String(request.text),
+                delayMs: Number(request.delay_ms),
+              }
+            : actionType === "keyboard_key"
+              ? {
+                  type: "keyboard_key" as const,
+                  key: String(request.key),
+                  modifiers: request.modifiers as ("ctrl" | "alt" | "shift" | "cmd")[],
+                }
+              : actionType === "keyboard_hotkey"
+                ? { type: "keyboard_hotkey" as const, keys: String(request.keys) }
+                : actionType === "mouse_scroll"
+                  ? {
+                      type: "mouse_scroll" as const,
+                      direction: request.direction as "up" | "down",
+                      amount: Number(request.amount),
+                      x: request.x === undefined ? undefined : Number(request.x),
+                      y: request.y === undefined ? undefined : Number(request.y),
+                    }
+                  : actionType === "mouse_click"
+                    ? {
+                        type: "mouse_click" as const,
+                        x: Number(request.x),
+                        y: Number(request.y),
+                        button: request.button as "left" | "right" | "middle",
+                        double: Boolean(request.double),
+                      }
+                    : {
+                        type: "mouse_move" as const,
+                        x: Number(request.x),
+                        y: Number(request.y),
+                      };
+      await guard.assertOwned();
+      await provider.executeComputerAction({
+        providerResourceId: row.sandbox.providerResourceId,
+        action,
+      });
+      result = { kind: "computer_action", performed: true };
+    } else {
+      if (
+        !capabilities?.screenshot ||
+        !observed.computer?.screenshot ||
+        !provider.captureComputerScreenshot
+      ) {
+        throw new ProviderError("computer screenshots are unsupported", "unsupported", false);
+      }
+      const format = request.format as "png" | "jpeg";
+      if (!capabilities.screenshot.formats.includes(format)) {
+        throw new ProviderError(
+          `computer screenshot format ${format} is unsupported`,
+          "unsupported",
+          false,
+        );
+      }
+      if (!observed.computer.screenshot.formats?.includes(format)) {
+        throw new ProviderError(
+          `computer screenshot format ${format} was not observed for this sandbox`,
+          "unsupported",
+          false,
+        );
+      }
+      const region = request.region as
+        { x: number; y: number; width: number; height: number } | undefined;
+      await guard.assertOwned();
+      const screenshot = await provider.captureComputerScreenshot({
+        providerResourceId: row.sandbox.providerResourceId,
+        format,
+        showCursor: Boolean(request.show_cursor),
+        quality: request.quality === undefined ? undefined : Number(request.quality),
+        scale: request.scale === undefined ? undefined : Number(request.scale),
+        region,
+      });
+      if (screenshot.data.byteLength > capabilities.screenshot.maxBytes) {
+        throw new ProviderError("computer screenshot exceeds provider limit", "unsupported", false);
+      }
+      result = {
+        kind: "computer_screenshot",
+        format: screenshot.format,
+        data_base64: Buffer.from(screenshot.data).toString("base64"),
+        byte_length: screenshot.data.byteLength,
+        ...(screenshot.cursorPosition
+          ? {
+              cursor_position: {
+                x: screenshot.cursorPosition.x,
+                y: screenshot.cursorPosition.y,
+              },
+            }
+          : {}),
+      };
+    }
+    await guard.assertOwned();
+    await db
+      .update(runtimeOperations)
+      .set({ state: "succeeded", result, error: null, completedAt: new Date() })
+      .where(
+        and(
+          eq(runtimeOperations.id, operationId),
+          eq(runtimeOperations.state, "running"),
+          eq(runtimeOperations.operationToken, guard.token),
+        ),
+      );
+  } catch (error) {
+    if (error instanceof OutboxLeaseLostError) throw error;
+    await db
+      .update(runtimeOperations)
+      .set({ state: "failed", error: runtimeError(error), completedAt: new Date() })
+      .where(
+        and(
+          eq(runtimeOperations.id, operationId),
+          eq(runtimeOperations.state, "running"),
+          eq(runtimeOperations.operationToken, guard.token),
+        ),
+      );
+  }
+}
+
+async function executeRecordingOperation(
+  db: MetalDb,
+  provider: SandboxProvider,
+  recordingId: string,
+  action: "start" | "stop",
+  guard: JobLeaseGuard,
+) {
+  await guard.assertOwned();
+  const row = await db
+    .select({ recording: sandboxRecordings, sandbox: sandboxes })
+    .from(sandboxRecordings)
+    .innerJoin(sandboxes, eq(sandboxes.id, sandboxRecordings.sandboxId))
+    .where(eq(sandboxRecordings.id, recordingId))
+    .then((rows) => rows[0]);
+  if (!row || row.recording.state === "stopped" || row.recording.state === "failed") return;
+  const expectedState = action === "start" ? "starting" : "stopping";
+  if (row.recording.state !== expectedState) return;
+  const snapshot = row.sandbox.providerCapabilities ?? runtimeCapabilities(provider);
+  const [claimed] = await db
+    .update(sandboxRecordings)
+    .set({ operationToken: guard.token, providerCapabilities: snapshot, updatedAt: new Date() })
+    .where(
+      and(
+        eq(sandboxRecordings.id, recordingId),
+        eq(sandboxRecordings.state, expectedState),
+        sql`${sandboxRecordings.operationToken} is not distinct from ${row.recording.operationToken}::uuid`,
+      ),
+    )
+    .returning();
+  if (!claimed) return;
+  try {
+    if (!row.sandbox.providerResourceId || row.sandbox.status !== "ready") {
+      throw new ProviderError("sandbox is not ready", "customer", false);
+    }
+    const capabilities = provider.capabilities.runtime?.computer?.recording;
+    const observed = snapshot as { computer?: { recording?: { formats?: string[] } } };
+    if (
+      !capabilities?.formats.includes("mp4") ||
+      !observed.computer?.recording?.formats?.includes("mp4")
+    ) {
+      throw new ProviderError("MP4 recording is unsupported", "unsupported", false);
+    }
+    await guard.assertOwned();
+    const result =
+      action === "start"
+        ? await provider.startComputerRecording?.({
+            providerResourceId: row.sandbox.providerResourceId,
+            format: "mp4",
+            label: row.recording.label ?? undefined,
+          })
+        : row.recording.providerRecordingId
+          ? await provider.stopComputerRecording?.({
+              providerResourceId: row.sandbox.providerResourceId,
+              recordingId: row.recording.providerRecordingId,
+            })
+          : undefined;
+    if (!result) {
+      throw new ProviderError(`recording ${action} is unsupported`, "unsupported", false);
+    }
+    await guard.assertOwned();
+    await db
+      .update(sandboxRecordings)
+      .set({
+        state: action === "start" ? "recording" : "stopped",
+        providerRecordingId: result.recordingId,
+        filePath: result.filePath ?? row.recording.filePath,
+        sizeBytes: result.sizeBytes ?? row.recording.sizeBytes,
+        durationSeconds:
+          result.durationSeconds === undefined
+            ? row.recording.durationSeconds
+            : Math.round(result.durationSeconds),
+        startedAt: result.startedAt ?? row.recording.startedAt ?? new Date(),
+        stoppedAt: action === "stop" ? (result.stoppedAt ?? new Date()) : null,
+        error: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(sandboxRecordings.id, recordingId),
+          eq(sandboxRecordings.operationToken, guard.token),
+        ),
+      );
+  } catch (error) {
+    if (error instanceof OutboxLeaseLostError) throw error;
+    await db
+      .update(sandboxRecordings)
+      .set({ state: "failed", error: runtimeError(error), updatedAt: new Date() })
+      .where(
+        and(
+          eq(sandboxRecordings.id, recordingId),
+          eq(sandboxRecordings.operationToken, guard.token),
+        ),
+      );
+  }
+}
+
 async function createHttpEndpoint(
   db: MetalDb,
   provider: SandboxProvider,
@@ -2079,7 +2474,9 @@ async function recordTerminalRuntimeFailure(
     payload.job_type === "filesystem.read" ||
     payload.job_type === "filesystem.write" ||
     payload.job_type === "filesystem.list" ||
-    payload.job_type === "filesystem.delete"
+    payload.job_type === "filesystem.delete" ||
+    payload.job_type === "computer.action" ||
+    payload.job_type === "computer.screenshot"
   ) {
     await db
       .update(runtimeOperations)
@@ -2089,6 +2486,19 @@ async function recordTerminalRuntimeFailure(
           eq(runtimeOperations.id, payload.runtime_operation_id),
           eq(runtimeOperations.operationToken, guard.token),
           inArray(runtimeOperations.state, ["queued", "running"]),
+        ),
+      );
+    return;
+  }
+  if (payload.job_type === "recording.start" || payload.job_type === "recording.stop") {
+    await db
+      .update(sandboxRecordings)
+      .set({ state: "failed", error: safe, updatedAt: new Date() })
+      .where(
+        and(
+          eq(sandboxRecordings.id, payload.recording_id),
+          eq(sandboxRecordings.operationToken, guard.token),
+          inArray(sandboxRecordings.state, ["starting", "recording", "stopping"]),
         ),
       );
     return;
@@ -2140,10 +2550,16 @@ async function runtimeSandboxId(
         OutboxJobPayload,
         {
           job_type:
-            "filesystem.read" | "filesystem.write" | "filesystem.list" | "filesystem.delete";
+            | "filesystem.read"
+            | "filesystem.write"
+            | "filesystem.list"
+            | "filesystem.delete"
+            | "computer.action"
+            | "computer.screenshot";
         }
       >
-    | Extract<OutboxJobPayload, { job_type: "endpoint.create" | "endpoint.revoke" }>,
+    | Extract<OutboxJobPayload, { job_type: "endpoint.create" | "endpoint.revoke" }>
+    | Extract<OutboxJobPayload, { job_type: "recording.start" | "recording.stop" }>,
 ) {
   if (payload.job_type === "process.execute" || payload.job_type === "process.cancel") {
     return db
@@ -2157,6 +2573,13 @@ async function runtimeSandboxId(
       .select({ sandboxId: sandboxEndpoints.sandboxId })
       .from(sandboxEndpoints)
       .where(eq(sandboxEndpoints.id, payload.endpoint_id))
+      .then((rows) => rows[0]?.sandboxId);
+  }
+  if (payload.job_type === "recording.start" || payload.job_type === "recording.stop") {
+    return db
+      .select({ sandboxId: sandboxRecordings.sandboxId })
+      .from(sandboxRecordings)
+      .where(eq(sandboxRecordings.id, payload.recording_id))
       .then((rows) => rows[0]?.sandboxId);
   }
   return db
@@ -2247,6 +2670,27 @@ export async function processOnce(
               db,
               sandboxProvider,
               payload.runtime_operation_id,
+              guard,
+            );
+          } else if (
+            payload.job_type === "computer.action" ||
+            payload.job_type === "computer.screenshot"
+          ) {
+            await executeComputerOperation(
+              db,
+              sandboxProvider,
+              payload.runtime_operation_id,
+              guard,
+            );
+          } else if (
+            payload.job_type === "recording.start" ||
+            payload.job_type === "recording.stop"
+          ) {
+            await executeRecordingOperation(
+              db,
+              sandboxProvider,
+              payload.recording_id,
+              payload.job_type === "recording.start" ? "start" : "stop",
               guard,
             );
           } else if (payload.job_type === "endpoint.create") {

@@ -197,7 +197,9 @@ function classifyProviderFailure(error: unknown): {
       unknown: false,
     };
   }
-  if (/timeout|abort/.test(message)) {
+  if (
+    /timeout|abort|fetch failed|network|econn|enotfound|eai_again|socket|terminated/.test(message)
+  ) {
     return {
       kind: "provider_unknown_outcome",
       retryable: true,

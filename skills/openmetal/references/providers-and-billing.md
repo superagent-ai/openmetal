@@ -55,6 +55,7 @@ Provider-specific runtime limitations:
 - Cloudflare supports ordered process execution with an omitted or empty environment, but rejects non-empty environment overrides. It has no process cancellation.
 - E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Runloop supports provider-level cancellation even though its output is buffered.
 - Daytona, E2B, and Modal reject append writes. Runloop and Vercel also reject append; Runloop rejects `create_parents: true`.
+- Daytona applies an OCI image as a declarative `FROM <image>` build and waits until the sandbox state is `started`. Omitted `disk_mb` is sent as 16 GiB because Daytona's own default disk is 3 GiB.
 - Modal managed cost uses cumulative CPU core nanoseconds and memory GiB nanoseconds from the
   sandbox resource API. Metal applies the published Sandbox rate card with medium confidence and
   retains a final usage measurement before termination. Credits, discounts, and regional modifiers

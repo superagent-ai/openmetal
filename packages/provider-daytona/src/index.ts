@@ -31,12 +31,29 @@ import { ProviderError } from "@openmetal/provider-core";
 const MAX_OUTPUT_BYTES = 100 * 1_024 * 1_024;
 const MAX_FILE_BYTES = 10 * 1_024 * 1_024;
 const MAX_LIST_ENTRIES = 10_000;
+const IMAGE_READY_TIMEOUT_MS = 15 * 60_000;
+const IMAGE_POLL_INTERVAL_MS = 2_000;
+const DAYTONA_IMAGE_DISK_GB = 16;
+const DAYTONA_PENDING_STATES = new Set([
+  "creating",
+  "pending_build",
+  "building_snapshot",
+  "pulling_snapshot",
+  "starting",
+  "unknown",
+  "restoring",
+]);
+const DAYTONA_FAILED_STATES = new Set(["error", "build_failed", "destroyed", "destroying"]);
+const OCI_IMAGE_REFERENCE =
+  /^(?:(?:localhost|[\w.-]+(?::\d+)?)\/)?[a-z0-9]+(?:(?:[._]|__|[-]*)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|[-]*)[a-z0-9]+)*)*(?::[\w][\w.-]{0,127})?(?:@(?:sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}))?$/;
 
 const DaytonaSandboxSchema = z
   .object({
     id: z.string().min(1),
     organizationId: z.string().min(1),
     toolboxProxyUrl: z.string().url().optional(),
+    state: z.string().min(1).optional(),
+    errorReason: z.string().nullish(),
   })
   .passthrough();
 
@@ -122,6 +139,7 @@ export type DaytonaProviderOptions = {
   target?: string;
   pauseSupported?: boolean;
   requestTimeoutMs?: number;
+  imageReadyTimeoutMs?: number;
   fetchImpl?: typeof fetch;
 };
 
@@ -139,6 +157,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   private readonly analyticsApiUrl: string;
   private readonly target?: string;
   private readonly requestTimeoutMs: number;
+  private readonly imageReadyTimeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private organizationId?: string;
   private readonly toolboxUrls = new Map<string, string>();
@@ -201,11 +220,13 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     this.target = options.target;
     this.organizationId = options.organizationId;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
+    this.imageReadyTimeoutMs = options.imageReadyTimeoutMs ?? IMAGE_READY_TIMEOUT_MS;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
   async create(input: ProviderCreateSandboxInput): Promise<ProviderSandbox> {
     const resolved = resolveProviderResources("daytona", input.resources, input.providerOptions);
+    const image = daytonaImageSpec(input);
     const name = `metal-${input.metalSandboxId}`;
     let response: unknown;
     try {
@@ -215,7 +236,16 @@ export class DaytonaSandboxProvider implements SandboxProvider {
           name,
           ephemeral: true,
           autoDeleteInterval: 0,
-          ...(input.image ? { image: input.image } : {}),
+          ...(image
+            ? {
+                // CreateSandbox has no image field. The Daytona SDK sends a registry
+                // reference as a declarative build, which pulls that image.
+                buildInfo: { dockerfileContent: `FROM ${input.image}\n` },
+                cpu: image.cpu,
+                memory: image.memoryGb,
+                disk: image.diskGb,
+              }
+            : {}),
           ...(this.target ? { target: this.target } : {}),
           labels: {
             "metal.sandbox_id": input.metalSandboxId,
@@ -235,15 +265,20 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         signal: input.signal,
       });
     }
-    const parsed = DaytonaSandboxSchema.parse(response);
-    this.organizationId = parsed.organizationId;
-    if (parsed.toolboxProxyUrl) {
-      this.toolboxUrls.set(parsed.id, this.resolveToolboxUrl(parsed.toolboxProxyUrl, parsed.id));
-    }
+    let parsed = DaytonaSandboxSchema.parse(response);
+    if (image) parsed = await this.waitUntilStarted(parsed, input.signal);
+    this.rememberSandbox(parsed);
     return {
       providerResourceId: parsed.id,
       providerOrganizationId: parsed.organizationId,
-      resolvedResources: resolved,
+      resolvedResources: image
+        ? {
+            ...resolved,
+            vcpu: image.cpu,
+            memoryMb: image.memoryGb * 1024,
+            diskMb: image.diskGb * 1024,
+          }
+        : resolved,
     };
   }
 
@@ -252,18 +287,16 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     signal?: AbortSignal,
   ): Promise<ProviderSandbox | null> {
     try {
-      const sandbox = DaytonaSandboxSchema.parse(
+      let sandbox = DaytonaSandboxSchema.parse(
         await this.request(`/sandbox/${encodeURIComponent(`metal-${metalSandboxId}`)}`, {
           method: "GET",
           signal,
         }),
       );
-      if (sandbox.toolboxProxyUrl) {
-        this.toolboxUrls.set(
-          sandbox.id,
-          this.resolveToolboxUrl(sandbox.toolboxProxyUrl, sandbox.id),
-        );
+      if (sandbox.state && sandbox.state !== "started") {
+        sandbox = await this.waitUntilStarted(sandbox, signal);
       }
+      this.rememberSandbox(sandbox);
       return {
         providerResourceId: sandbox.id,
         providerOrganizationId: sandbox.organizationId,
@@ -757,6 +790,59 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     }
   }
 
+  private rememberSandbox(sandbox: z.infer<typeof DaytonaSandboxSchema>): void {
+    this.organizationId = sandbox.organizationId;
+    if (sandbox.toolboxProxyUrl) {
+      this.toolboxUrls.set(sandbox.id, this.resolveToolboxUrl(sandbox.toolboxProxyUrl, sandbox.id));
+    }
+  }
+
+  private async waitUntilStarted(
+    sandbox: z.infer<typeof DaytonaSandboxSchema>,
+    signal: AbortSignal | undefined,
+  ): Promise<z.infer<typeof DaytonaSandboxSchema>> {
+    const deadline = Date.now() + this.imageReadyTimeoutMs;
+    let current = sandbox;
+    while (current.state && current.state !== "started") {
+      if (DAYTONA_FAILED_STATES.has(current.state)) {
+        await this.destroy(current.id, signal).catch(() => undefined);
+        throw new ProviderError(
+          current.errorReason
+            ? `Daytona image build failed: ${current.errorReason}`
+            : `Daytona image build failed (${current.state})`,
+          "customer",
+          false,
+        );
+      }
+      if (!DAYTONA_PENDING_STATES.has(current.state)) {
+        throw new ProviderError(
+          `Daytona sandbox entered ${current.state} before it started`,
+          "unavailable",
+          true,
+        );
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new ProviderError(
+          "Daytona sandbox image was not ready before the deadline",
+          "unknown_outcome",
+          true,
+        );
+      }
+      await abortableDelay(
+        Math.min(IMAGE_POLL_INTERVAL_MS, remaining),
+        signal ?? AbortSignal.timeout(remaining),
+      );
+      current = DaytonaSandboxSchema.parse(
+        await this.request(`/sandbox/${encodeURIComponent(current.id)}`, {
+          method: "GET",
+          signal,
+        }),
+      );
+    }
+    return current;
+  }
+
   private resolveToolboxUrl(proxyUrl: string, providerResourceId: string): string {
     if (proxyUrl.includes("{sandboxId}")) {
       return proxyUrl
@@ -910,6 +996,25 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     this.organizationId = organizationId;
     return organizationId;
   }
+}
+
+function daytonaImageSpec(input: ProviderCreateSandboxInput): {
+  cpu: number;
+  memoryGb: number;
+  diskGb: number;
+} | null {
+  if (!input.image) return null;
+  if (!OCI_IMAGE_REFERENCE.test(input.image)) {
+    throw new ProviderError("Daytona OCI image reference is invalid", "invalid_request", false);
+  }
+  return {
+    cpu: input.resources.vcpu,
+    memoryGb: Math.max(1, Math.ceil(input.resources.memoryMb / 1024)),
+    diskGb:
+      input.resources.diskMb === undefined
+        ? DAYTONA_IMAGE_DISK_GB
+        : Math.max(1, Math.ceil(input.resources.diskMb / 1024)),
+  };
 }
 
 function daytonaRecording(

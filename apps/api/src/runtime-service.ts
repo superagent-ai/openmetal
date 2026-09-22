@@ -509,7 +509,7 @@ export async function stopRecording(db: MetalDb, scope: Scope & { recordingId: s
     }
     const [updated] = await tx
       .update(sandboxRecordings)
-      .set({ state: "stopping", updatedAt: new Date() })
+      .set({ state: "stopping", operationToken: null, updatedAt: new Date() })
       .where(eq(sandboxRecordings.id, recording.row.id))
       .returning();
     await tx

@@ -1953,6 +1953,13 @@ async function executeRecordingOperation(
     .returning();
   if (!claimed) return;
   try {
+    if (row.recording.operationToken) {
+      throw new ProviderError(
+        `recording ${action} was reclaimed without provider reconciliation support`,
+        "unknown_outcome",
+        false,
+      );
+    }
     if (!row.sandbox.providerResourceId || row.sandbox.status !== "ready") {
       throw new ProviderError("sandbox is not ready", "customer", false);
     }
@@ -1996,6 +2003,7 @@ async function executeRecordingOperation(
         startedAt: result.startedAt ?? row.recording.startedAt ?? new Date(),
         stoppedAt: action === "stop" ? (result.stoppedAt ?? new Date()) : null,
         error: null,
+        operationToken: null,
         updatedAt: new Date(),
       })
       .where(
@@ -2008,7 +2016,12 @@ async function executeRecordingOperation(
     if (error instanceof OutboxLeaseLostError) throw error;
     await db
       .update(sandboxRecordings)
-      .set({ state: "failed", error: runtimeError(error), updatedAt: new Date() })
+      .set({
+        state: "failed",
+        error: runtimeError(error),
+        operationToken: null,
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(sandboxRecordings.id, recordingId),

@@ -5,7 +5,7 @@ import {
   enforceSpendLimit,
   type StripeGateway,
 } from "@openmetal/billing";
-import { and, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import {
   claimOutboxJobs,
   insertDomainEventAndBroadcast,
@@ -32,6 +32,7 @@ import {
   ProviderError,
   resolveMetalEnvironment,
   resolveProviderResources,
+  type ProviderComputerRecording,
   type ProviderCreateSandboxInput,
   type ProviderExecEvent,
   type ProviderRuntimeCapabilities,
@@ -432,9 +433,26 @@ async function provisionSandbox(
         metadata: sandbox.metadata,
       });
       const resolvedResources = remote.resolvedResources ?? resolved;
-      const discoveredRuntime =
-        (await provider.discoverRuntimeCapabilities?.(remote.providerResourceId)) ??
-        provider.capabilities.runtime;
+      const cleanupCreatedResource = async () => {
+        try {
+          await provider.destroy(remote.providerResourceId);
+        } catch {
+          throw new ProviderError(
+            `${providerName} capability discovery failed and cleanup was unconfirmed`,
+            "unknown_outcome",
+            true,
+          );
+        }
+      };
+      let discoveredRuntime: ProviderRuntimeCapabilities | undefined;
+      try {
+        discoveredRuntime =
+          (await provider.discoverRuntimeCapabilities?.(remote.providerResourceId)) ??
+          provider.capabilities.runtime;
+      } catch (error) {
+        await cleanupCreatedResource();
+        throw error;
+      }
       if (
         !supportsRequestedFeatures(
           discoveredRuntime,
@@ -442,7 +460,7 @@ async function provisionSandbox(
           provider.capabilities.resume === true,
         )
       ) {
-        await provider.destroy(remote.providerResourceId).catch(() => undefined);
+        await cleanupCreatedResource();
         await db
           .update(providerAttempts)
           .set({
@@ -545,6 +563,48 @@ async function provisionSandbox(
           const discoveredRuntime =
             (await provider.discoverRuntimeCapabilities?.(reconciled.providerResourceId)) ??
             provider.capabilities.runtime;
+          if (
+            !supportsRequestedFeatures(
+              discoveredRuntime,
+              sandbox.features as Record<string, unknown>,
+              provider.capabilities.resume === true,
+            )
+          ) {
+            try {
+              await provider.destroy(reconciled.providerResourceId);
+            } catch {
+              await db
+                .update(sandboxes)
+                .set({
+                  status: "provision_unknown",
+                  provider: providerName,
+                  providerCredentialId,
+                  providerResourceId: reconciled.providerResourceId,
+                  providerOrganizationId: reconciled.providerOrganizationId,
+                  providerMetadata: reconciled.providerMetadata ?? {},
+                  updatedAt: new Date(),
+                })
+                .where(eq(sandboxes.id, sandbox.id));
+              await setOperationState(db, operationId, "reconciling", {
+                code: "provider_unknown_outcome",
+                message: "reconciled resource lacks requested features and cleanup was unconfirmed",
+                retryable: true,
+              });
+              return;
+            }
+            await db
+              .update(providerAttempts)
+              .set({
+                state: "failed",
+                providerResourceId: reconciled.providerResourceId,
+                errorCode: "capability_unsupported",
+                errorMessage: `${providerName} did not expose the requested features after reconciliation`,
+                outcome: "absent",
+                completedAt: new Date(),
+              })
+              .where(eq(providerAttempts.id, attempt!.id));
+            continue;
+          }
           const capabilitySnapshot = runtimeCapabilities(provider, discoveredRuntime);
           await db
             .update(providerAttempts)
@@ -623,6 +683,7 @@ async function destroySandbox(
     ? await provider.destroy(sandbox.providerResourceId)
     : undefined;
   await withTransaction(db, async (tx) => {
+    const stoppedAt = new Date();
     const [updated] = await tx
       .update(sandboxes)
       .set({
@@ -633,11 +694,30 @@ async function destroySandbox(
           ...sandbox.providerMetadata,
           ...(destroyResult?.providerMetadata ?? {}),
         },
-        deletedAt: new Date(),
-        updatedAt: new Date(),
+        deletedAt: stoppedAt,
+        updatedAt: stoppedAt,
       })
       .where(eq(sandboxes.id, sandbox.id))
       .returning();
+    await tx
+      .update(sandboxRecordings)
+      .set({
+        state: "failed",
+        error: {
+          code: "sandbox_stopped",
+          message: "sandbox stopped before the recording completed",
+          retryable: false,
+        },
+        operationToken: null,
+        stoppedAt,
+        updatedAt: stoppedAt,
+      })
+      .where(
+        and(
+          eq(sandboxRecordings.sandboxId, sandbox.id),
+          inArray(sandboxRecordings.state, ["starting", "recording", "stopping"]),
+        ),
+      );
     if (updated) {
       await recordSandboxEvent(tx, updated, "sandbox.deleted", {
         provider: provider.name,
@@ -684,17 +764,37 @@ async function pauseSandbox(
   }
   await provider.pause(sandbox.providerResourceId);
   await withTransaction(db, async (tx) => {
+    const pausedAt = new Date();
     const [updated] = await tx
       .update(sandboxes)
       .set({
         status: "paused",
         errorCode: null,
         errorMessage: null,
-        pausedAt: new Date(),
-        updatedAt: new Date(),
+        pausedAt,
+        updatedAt: pausedAt,
       })
       .where(eq(sandboxes.id, sandbox.id))
       .returning();
+    await tx
+      .update(sandboxRecordings)
+      .set({
+        state: "failed",
+        error: {
+          code: "sandbox_paused",
+          message: "sandbox paused before the recording completed",
+          retryable: false,
+        },
+        operationToken: null,
+        stoppedAt: pausedAt,
+        updatedAt: pausedAt,
+      })
+      .where(
+        and(
+          eq(sandboxRecordings.sandboxId, sandbox.id),
+          inArray(sandboxRecordings.state, ["starting", "recording", "stopping"]),
+        ),
+      );
     if (updated) {
       await recordSandboxEvent(tx, updated, "sandbox.paused", {
         provider: provider.name,
@@ -1953,13 +2053,6 @@ async function executeRecordingOperation(
     .returning();
   if (!claimed) return;
   try {
-    if (row.recording.operationToken) {
-      throw new ProviderError(
-        `recording ${action} was reclaimed without provider reconciliation support`,
-        "unknown_outcome",
-        false,
-      );
-    }
     if (!row.sandbox.providerResourceId || row.sandbox.status !== "ready") {
       throw new ProviderError("sandbox is not ready", "customer", false);
     }
@@ -1972,19 +2065,39 @@ async function executeRecordingOperation(
       throw new ProviderError("MP4 recording is unsupported", "unsupported", false);
     }
     await guard.assertOwned();
-    const result =
-      action === "start"
-        ? await provider.startComputerRecording?.({
-            providerResourceId: row.sandbox.providerResourceId,
-            format: "mp4",
-            label: row.recording.label ?? undefined,
-          })
-        : row.recording.providerRecordingId
-          ? await provider.stopComputerRecording?.({
-              providerResourceId: row.sandbox.providerResourceId,
-              recordingId: row.recording.providerRecordingId,
-            })
-          : undefined;
+    let result: ProviderComputerRecording | null | undefined;
+    if (row.recording.operationToken) {
+      result = await provider.reconcileComputerRecording?.({
+        providerResourceId: row.sandbox.providerResourceId,
+        recordingKey: row.recording.publicId,
+        recordingId: row.recording.providerRecordingId ?? undefined,
+      });
+      if (!result) {
+        throw new ProviderError(
+          `recording ${action} outcome could not be reconciled`,
+          "unknown_outcome",
+          false,
+        );
+      }
+      if (action === "stop" && result.state === "recording") {
+        result = await provider.stopComputerRecording?.({
+          providerResourceId: row.sandbox.providerResourceId,
+          recordingId: result.recordingId,
+        });
+      }
+    } else if (action === "start") {
+      result = await provider.startComputerRecording?.({
+        providerResourceId: row.sandbox.providerResourceId,
+        recordingKey: row.recording.publicId,
+        format: "mp4",
+        label: row.recording.label ?? undefined,
+      });
+    } else if (row.recording.providerRecordingId) {
+      result = await provider.stopComputerRecording?.({
+        providerResourceId: row.sandbox.providerResourceId,
+        recordingId: row.recording.providerRecordingId,
+      });
+    }
     if (!result) {
       throw new ProviderError(`recording ${action} is unsupported`, "unsupported", false);
     }
@@ -1992,7 +2105,7 @@ async function executeRecordingOperation(
     await db
       .update(sandboxRecordings)
       .set({
-        state: action === "start" ? "recording" : "stopped",
+        state: result.state,
         providerRecordingId: result.recordingId,
         filePath: result.filePath ?? row.recording.filePath,
         sizeBytes: result.sizeBytes ?? row.recording.sizeBytes,
@@ -2001,7 +2114,7 @@ async function executeRecordingOperation(
             ? row.recording.durationSeconds
             : Math.round(result.durationSeconds),
         startedAt: result.startedAt ?? row.recording.startedAt ?? new Date(),
-        stoppedAt: action === "stop" ? (result.stoppedAt ?? new Date()) : null,
+        stoppedAt: result.state === "stopped" ? (result.stoppedAt ?? new Date()) : null,
         error: null,
         operationToken: null,
         updatedAt: new Date(),
@@ -2497,7 +2610,10 @@ async function recordTerminalRuntimeFailure(
       .where(
         and(
           eq(runtimeOperations.id, payload.runtime_operation_id),
-          eq(runtimeOperations.operationToken, guard.token),
+          or(
+            eq(runtimeOperations.operationToken, guard.token),
+            isNull(runtimeOperations.operationToken),
+          ),
           inArray(runtimeOperations.state, ["queued", "running"]),
         ),
       );
@@ -2506,11 +2622,14 @@ async function recordTerminalRuntimeFailure(
   if (payload.job_type === "recording.start" || payload.job_type === "recording.stop") {
     await db
       .update(sandboxRecordings)
-      .set({ state: "failed", error: safe, updatedAt: new Date() })
+      .set({ state: "failed", error: safe, operationToken: null, updatedAt: new Date() })
       .where(
         and(
           eq(sandboxRecordings.id, payload.recording_id),
-          eq(sandboxRecordings.operationToken, guard.token),
+          or(
+            eq(sandboxRecordings.operationToken, guard.token),
+            isNull(sandboxRecordings.operationToken),
+          ),
           inArray(sandboxRecordings.state, ["starting", "recording", "stopping"]),
         ),
       );

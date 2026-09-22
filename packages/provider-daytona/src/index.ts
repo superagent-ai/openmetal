@@ -16,6 +16,7 @@ import type {
   ProviderListFilesResult,
   ProviderReadFileInput,
   ProviderReadFileResult,
+  ProviderReconcileRecordingInput,
   ProviderSandbox,
   ProviderSandboxCost,
   ProviderSandboxCostInput,
@@ -67,11 +68,19 @@ const DaytonaRecordingSchema = z
   .object({
     id: z.string().min(1),
     status: z.string().min(1),
+    label: z.string().optional(),
+    fileName: z.string().optional(),
     filePath: z.string().optional(),
     sizeBytes: z.number().int().nonnegative().optional(),
     durationSeconds: z.number().nonnegative().optional(),
     startTime: z.string().optional(),
     endTime: z.string().optional(),
+  })
+  .passthrough();
+
+const DaytonaRecordingsSchema = z
+  .object({
+    recordings: z.array(DaytonaRecordingSchema),
   })
   .passthrough();
 
@@ -550,7 +559,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       });
       return this.capabilities.runtime ?? {};
     } catch (error) {
-      if (error instanceof DaytonaRequestError && error.status === 404) {
+      if (error instanceof DaytonaRequestError && (error.status === 404 || error.status === 503)) {
         const { computer: _computer, ...runtime } = this.capabilities.runtime ?? {};
         return runtime;
       }
@@ -640,7 +649,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     const recording = DaytonaRecordingSchema.parse(
       await this.toolboxJson(input.providerResourceId, "/computeruse/recordings/start", {
         method: "POST",
-        body: JSON.stringify(input.label ? { label: input.label } : {}),
+        body: JSON.stringify({ label: input.recordingKey }),
         signal,
       }),
     );
@@ -659,6 +668,41 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       }),
     );
     return daytonaRecording(recording, "stopped");
+  }
+
+  async reconcileComputerRecording(
+    input: ProviderReconcileRecordingInput,
+  ): Promise<ProviderComputerRecording | null> {
+    const signal = deadlineSignal(input.signal, input.deadline, this.requestTimeoutMs);
+    try {
+      if (input.recordingId) {
+        const recording = DaytonaRecordingSchema.parse(
+          await this.toolboxJson(
+            input.providerResourceId,
+            `/computeruse/recordings/${encodeURIComponent(input.recordingId)}`,
+            { method: "GET", signal },
+          ),
+        );
+        return daytonaRecording(recording, daytonaRecordingState(recording.status));
+      }
+      const response = DaytonaRecordingsSchema.parse(
+        await this.toolboxJson(input.providerResourceId, "/computeruse/recordings", {
+          method: "GET",
+          signal,
+        }),
+      );
+      const recording = response.recordings.find(
+        (candidate) =>
+          candidate.label === input.recordingKey ||
+          candidate.fileName?.includes(input.recordingKey) === true,
+      );
+      return recording
+        ? daytonaRecording(recording, daytonaRecordingState(recording.status))
+        : null;
+    } catch (error) {
+      if (error instanceof DaytonaRequestError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   private resolveToolboxUrl(proxyUrl: string, providerResourceId: string): string {
@@ -830,6 +874,10 @@ function daytonaRecording(
     startedAt: recording.startTime ? new Date(recording.startTime) : undefined,
     stoppedAt: recording.endTime ? new Date(recording.endTime) : undefined,
   };
+}
+
+function daytonaRecordingState(status: string): "recording" | "stopped" {
+  return /^(completed|finished|stopped)$/i.test(status) ? "stopped" : "recording";
 }
 
 function daytonaSessionCommand(input: ProviderExecInput): string {

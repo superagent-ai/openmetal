@@ -19,6 +19,7 @@ import {
   type ProviderListFilesResult,
   type ProviderReadFileInput,
   type ProviderReadFileResult,
+  type ProviderReconcileRecordingInput,
   type ProviderRevokeHttpEndpointInput,
   type ProviderRevokeHttpEndpointResult,
   type ProviderSandbox,
@@ -92,6 +93,7 @@ export class FakeSandboxProvider implements SandboxProvider {
   >();
   readonly computerActions: ProviderComputerActionInput["action"][] = [];
   readonly recordings = new Map<string, ProviderComputerRecording>();
+  private readonly recordingKeys = new Map<string, string>();
   private failures: FakeProviderBehavior["failures"];
   private readonly executions = new Map<string, FakeExecutionState>();
   private executionSequence = 0;
@@ -243,6 +245,7 @@ export class FakeSandboxProvider implements SandboxProvider {
       startedAt: this.behavior.now ?? new Date(),
     };
     this.recordings.set(recording.recordingId, recording);
+    this.recordingKeys.set(input.recordingKey, recording.recordingId);
     return recording;
   }
 
@@ -265,6 +268,14 @@ export class FakeSandboxProvider implements SandboxProvider {
     };
     this.recordings.set(input.recordingId, recording);
     return recording;
+  }
+
+  async reconcileComputerRecording(
+    input: ProviderReconcileRecordingInput,
+  ): Promise<ProviderComputerRecording | null> {
+    this.find(input.providerResourceId);
+    const recordingId = input.recordingId ?? this.recordingKeys.get(input.recordingKey);
+    return recordingId ? (this.recordings.get(recordingId) ?? null) : null;
   }
 
   async getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost> {

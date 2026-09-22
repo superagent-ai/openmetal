@@ -346,12 +346,18 @@ export type ProviderComputerScreenshot = {
 };
 
 export type ProviderStartRecordingInput = ProviderComputerOperation & {
+  recordingKey: string;
   label?: string;
   format: "mp4";
 };
 
 export type ProviderStopRecordingInput = ProviderComputerOperation & {
   recordingId: string;
+};
+
+export type ProviderReconcileRecordingInput = ProviderComputerOperation & {
+  recordingKey: string;
+  recordingId?: string;
 };
 
 export type ProviderComputerRecording = {
@@ -372,6 +378,9 @@ export interface ProviderComputerRuntime {
   ): Promise<ProviderComputerScreenshot>;
   startComputerRecording?(input: ProviderStartRecordingInput): Promise<ProviderComputerRecording>;
   stopComputerRecording?(input: ProviderStopRecordingInput): Promise<ProviderComputerRecording>;
+  reconcileComputerRecording?(
+    input: ProviderReconcileRecordingInput,
+  ): Promise<ProviderComputerRecording | null>;
 }
 
 export interface SandboxRuntimeProvider

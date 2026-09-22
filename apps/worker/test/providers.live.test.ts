@@ -518,6 +518,11 @@ function assertRuntimeCapabilityDeclarations(provider: SandboxProvider): void {
       Boolean(runtime?.computer?.recording),
       provider.stopComputerRecording,
     ],
+    [
+      "reconcileComputerRecording",
+      Boolean(runtime?.computer?.recording),
+      provider.reconcileComputerRecording,
+    ],
   ] as const;
   for (const [name, declared, method] of declarations) {
     expect(typeof method === "function", `${provider.name} ${name} declaration`).toBe(

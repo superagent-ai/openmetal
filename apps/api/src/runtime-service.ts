@@ -504,14 +504,22 @@ export async function stopRecording(db: MetalDb, scope: Scope & { recordingId: s
     if (recording.row.state === "stopped" || recording.row.state === "failed") {
       return recording.serialized;
     }
+    if (recording.row.state === "stopping") {
+      return recording.serialized;
+    }
     if (recording.row.state === "starting") {
       throw new ApiError(409, "invalid_recording_state", "recording has not started");
     }
     const [updated] = await tx
       .update(sandboxRecordings)
       .set({ state: "stopping", operationToken: null, updatedAt: new Date() })
-      .where(eq(sandboxRecordings.id, recording.row.id))
+      .where(
+        and(eq(sandboxRecordings.id, recording.row.id), eq(sandboxRecordings.state, "recording")),
+      )
       .returning();
+    if (!updated) {
+      return (await getRecording(tx, scope)).serialized;
+    }
     await tx
       .insert(outboxJobs)
       .values({
@@ -520,7 +528,7 @@ export async function stopRecording(db: MetalDb, scope: Scope & { recordingId: s
         payload: { job_type: "recording.stop", recording_id: recording.row.id },
       })
       .onConflictDoNothing();
-    return serializeRecording(updated ?? recording.row, scope.sandboxId);
+    return serializeRecording(updated, scope.sandboxId);
   });
 }
 

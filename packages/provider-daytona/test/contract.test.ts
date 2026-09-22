@@ -52,6 +52,7 @@ it("uses Daytona native computer actions, screenshots, and recordings", async ()
       });
     }
     if (url.endsWith("/computeruse/recordings/start")) {
+      expect(JSON.parse(String(init?.body))).toEqual({ label: "rec_test" });
       return Response.json({
         id: "recording-1",
         status: "recording",
@@ -71,6 +72,16 @@ it("uses Daytona native computer actions, screenshots, and recordings", async ()
         endTime: "2026-09-22T12:00:01.000Z",
         durationSeconds: 1,
         sizeBytes: 1024,
+      });
+    }
+    if (url.endsWith("/computeruse/recordings/recording-1")) {
+      return Response.json({
+        id: "recording-1",
+        status: "stopped",
+        fileName: "recording-1.mp4",
+        filePath: "/workspace/recording-1.mp4",
+        startTime: "2026-09-22T12:00:00.000Z",
+        endTime: "2026-09-22T12:00:01.000Z",
       });
     }
     throw new Error(`Unexpected URL: ${url}`);
@@ -93,6 +104,7 @@ it("uses Daytona native computer actions, screenshots, and recordings", async ()
   });
   const recording = await provider.startComputerRecording({
     providerResourceId: "sandbox-1",
+    recordingKey: "rec_test",
     format: "mp4",
     label: "demo",
   });
@@ -110,6 +122,16 @@ it("uses Daytona native computer actions, screenshots, and recordings", async ()
     state: "stopped",
     sizeBytes: 1024,
     durationSeconds: 1,
+  });
+  await expect(
+    provider.reconcileComputerRecording({
+      providerResourceId: "sandbox-1",
+      recordingKey: "rec_test",
+      recordingId: "recording-1",
+    }),
+  ).resolves.toMatchObject({
+    recordingId: "recording-1",
+    state: "stopped",
   });
 });
 
@@ -132,6 +154,28 @@ it("reconciles a missing Daytona sandbox as absent", async () => {
   });
 
   await expect(provider.reconcileCreate("sbx_missing")).resolves.toBeNull();
+});
+
+it("treats an unavailable computer-use service as an absent sandbox capability", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.endsWith("/computeruse/status")) return new Response(null, { status: 503 });
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(provider.discoverRuntimeCapabilities("sandbox-1")).resolves.toMatchObject({
+    process: { exec: true },
+    files: { read: true },
+  });
+  expect((await provider.discoverRuntimeCapabilities("sandbox-1")).computer).toBeUndefined();
 });
 
 it("marks Daytona analytics prices as provider reported", async () => {

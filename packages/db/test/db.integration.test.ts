@@ -58,6 +58,69 @@ describe("database readiness", () => {
     ).rejects.toThrow(/append-only/);
   });
 
+  it("accepts a 48 hour sandbox ttl and rejects one minute more", async () => {
+    const organizationId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    await database.sql`
+      insert into public.organizations (id, name, slug)
+      values (
+        ${organizationId},
+        'TTL Org',
+        ${`ttl-${organizationId.slice(0, 8)}`}
+      )
+    `;
+    await database.sql`
+      insert into public.projects (id, organization_id, name, slug)
+      values (
+        ${projectId},
+        ${organizationId},
+        'TTL Project',
+        ${`ttl-${projectId.slice(0, 8)}`}
+      )
+    `;
+    const sandbox = {
+      source: JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" }),
+      resources: JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" }),
+      fallback: JSON.stringify({ providers: [] }),
+    };
+    await expect(
+      database.sql`
+        insert into metal.sandboxes (
+          organization_id, project_id, provider, primary_provider, billing_mode, status,
+          source, resource_requirements, lifecycle, fallback, provider_options, environment,
+          secret_refs, metadata, ttl_minutes, created_by
+        )
+        values (
+          ${organizationId}, ${projectId}, 'e2b', 'e2b', 'managed', 'requested',
+          ${sandbox.source}::jsonb,
+          ${sandbox.resources}::jsonb,
+          ${JSON.stringify({ runtime_timeout_seconds: 172_800 })}::jsonb,
+          ${sandbox.fallback}::jsonb,
+          '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+          2880, ${crypto.randomUUID()}
+        )
+      `,
+    ).resolves.toHaveLength(0);
+    await expect(
+      database.sql`
+        insert into metal.sandboxes (
+          organization_id, project_id, provider, primary_provider, billing_mode, status,
+          source, resource_requirements, lifecycle, fallback, provider_options, environment,
+          secret_refs, metadata, ttl_minutes, created_by
+        )
+        values (
+          ${organizationId}, ${projectId}, 'e2b', 'e2b', 'managed', 'requested',
+          ${sandbox.source}::jsonb,
+          ${sandbox.resources}::jsonb,
+          ${JSON.stringify({ runtime_timeout_seconds: 172_860 })}::jsonb,
+          ${sandbox.fallback}::jsonb,
+          '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+          2881, ${crypto.randomUUID()}
+        )
+      `,
+    ).rejects.toThrow(/sandboxes_ttl_range/);
+  });
+
   it("rejects unbalanced ledger entries", async () => {
     const organizationId = crypto.randomUUID();
     await database.sql`

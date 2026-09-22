@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -258,6 +259,7 @@ export const sandboxes = metalSchema.table(
     index("sandboxes_provider_credential_id_idx")
       .on(table.providerCredentialId)
       .where(sql`${table.providerCredentialId} is not null`),
+    check("sandboxes_ttl_range", sql`${table.ttlMinutes} between 1 and 2880`),
   ],
 );
 

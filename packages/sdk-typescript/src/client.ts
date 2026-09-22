@@ -3,8 +3,11 @@ import {
   BillingCheckoutResponseSchema,
   BillingQuoteSchema,
   BillingSetupResponseSchema,
+  ComputerActionRequestSchema,
+  ComputerScreenshotRequestSchema,
   CreateProcessRequestSchema,
   CreateSandboxEndpointRequestSchema,
+  CreateSandboxRecordingRequestSchema,
   CreateSandboxRequestSchema,
   ConfiguredProviderCredentialSchema,
   DeleteFileRequestSchema,
@@ -28,11 +31,14 @@ import {
   ProviderCredentialListResponseSchema,
   ReadFileRequestSchema,
   RuntimeOperationSchema,
+  SandboxCapabilitiesSchema,
   SandboxEndpointListResponseSchema,
   SandboxEndpointSchema,
   SandboxMutationSchema,
   SandboxListResponseSchema,
   SandboxSchema,
+  SandboxRecordingListResponseSchema,
+  SandboxRecordingSchema,
   WriteFileRequestSchema,
   CreateWebhookEndpointRequestSchema,
   UpdateWebhookEndpointRequestSchema,
@@ -52,6 +58,7 @@ import {
   type ProcessEvent,
   type ProviderCredentialInput,
   type RuntimeOperation,
+  type SandboxRecording,
   type SandboxEndpoint,
   type SandboxMutation,
 } from "@openmetal/contracts";
@@ -984,6 +991,120 @@ export class MetalClient {
       }) as Promise<SandboxEndpoint>,
   };
 
+  readonly computer = {
+    action: (
+      sandboxId: string,
+      input: z.input<typeof ComputerActionRequestSchema>,
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/computer/actions`,
+        body: ComputerActionRequestSchema.parse(input),
+        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        projectId: options?.projectId,
+        schema: RuntimeOperationSchema,
+      }) as Promise<RuntimeOperation>,
+    screenshot: (
+      sandboxId: string,
+      input: z.input<typeof ComputerScreenshotRequestSchema> = {},
+      options?: { projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/computer/screenshots`,
+        body: ComputerScreenshotRequestSchema.parse(input),
+        projectId: options?.projectId,
+        schema: RuntimeOperationSchema,
+      }) as Promise<RuntimeOperation>,
+    capture: async (
+      sandboxId: string,
+      input: z.input<typeof ComputerScreenshotRequestSchema> = {},
+      options: RuntimeWaitOptions = {},
+    ) => {
+      const operation = await this.computer.screenshot(sandboxId, input, options);
+      const completed = await this.runtimeOperations.wait(operation, options);
+      if (completed.state !== "succeeded" || completed.result?.kind !== "computer_screenshot") {
+        throw new Error(completed.error?.message ?? "computer screenshot failed");
+      }
+      return {
+        ...completed.result,
+        data: base64ToBytes(completed.result.data_base64),
+      };
+    },
+  };
+
+  readonly recordings = {
+    start: (
+      sandboxId: string,
+      input: z.input<typeof CreateSandboxRecordingRequestSchema> = {},
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/recordings`,
+        body: CreateSandboxRecordingRequestSchema.parse(input),
+        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        projectId: options?.projectId,
+        schema: SandboxRecordingSchema,
+      }) as Promise<SandboxRecording>,
+    get: (sandboxId: string, recordingId: string, options?: { projectId?: string }) =>
+      this.request({
+        method: "GET",
+        path: `/v1/sandboxes/${sandboxId}/recordings/${recordingId}`,
+        projectId: options?.projectId,
+        schema: SandboxRecordingSchema,
+      }) as Promise<SandboxRecording>,
+    list: (sandboxId: string, options?: { cursor?: string; limit?: number; projectId?: string }) =>
+      this.request({
+        method: "GET",
+        path: `/v1/sandboxes/${sandboxId}/recordings`,
+        query: { cursor: options?.cursor, limit: options?.limit },
+        projectId: options?.projectId,
+        schema: SandboxRecordingListResponseSchema,
+      }),
+    stop: (
+      sandboxId: string,
+      recordingId: string,
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: `/v1/sandboxes/${sandboxId}/recordings/${recordingId}/actions/stop`,
+        idempotencyKey: options?.idempotencyKey,
+        projectId: options?.projectId,
+        schema: SandboxRecordingSchema,
+      }) as Promise<SandboxRecording>,
+    wait: async (
+      recordingOrId: SandboxRecording | string,
+      options: RuntimeWaitOptions & {
+        sandboxId?: string;
+        state?: "recording" | "stopped";
+      } = {},
+    ) => {
+      const recordingId = typeof recordingOrId === "string" ? recordingOrId : recordingOrId.id;
+      const sandboxId =
+        typeof recordingOrId === "string" ? options.sandboxId : recordingOrId.sandbox_id;
+      if (!sandboxId) throw new Error("sandboxId is required when waiting by recording ID");
+      const target =
+        options.state ??
+        (typeof recordingOrId !== "string" &&
+        (recordingOrId.state === "stopping" || recordingOrId.state === "stopped")
+          ? "stopped"
+          : "recording");
+      const deadline = Date.now() + (options.timeoutMs ?? 180_000);
+      while (Date.now() < deadline) {
+        if (options.signal?.aborted) {
+          throw options.signal.reason ?? new Error("recording wait aborted");
+        }
+        const recording = await this.recordings.get(sandboxId, recordingId, options);
+        if (recording.state === target || recording.state === "failed") return recording;
+        await abortableSleep(options.pollIntervalMs ?? 500, options.signal);
+      }
+      throw new Error(`recording ${recordingId} did not reach ${target} before timeout`);
+    },
+  };
+
   readonly sandboxes = {
     list: (projectId: string) =>
       this.request({
@@ -1033,6 +1154,13 @@ export class MetalClient {
         path: `/v1/sandboxes/${sandboxId}`,
         projectId: options?.projectId,
         schema: SandboxSchema,
+      }),
+    capabilities: (sandboxId: string, options?: { projectId?: string }) =>
+      this.request({
+        method: "GET",
+        path: `/v1/sandboxes/${sandboxId}/capabilities`,
+        projectId: options?.projectId,
+        schema: SandboxCapabilitiesSchema,
       }),
     pauseAsync: (sandboxId: string, options?: { idempotencyKey?: string; projectId?: string }) =>
       this.request({

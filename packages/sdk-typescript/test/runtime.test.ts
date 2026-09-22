@@ -39,7 +39,13 @@ function process(state = "running") {
 }
 
 function runtimeOperation(
-  kind: "filesystem_read" | "filesystem_write" | "filesystem_list" | "filesystem_delete",
+  kind:
+    | "filesystem_read"
+    | "filesystem_write"
+    | "filesystem_list"
+    | "filesystem_delete"
+    | "computer_action"
+    | "computer_screenshot",
   state = "queued",
   result: unknown = null,
 ) {
@@ -72,6 +78,33 @@ function endpoint(state = "active") {
     revoked_at: state === "revoked" ? now : null,
     error: null,
     created_at: now,
+    updated_at: now,
+  };
+}
+
+function recording(state = "recording") {
+  return {
+    id: "rec_test",
+    type: "sandbox_recording",
+    project_id: "prj_test",
+    sandbox_id: "sbx_test",
+    state,
+    format: "mp4",
+    label: null,
+    artifact:
+      state === "stopped"
+        ? {
+            kind: "sandbox_file",
+            path: "/workspace/rec_test.mp4",
+            media_type: "video/mp4",
+          }
+        : null,
+    size_bytes: state === "stopped" ? 1024 : null,
+    duration_seconds: state === "stopped" ? 1 : null,
+    error: null,
+    created_at: now,
+    started_at: now,
+    stopped_at: state === "stopped" ? now : null,
     updated_at: now,
   };
 }
@@ -634,6 +667,67 @@ describe("MetalClient runtime namespaces", () => {
         method: "DELETE",
         key: null,
       },
+    ]);
+  });
+
+  it("exposes portable computer and recording routes", async () => {
+    const requests: Array<{ url: string; method?: string; key: string | null }> = [];
+    const client = new MetalClient({
+      baseUrl: "http://localhost:4000",
+      accessToken: async () => "metal_sk_test",
+      projectId: "prj_test",
+      fetch: async (url, init) => {
+        requests.push({
+          url: String(url),
+          method: init?.method,
+          key: new Headers(init?.headers).get("idempotency-key"),
+        });
+        const path = String(url);
+        if (path.endsWith("/computer/actions")) {
+          return jsonResponse(202, runtimeOperation("computer_action"));
+        }
+        if (path.endsWith("/computer/screenshots")) {
+          return jsonResponse(202, runtimeOperation("computer_screenshot"));
+        }
+        if (path.endsWith("/recordings") && init?.method === "GET") {
+          return jsonResponse(200, { recordings: [recording()], next_cursor: null });
+        }
+        if (path.endsWith("/recordings/rec_test") && init?.method === "GET") {
+          return jsonResponse(200, recording("stopped"));
+        }
+        return jsonResponse(
+          202,
+          recording(path.endsWith("/actions/stop") ? "stopped" : "recording"),
+        );
+      },
+    });
+
+    await client.computer.action(
+      "sbx_test",
+      { type: "mouse_click", x: 1, y: 2 },
+      { idempotencyKey: "action-key" },
+    );
+    await client.computer.screenshot("sbx_test");
+    await client.recordings.start("sbx_test", {}, { idempotencyKey: "recording-key" });
+    await client.recordings.list("sbx_test");
+    const stopped = await client.recordings.stop("sbx_test", "rec_test", {
+      idempotencyKey: "stop-key",
+    });
+    await expect(client.recordings.wait(stopped, { pollIntervalMs: 0 })).resolves.toMatchObject({
+      state: "stopped",
+    });
+
+    expect(requests.map(({ method, url, key }) => [method, url, key])).toEqual([
+      ["POST", "http://localhost:4000/v1/sandboxes/sbx_test/computer/actions", "action-key"],
+      ["POST", "http://localhost:4000/v1/sandboxes/sbx_test/computer/screenshots", null],
+      ["POST", "http://localhost:4000/v1/sandboxes/sbx_test/recordings", "recording-key"],
+      ["GET", "http://localhost:4000/v1/sandboxes/sbx_test/recordings", null],
+      [
+        "POST",
+        "http://localhost:4000/v1/sandboxes/sbx_test/recordings/rec_test/actions/stop",
+        "stop-key",
+      ],
+      ["GET", "http://localhost:4000/v1/sandboxes/sbx_test/recordings/rec_test", null],
     ]);
   });
 });

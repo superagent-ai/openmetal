@@ -16,9 +16,123 @@ it("declares the Daytona provider contract", () => {
       delete: true,
     },
     httpEndpoints: { expose: false, revoke: false },
+    computer: {
+      implementation: "native",
+      screenshot: { formats: ["png", "jpeg"] },
+      recording: { formats: ["mp4"] },
+    },
   });
   expect(provider.exposeHttpEndpoint).toBeUndefined();
   expect(provider.revokeHttpEndpoint).toBeUndefined();
+});
+
+it("uses Daytona native computer actions, screenshots, and recordings", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.endsWith("/computeruse/start")) return Response.json({ status: {} });
+    if (url.endsWith("/computeruse/mouse/click")) {
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        x: 10,
+        y: 20,
+        button: "left",
+      });
+      return Response.json({ x: 10, y: 20 });
+    }
+    if (url.includes("/computeruse/screenshot?")) {
+      return Response.json({
+        screenshot: Buffer.from("png-bytes").toString("base64"),
+        cursorPosition: { x: 1, y: 2 },
+      });
+    }
+    if (url.endsWith("/computeruse/recordings/start")) {
+      expect(JSON.parse(String(init?.body))).toEqual({ label: "rec_test" });
+      return Response.json({
+        id: "recording-1",
+        status: "recording",
+        fileName: "recording-1.mp4",
+        filePath: "/workspace/recording-1.mp4",
+        startTime: "2026-09-22T12:00:00.000Z",
+      });
+    }
+    if (url.endsWith("/computeruse/recordings/stop")) {
+      expect(JSON.parse(String(init?.body))).toEqual({ id: "recording-1" });
+      return Response.json({
+        id: "recording-1",
+        status: "stopped",
+        fileName: "recording-1.mp4",
+        filePath: "/workspace/recording-1.mp4",
+        startTime: "2026-09-22T12:00:00.000Z",
+        endTime: "2026-09-22T12:00:01.000Z",
+        durationSeconds: 1,
+        sizeBytes: 1024,
+      });
+    }
+    if (url.endsWith("/computeruse/recordings/recording-1")) {
+      return Response.json({
+        id: "recording-1",
+        status: "stopped",
+        fileName: "recording-1.mp4",
+        filePath: "/workspace/recording-1.mp4",
+        startTime: "2026-09-22T12:00:00.000Z",
+        endTime: "2026-09-22T12:00:01.000Z",
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await provider.executeComputerAction({
+    providerResourceId: "sandbox-1",
+    action: { type: "mouse_click", x: 10, y: 20, button: "left" },
+  });
+  await expect(
+    provider.captureComputerScreenshot({
+      providerResourceId: "sandbox-1",
+      format: "png",
+    }),
+  ).resolves.toMatchObject({
+    format: "png",
+    data: new Uint8Array(Buffer.from("png-bytes")),
+    cursorPosition: { x: 1, y: 2 },
+  });
+  const recording = await provider.startComputerRecording({
+    providerResourceId: "sandbox-1",
+    recordingKey: "rec_test",
+    format: "mp4",
+    label: "demo",
+  });
+  expect(recording).toMatchObject({
+    recordingId: "recording-1",
+    state: "recording",
+    filePath: "/workspace/recording-1.mp4",
+  });
+  await expect(
+    provider.stopComputerRecording({
+      providerResourceId: "sandbox-1",
+      recordingId: recording.recordingId,
+    }),
+  ).resolves.toMatchObject({
+    state: "stopped",
+    sizeBytes: 1024,
+    durationSeconds: 1,
+  });
+  await expect(
+    provider.reconcileComputerRecording({
+      providerResourceId: "sandbox-1",
+      recordingKey: "rec_test",
+      recordingId: "recording-1",
+    }),
+  ).resolves.toMatchObject({
+    recordingId: "recording-1",
+    state: "stopped",
+  });
 });
 
 it("treats repeated destroy conflicts as idempotent success", async () => {
@@ -40,6 +154,90 @@ it("reconciles a missing Daytona sandbox as absent", async () => {
   });
 
   await expect(provider.reconcileCreate("sbx_missing")).resolves.toBeNull();
+});
+
+it("treats an unavailable computer-use service as an absent sandbox capability", async () => {
+  vi.useFakeTimers();
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.endsWith("/computeruse/status")) return new Response(null, { status: 503 });
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const discovery = provider.discoverRuntimeCapabilities("sandbox-1");
+  await vi.advanceTimersByTimeAsync(4_000);
+  const capabilities = await discovery;
+  expect(capabilities).toMatchObject({
+    process: { exec: true },
+    files: { read: true },
+  });
+  expect(capabilities.computer).toBeUndefined();
+  expect(fetchImpl).toHaveBeenCalledTimes(6);
+  vi.useRealTimers();
+});
+
+it("does not advertise recording when FFmpeg is unavailable", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.endsWith("/computeruse/status")) return Response.json({ status: "running" });
+    if (url.endsWith("/process/session")) return Response.json({});
+    if (url.includes("/process/session/") && url.endsWith("/exec")) {
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        command: expect.stringContaining("command -v ffmpeg"),
+      });
+      return Response.json({
+        cmdId: "ffmpeg-probe",
+        stdout: "",
+        stderr: "",
+        exitCode: 127,
+      });
+    }
+    if (url.includes("/process/session/") && init?.method === "DELETE") {
+      return Response.json({});
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const capabilities = await provider.discoverRuntimeCapabilities("sandbox-1");
+
+  expect(capabilities.computer?.screenshot).toBeDefined();
+  expect(capabilities.computer?.recording).toBeUndefined();
+});
+
+it("keeps desktop capabilities when the recording probe is unavailable", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.endsWith("/computeruse/status")) return Response.json({ status: "running" });
+    if (url.endsWith("/process/session")) return new Response(null, { status: 503 });
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const capabilities = await provider.discoverRuntimeCapabilities("sandbox-1");
+
+  expect(capabilities.computer?.screenshot).toBeDefined();
+  expect(capabilities.computer?.actions.length).toBeGreaterThan(0);
+  expect(capabilities.computer?.recording).toBeUndefined();
 });
 
 it("marks Daytona analytics prices as provider reported", async () => {

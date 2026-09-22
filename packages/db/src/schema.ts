@@ -204,6 +204,7 @@ export const sandboxes = metalSchema.table(
       .$type<Record<string, unknown>>()
       .notNull()
       .default({}),
+    providerCapabilities: jsonb("provider_capabilities").$type<Record<string, unknown>>(),
     source: jsonb("source").$type<Record<string, unknown>>().notNull().default({}),
     resourceRequirements: jsonb("resource_requirements")
       .$type<Record<string, unknown>>()
@@ -396,6 +397,8 @@ export const runtimeOperationKindEnum = metalSchema.enum("runtime_operation_kind
   "filesystem_write",
   "filesystem_list",
   "filesystem_delete",
+  "computer_action",
+  "computer_screenshot",
 ]);
 
 export const runtimeOperations = metalSchema.table(
@@ -484,6 +487,52 @@ export const sandboxEndpoints = metalSchema.table(
     uniqueIndex("sandbox_endpoints_active_port_key")
       .on(table.sandboxId, table.port)
       .where(sql`${table.state} in ('provisioning', 'active', 'revoking')`),
+  ],
+);
+
+export const sandboxRecordingStateEnum = metalSchema.enum("sandbox_recording_state", [
+  "starting",
+  "recording",
+  "stopping",
+  "stopped",
+  "failed",
+]);
+
+export const sandboxRecordings = metalSchema.table(
+  "sandbox_recordings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    publicId: text("public_id")
+      .notNull()
+      .default(sql`'rec_' || replace(gen_random_uuid()::text, '-', '')`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    sandboxId: uuid("sandbox_id")
+      .notNull()
+      .references(() => sandboxes.id),
+    state: sandboxRecordingStateEnum("state").notNull().default("starting"),
+    format: text("format").notNull().default("mp4"),
+    label: text("label"),
+    providerRecordingId: text("provider_recording_id"),
+    filePath: text("file_path"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    durationSeconds: integer("duration_seconds"),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    providerCapabilities: jsonb("provider_capabilities").$type<Record<string, unknown>>(),
+    operationToken: uuid("operation_token"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    stoppedAt: timestamp("stopped_at", { withTimezone: true, mode: "date" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("sandbox_recordings_public_id_key").on(table.publicId),
+    index("sandbox_recordings_sandbox_created_idx").on(table.sandboxId, table.createdAt),
+    index("sandbox_recordings_project_created_idx").on(table.projectId, table.createdAt),
   ],
 );
 
@@ -987,6 +1036,7 @@ export const schema = {
   processEvents,
   runtimeOperations,
   sandboxEndpoints,
+  sandboxRecordings,
   providerAttempts,
   providerCostSnapshots,
   domainEvents,

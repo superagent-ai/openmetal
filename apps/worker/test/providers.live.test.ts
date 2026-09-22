@@ -498,6 +498,31 @@ function assertRuntimeCapabilityDeclarations(provider: SandboxProvider): void {
     ["deleteFile", runtime?.files?.delete, provider.deleteFile],
     ["exposeHttpEndpoint", runtime?.httpEndpoints?.expose, provider.exposeHttpEndpoint],
     ["revokeHttpEndpoint", runtime?.httpEndpoints?.revoke, provider.revokeHttpEndpoint],
+    [
+      "executeComputerAction",
+      Boolean(runtime?.computer?.actions.length),
+      provider.executeComputerAction,
+    ],
+    [
+      "captureComputerScreenshot",
+      Boolean(runtime?.computer?.screenshot),
+      provider.captureComputerScreenshot,
+    ],
+    [
+      "startComputerRecording",
+      Boolean(runtime?.computer?.recording),
+      provider.startComputerRecording,
+    ],
+    [
+      "stopComputerRecording",
+      Boolean(runtime?.computer?.recording),
+      provider.stopComputerRecording,
+    ],
+    [
+      "reconcileComputerRecording",
+      Boolean(runtime?.computer?.recording),
+      provider.reconcileComputerRecording,
+    ],
   ] as const;
   for (const [name, declared, method] of declarations) {
     expect(typeof method === "function", `${provider.name} ${name} declaration`).toBe(

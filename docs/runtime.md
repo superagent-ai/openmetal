@@ -75,20 +75,39 @@ List pagination defaults to 50 and permits 1 through 100 items. An invalid curso
 
 Delete returns `202` and moves an active lease toward `revoked`; repeated deletion of an already revoked or expired endpoint returns its current representation. The worker is the single project-safe expiry authority: it records `endpoint.expired`, then queues verified provider revocation. The API never performs an unscoped expiry update while listing. A provider response cannot extend the absolute lease expiry recorded when the API accepted creation, and activation is conditional so concurrent deletion or expiry wins. Endpoint states are `provisioning`, `active`, `revoking`, `revoked`, `expired`, and `failed`.
 
+## Computer use and recordings
+
+Computer use is capability-driven. Call `GET /v1/sandboxes/{sandbox_id}/capabilities` after a sandbox becomes ready instead of branching on its provider name. The manifest records whether the implementation is native or emulated, the available action kinds, screenshot formats and limits, and recording formats observed for that sandbox.
+
+Portable routes are:
+
+```text
+POST /v1/sandboxes/{sandbox_id}/computer/actions
+POST /v1/sandboxes/{sandbox_id}/computer/screenshots
+GET  /v1/sandboxes/{sandbox_id}/recordings
+POST /v1/sandboxes/{sandbox_id}/recordings
+GET  /v1/sandboxes/{sandbox_id}/recordings/{recording_id}
+POST /v1/sandboxes/{sandbox_id}/recordings/{recording_id}/actions/stop
+```
+
+Actions and screenshots are asynchronous runtime operations. Actions include pointer move, click, drag and scroll plus keyboard text, key and hotkey input. A successful screenshot result contains bounded base64 image bytes.
+
+Recordings are durable resources with `starting`, `recording`, `stopping`, `stopped`, and `failed` states. MP4 output is normalized as a `sandbox_file` artifact, so clients download it through the existing chunked filesystem helper regardless of whether the provider recorded natively or an adapter used a local fallback. Request `features.computer_use` or `features.recording` during sandbox creation when routing must reject providers that cannot satisfy those capabilities.
+
 ## Current provider coverage
 
-| Provider    | Processes                     | Filesystem                     | HTTP endpoints |
-| ----------- | ----------------------------- | ------------------------------ | -------------- |
-| Blaxel      | Execute; buffered output      | Read, write, list, delete      | Yes            |
-| Cloudflare  | Execute and stream; no cancel | Read/write within `/workspace` | No             |
-| CodeSandbox | No                            | No                             | No             |
-| Daytona     | Execute; buffered output      | Read, write, list, delete      | No             |
-| E2B         | Execute and stream; no cancel | Read, write, list, delete      | No             |
-| Freestyle   | Execute; buffered output      | Read, write, list, delete      | No             |
-| Modal       | Execute and stream; no cancel | Read, write, list, delete      | No             |
-| Northflank  | No                            | No                             | No             |
-| Runloop     | Execute; buffered output      | Read and write                 | No             |
-| Vercel      | Execute and stream; no cancel | Read and write                 | No             |
+| Provider    | Processes                     | Filesystem                     | HTTP endpoints | Computer use       |
+| ----------- | ----------------------------- | ------------------------------ | -------------- | ------------------ |
+| Blaxel      | Execute; buffered output      | Read, write, list, delete      | Yes            | No                 |
+| Cloudflare  | Execute and stream; no cancel | Read/write within `/workspace` | No             | No                 |
+| CodeSandbox | No                            | No                             | No             | No                 |
+| Daytona     | Execute; buffered output      | Read, write, list, delete      | No             | Native, MP4 record |
+| E2B         | Execute and stream; no cancel | Read, write, list, delete      | No             | No                 |
+| Freestyle   | Execute; buffered output      | Read, write, list, delete      | No             | No                 |
+| Modal       | Execute and stream; no cancel | Read, write, list, delete      | No             | No                 |
+| Northflank  | No                            | No                             | No             | No                 |
+| Runloop     | Execute; buffered output      | Read and write                 | No             | No                 |
+| Vercel      | Execute and stream; no cancel | Read and write                 | No             | No                 |
 
 The worker accepts both streaming and buffered process adapters. Blaxel, Daytona, Freestyle, and Runloop return output after command completion, so callers cannot react to their output while the command runs and should not infer stdout/stderr interleaving from event sequence. Cloudflare supports an omitted or empty environment but rejects non-empty environment overrides. E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Daytona, E2B, Freestyle, Modal, Runloop, and Vercel reject append writes; Freestyle supports only overwrite writes, and Runloop rejects parent creation. Blaxel, Daytona, E2B, Freestyle, and Modal implement file list/delete. Freestyle's native buffered exec is limited to 300 seconds.
 
@@ -112,4 +131,4 @@ HTTP errors use:
 
 Common runtime codes include `idempotency_key_required`, `idempotency_mismatch`, `invalid_sandbox_state`, `process_terminal`, `endpoint_conflict`, `capability_unsupported`, `not_found`, and `validation_error`. Provider execution failures are recorded on the process, runtime operation, or endpoint instead of changing the already returned `202`.
 
-Once provider work starts, resources can include a `provider_capabilities` snapshot. Treat it as observed metadata for that operation, not a portable guarantee for another provider or sandbox. See the provider matrix in the OpenMetal skill's [provider reference](../skills/openmetal/references/providers-and-billing.md) for current adapter limitations.
+Every newly provisioned sandbox stores an observed `provider_capabilities` snapshot. Runtime resources copy that snapshot for auditability. Treat it as a guarantee for that sandbox snapshot only, not for another provider, image, or future sandbox. See the provider matrix in the OpenMetal skill's [provider reference](../skills/openmetal/references/providers-and-billing.md) for current adapter limitations.

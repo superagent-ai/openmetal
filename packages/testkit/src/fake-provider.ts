@@ -3,6 +3,9 @@ import {
   resolveProviderResources,
   type ProviderCancelExecInput,
   type ProviderCancelExecResult,
+  type ProviderComputerActionInput,
+  type ProviderComputerRecording,
+  type ProviderComputerScreenshotInput,
   type ProviderCreateSandboxInput,
   type ProviderDeleteFileInput,
   type ProviderDeleteFileResult,
@@ -16,11 +19,14 @@ import {
   type ProviderListFilesResult,
   type ProviderReadFileInput,
   type ProviderReadFileResult,
+  type ProviderReconcileRecordingInput,
   type ProviderRevokeHttpEndpointInput,
   type ProviderRevokeHttpEndpointResult,
   type ProviderSandbox,
   type ProviderSandboxCost,
   type ProviderSandboxCostInput,
+  type ProviderStartRecordingInput,
+  type ProviderStopRecordingInput,
   type ProviderWriteFileInput,
   type ProviderWriteFileResult,
   type SandboxProvider,
@@ -34,6 +40,10 @@ export type FakeRuntimeOperation =
   | "writeFile"
   | "listFiles"
   | "deleteFile"
+  | "executeComputerAction"
+  | "captureComputerScreenshot"
+  | "startComputerRecording"
+  | "stopComputerRecording"
   | "exposeHttpEndpoint"
   | "revokeHttpEndpoint";
 
@@ -81,6 +91,9 @@ export class FakeSandboxProvider implements SandboxProvider {
       revoked: boolean;
     }
   >();
+  readonly computerActions: ProviderComputerActionInput["action"][] = [];
+  readonly recordings = new Map<string, ProviderComputerRecording>();
+  private readonly recordingKeys = new Map<string, string>();
   private failures: FakeProviderBehavior["failures"];
   private readonly executions = new Map<string, FakeExecutionState>();
   private executionSequence = 0;
@@ -121,6 +134,25 @@ export class FakeSandboxProvider implements SandboxProvider {
           expose: !unsupported.has("exposeHttpEndpoint"),
           revoke: !unsupported.has("revokeHttpEndpoint"),
           maxLeaseDurationSeconds: behavior.runtimeLimits?.maxLeaseDurationSeconds ?? 3_600,
+        },
+        computer: {
+          implementation: "emulated",
+          actions: [
+            "mouse_move",
+            "mouse_click",
+            "mouse_drag",
+            "mouse_scroll",
+            "keyboard_type",
+            "keyboard_key",
+            "keyboard_hotkey",
+          ],
+          screenshot: {
+            formats: ["png", "jpeg"],
+            maxBytes: 1_048_576,
+          },
+          recording: {
+            formats: ["mp4"],
+          },
         },
       },
     };
@@ -177,6 +209,73 @@ export class FakeSandboxProvider implements SandboxProvider {
         this.endpointLeases.delete(leaseId);
       }
     }
+  }
+
+  async executeComputerAction(input: ProviderComputerActionInput): Promise<void> {
+    if (this.behavior.unsupportedRuntimeOperations?.includes("executeComputerAction")) {
+      throw new ProviderError("computer actions are unsupported", "unsupported", false);
+    }
+    this.find(input.providerResourceId);
+    this.computerActions.push(input.action);
+  }
+
+  async captureComputerScreenshot(input: ProviderComputerScreenshotInput) {
+    if (this.behavior.unsupportedRuntimeOperations?.includes("captureComputerScreenshot")) {
+      throw new ProviderError("computer screenshots are unsupported", "unsupported", false);
+    }
+    this.find(input.providerResourceId);
+    return {
+      format: input.format ?? ("png" as const),
+      data: new TextEncoder().encode("fake-screenshot"),
+      cursorPosition: { x: 0, y: 0 },
+    };
+  }
+
+  async startComputerRecording(
+    input: ProviderStartRecordingInput,
+  ): Promise<ProviderComputerRecording> {
+    if (this.behavior.unsupportedRuntimeOperations?.includes("startComputerRecording")) {
+      throw new ProviderError("computer recording is unsupported", "unsupported", false);
+    }
+    this.find(input.providerResourceId);
+    const recording: ProviderComputerRecording = {
+      recordingId: `recording-${this.recordings.size + 1}`,
+      state: "recording",
+      format: "mp4",
+      startedAt: this.behavior.now ?? new Date(),
+    };
+    this.recordings.set(recording.recordingId, recording);
+    this.recordingKeys.set(input.recordingKey, recording.recordingId);
+    return recording;
+  }
+
+  async stopComputerRecording(
+    input: ProviderStopRecordingInput,
+  ): Promise<ProviderComputerRecording> {
+    if (this.behavior.unsupportedRuntimeOperations?.includes("stopComputerRecording")) {
+      throw new ProviderError("computer recording is unsupported", "unsupported", false);
+    }
+    this.find(input.providerResourceId);
+    const current = this.recordings.get(input.recordingId);
+    if (!current) throw new ProviderError("recording not found", "customer", false);
+    const recording: ProviderComputerRecording = {
+      ...current,
+      state: "stopped",
+      filePath: `/workspace/${input.recordingId}.mp4`,
+      sizeBytes: 1024,
+      durationSeconds: 1,
+      stoppedAt: this.behavior.now ?? new Date(),
+    };
+    this.recordings.set(input.recordingId, recording);
+    return recording;
+  }
+
+  async reconcileComputerRecording(
+    input: ProviderReconcileRecordingInput,
+  ): Promise<ProviderComputerRecording | null> {
+    this.find(input.providerResourceId);
+    const recordingId = input.recordingId ?? this.recordingKeys.get(input.recordingKey);
+    return recordingId ? (this.recordings.get(recordingId) ?? null) : null;
   }
 
   async getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost> {

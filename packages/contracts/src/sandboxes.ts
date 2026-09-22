@@ -132,6 +132,12 @@ export const PortableFeaturesSchema = z.object({
   pty: z.boolean().optional(),
   pause_resume: z.boolean().optional(),
   public_ports: z.array(z.number().int().min(1).max(65_535)).max(64).optional(),
+  computer_use: z.boolean().optional(),
+  recording: z
+    .object({
+      format: z.literal("mp4").default("mp4"),
+    })
+    .optional(),
 });
 export const NetworkRequirementsSchema = z
   .object({

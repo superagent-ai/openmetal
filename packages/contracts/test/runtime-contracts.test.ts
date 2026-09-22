@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  ComputerActionRequestSchema,
+  ComputerScreenshotRequestSchema,
+  CreateSandboxRecordingRequestSchema,
   CreateProcessRequestSchema,
   CreateSandboxEndpointRequestSchema,
   ListFilesRequestSchema,
@@ -9,6 +12,8 @@ import {
   RuntimeOperationSchema,
   RuntimeOperationIdSchema,
   SandboxEndpointIdSchema,
+  SandboxRecordingIdSchema,
+  SandboxRecordingSchema,
   WriteFileRequestSchema,
   buildOpenApiDocument,
 } from "../src/index.js";
@@ -112,6 +117,47 @@ describe("portable runtime contracts", () => {
     ).toThrow();
   });
 
+  it("validates portable computer actions, screenshots, and recordings", () => {
+    expect(
+      ComputerActionRequestSchema.parse({
+        type: "mouse_click",
+        x: 10,
+        y: 20,
+      }),
+    ).toMatchObject({ button: "left", double: false });
+    expect(
+      ComputerScreenshotRequestSchema.parse({
+        format: "jpeg",
+        quality: 80,
+      }),
+    ).toMatchObject({ show_cursor: false, format: "jpeg", quality: 80 });
+    expect(CreateSandboxRecordingRequestSchema.parse({})).toEqual({ format: "mp4" });
+    expect(SandboxRecordingIdSchema.safeParse("rec_abc123").success).toBe(true);
+    expect(
+      SandboxRecordingSchema.parse({
+        id: "rec_abc123",
+        type: "sandbox_recording",
+        project_id: "prj_abc123",
+        sandbox_id: "sbx_abc123",
+        state: "stopped",
+        format: "mp4",
+        label: null,
+        artifact: {
+          kind: "sandbox_file",
+          path: "/workspace/recording.mp4",
+          media_type: "video/mp4",
+        },
+        size_bytes: 1024,
+        duration_seconds: 1,
+        error: null,
+        created_at: "2026-08-27T08:00:00.000Z",
+        started_at: "2026-08-27T08:00:01.000Z",
+        stopped_at: "2026-08-27T08:00:02.000Z",
+        updated_at: "2026-08-27T08:00:02.000Z",
+      }),
+    ).toMatchObject({ state: "stopped" });
+  });
+
   it("documents process, filesystem, operation, and endpoint routes", () => {
     const document = buildOpenApiDocument() as {
       paths: Record<
@@ -144,6 +190,17 @@ describe("portable runtime contracts", () => {
       ["get", "/v1/sandboxes/{sandbox_id}/endpoints", "listSandboxEndpoints"],
       ["post", "/v1/sandboxes/{sandbox_id}/endpoints", "createSandboxEndpoint"],
       ["delete", "/v1/sandboxes/{sandbox_id}/endpoints/{endpoint_id}", "revokeSandboxEndpoint"],
+      ["get", "/v1/sandboxes/{sandbox_id}/capabilities", "getSandboxCapabilities"],
+      ["post", "/v1/sandboxes/{sandbox_id}/computer/actions", "performSandboxComputerAction"],
+      ["post", "/v1/sandboxes/{sandbox_id}/computer/screenshots", "captureSandboxScreenshot"],
+      ["get", "/v1/sandboxes/{sandbox_id}/recordings", "listSandboxRecordings"],
+      ["post", "/v1/sandboxes/{sandbox_id}/recordings", "startSandboxRecording"],
+      ["get", "/v1/sandboxes/{sandbox_id}/recordings/{recording_id}", "getSandboxRecording"],
+      [
+        "post",
+        "/v1/sandboxes/{sandbox_id}/recordings/{recording_id}/actions/stop",
+        "stopSandboxRecording",
+      ],
     ] as const;
 
     for (const [method, path, operationId] of operations) {

@@ -9,6 +9,7 @@ import {
   RuntimeOperationIdSchema,
   SandboxEndpointIdSchema,
   SandboxIdSchema,
+  SandboxRecordingIdSchema,
 } from "./primitives.js";
 import { SandboxProviderSchema } from "./sandboxes.js";
 
@@ -56,6 +57,12 @@ export const Base64PayloadSchema = z
 export const ProviderRuntimeCapabilitiesSchema = z.object({
   provider: SandboxProviderSchema,
   version: z.string().min(1).max(100),
+  lifecycle: z
+    .object({
+      pause: z.boolean(),
+      resume: z.boolean(),
+    })
+    .optional(),
   process: z
     .object({
       execute: z.boolean(),
@@ -84,8 +91,37 @@ export const ProviderRuntimeCapabilitiesSchema = z.object({
       max_lease_seconds: z.number().int().positive().optional(),
     })
     .optional(),
+  computer: z
+    .object({
+      implementation: z.enum(["native", "emulated"]),
+      actions: z.array(
+        z.enum([
+          "mouse_move",
+          "mouse_click",
+          "mouse_drag",
+          "mouse_scroll",
+          "keyboard_type",
+          "keyboard_key",
+          "keyboard_hotkey",
+        ]),
+      ),
+      screenshot: z
+        .object({
+          formats: z.array(z.enum(["png", "jpeg"])).min(1),
+          max_bytes: z.number().int().positive(),
+        })
+        .optional(),
+      recording: z
+        .object({
+          formats: z.array(z.enum(["mp4", "webm"])).min(1),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 export type ProviderRuntimeCapabilities = z.infer<typeof ProviderRuntimeCapabilitiesSchema>;
+export const SandboxCapabilitiesSchema = ProviderRuntimeCapabilitiesSchema;
+export type SandboxCapabilities = z.infer<typeof SandboxCapabilitiesSchema>;
 
 export const ProcessStateSchema = z.enum([
   "queued",
@@ -208,6 +244,8 @@ export const RuntimeOperationKindSchema = z.enum([
   "filesystem_write",
   "filesystem_list",
   "filesystem_delete",
+  "computer_action",
+  "computer_screenshot",
 ]);
 export const RuntimeOperationStateSchema = z.enum([
   "queued",
@@ -243,6 +281,69 @@ export const DeleteFileRequestSchema = z.object({
   recursive: z.boolean().default(false),
 });
 
+const CoordinateSchema = z.number().int().nonnegative();
+export const ComputerActionRequestSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("mouse_move"),
+    x: CoordinateSchema,
+    y: CoordinateSchema,
+  }),
+  z.object({
+    type: z.literal("mouse_click"),
+    x: CoordinateSchema,
+    y: CoordinateSchema,
+    button: z.enum(["left", "right", "middle"]).default("left"),
+    double: z.boolean().default(false),
+  }),
+  z.object({
+    type: z.literal("mouse_drag"),
+    start_x: CoordinateSchema,
+    start_y: CoordinateSchema,
+    end_x: CoordinateSchema,
+    end_y: CoordinateSchema,
+    button: z.enum(["left", "right", "middle"]).default("left"),
+  }),
+  z.object({
+    type: z.literal("mouse_scroll"),
+    direction: z.enum(["up", "down"]),
+    amount: z.number().int().positive().default(1),
+    x: CoordinateSchema.optional(),
+    y: CoordinateSchema.optional(),
+  }),
+  z.object({
+    type: z.literal("keyboard_type"),
+    text: z.string().max(100_000),
+    delay_ms: z.number().int().nonnegative().max(60_000).default(0),
+  }),
+  z.object({
+    type: z.literal("keyboard_key"),
+    key: z.string().min(1).max(100),
+    modifiers: z
+      .array(z.enum(["ctrl", "alt", "shift", "cmd"]))
+      .max(4)
+      .default([]),
+  }),
+  z.object({
+    type: z.literal("keyboard_hotkey"),
+    keys: z.string().min(1).max(200),
+  }),
+]);
+
+export const ComputerScreenshotRequestSchema = z.object({
+  format: z.enum(["png", "jpeg"]).default("png"),
+  show_cursor: z.boolean().default(false),
+  quality: z.number().int().min(1).max(100).optional(),
+  scale: z.number().min(0.1).max(1).optional(),
+  region: z
+    .object({
+      x: CoordinateSchema,
+      y: CoordinateSchema,
+      width: z.number().int().positive(),
+      height: z.number().int().positive(),
+    })
+    .optional(),
+});
+
 export const ReadFileResultSchema = z.object({
   kind: z.literal("filesystem_read"),
   path: PortablePathSchema,
@@ -273,11 +374,29 @@ export const DeleteFileResultSchema = z.object({
   path: PortablePathSchema,
   deleted: z.boolean(),
 });
+export const ComputerActionResultSchema = z.object({
+  kind: z.literal("computer_action"),
+  performed: z.literal(true),
+});
+export const ComputerScreenshotResultSchema = z.object({
+  kind: z.literal("computer_screenshot"),
+  format: z.enum(["png", "jpeg"]),
+  data_base64: Base64PayloadSchema,
+  byte_length: z.number().int().nonnegative(),
+  cursor_position: z
+    .object({
+      x: CoordinateSchema,
+      y: CoordinateSchema,
+    })
+    .optional(),
+});
 export const RuntimeOperationResultSchema = z.discriminatedUnion("kind", [
   ReadFileResultSchema,
   WriteFileResultSchema,
   ListFilesResultSchema,
   DeleteFileResultSchema,
+  ComputerActionResultSchema,
+  ComputerScreenshotResultSchema,
 ]);
 
 export const RuntimeOperationSchema = z
@@ -352,10 +471,55 @@ export const SandboxEndpointListResponseSchema = z.object({
   next_cursor: CursorSchema.nullable(),
 });
 
+export const SandboxRecordingStateSchema = z.enum([
+  "starting",
+  "recording",
+  "stopping",
+  "stopped",
+  "failed",
+]);
+export const CreateSandboxRecordingRequestSchema = z.object({
+  format: z.literal("mp4").default("mp4"),
+  label: z.string().min(1).max(200).optional(),
+});
+export const SandboxRecordingArtifactSchema = z.object({
+  kind: z.literal("sandbox_file"),
+  path: PortablePathSchema,
+  media_type: z.literal("video/mp4"),
+});
+export const SandboxRecordingSchema = z.object({
+  id: SandboxRecordingIdSchema,
+  type: z.literal("sandbox_recording"),
+  project_id: ProjectIdSchema,
+  sandbox_id: SandboxIdSchema,
+  state: SandboxRecordingStateSchema,
+  format: z.literal("mp4"),
+  label: z.string().nullable(),
+  artifact: SandboxRecordingArtifactSchema.nullable(),
+  size_bytes: z.number().int().nonnegative().nullable(),
+  duration_seconds: z.number().nonnegative().nullable(),
+  error: OperationErrorSchema.nullable(),
+  created_at: IsoDateTimeSchema,
+  started_at: IsoDateTimeSchema.nullable(),
+  stopped_at: IsoDateTimeSchema.nullable(),
+  updated_at: IsoDateTimeSchema,
+  provider_capabilities: ProviderRuntimeCapabilitiesSchema.optional(),
+});
+export const ListSandboxRecordingsQuerySchema = z.object({
+  cursor: CursorSchema.optional(),
+  limit: PaginationLimitSchema.default(50),
+});
+export const SandboxRecordingListResponseSchema = z.object({
+  recordings: z.array(SandboxRecordingSchema),
+  next_cursor: CursorSchema.nullable(),
+});
+
 export type ReadFileRequest = z.infer<typeof ReadFileRequestSchema>;
 export type WriteFileRequest = z.infer<typeof WriteFileRequestSchema>;
 export type ListFilesRequest = z.infer<typeof ListFilesRequestSchema>;
 export type DeleteFileRequest = z.infer<typeof DeleteFileRequestSchema>;
+export type ComputerActionRequest = z.infer<typeof ComputerActionRequestSchema>;
+export type ComputerScreenshotRequest = z.infer<typeof ComputerScreenshotRequestSchema>;
 export type RuntimeOperationKind = z.infer<typeof RuntimeOperationKindSchema>;
 export type RuntimeOperationState = z.infer<typeof RuntimeOperationStateSchema>;
 export type SandboxEndpointState = z.infer<typeof SandboxEndpointStateSchema>;
@@ -363,3 +527,8 @@ export type CreateSandboxEndpointRequest = z.infer<typeof CreateSandboxEndpointR
 export type SandboxEndpoint = z.infer<typeof SandboxEndpointSchema>;
 export type ListSandboxEndpointsQuery = z.infer<typeof ListSandboxEndpointsQuerySchema>;
 export type SandboxEndpointListResponse = z.infer<typeof SandboxEndpointListResponseSchema>;
+export type SandboxRecordingState = z.infer<typeof SandboxRecordingStateSchema>;
+export type CreateSandboxRecordingRequest = z.infer<typeof CreateSandboxRecordingRequestSchema>;
+export type SandboxRecording = z.infer<typeof SandboxRecordingSchema>;
+export type ListSandboxRecordingsQuery = z.infer<typeof ListSandboxRecordingsQuerySchema>;
+export type SandboxRecordingListResponse = z.infer<typeof SandboxRecordingListResponseSchema>;

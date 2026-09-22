@@ -574,12 +574,14 @@ export class DaytonaSandboxProvider implements SandboxProvider {
           signal: requestSignal,
         });
         const runtime = this.capabilities.runtime ?? {};
-        if (
-          !runtime.computer?.recording ||
-          (await this.hasRecordingPrerequisites(providerResourceId, requestSignal))
-        ) {
+        if (!runtime.computer?.recording) {
           return runtime;
         }
+        const recordingAvailable = await this.hasRecordingPrerequisites(
+          providerResourceId,
+          requestSignal,
+        ).catch(() => false);
+        if (recordingAvailable) return runtime;
         const { recording: _recording, ...computer } = runtime.computer;
         return { ...runtime, computer };
       } catch (error) {

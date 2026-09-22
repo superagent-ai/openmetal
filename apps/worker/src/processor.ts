@@ -2988,9 +2988,20 @@ export async function processOnce(
         continue;
       }
       const attempts = job.attemptCount;
-      const terminal = attempts >= env.WORKER_MAX_ATTEMPTS;
-      const retryDelayMs =
-        payload?.job_type === "sandbox.cost.sync" && payload.final
+      const maxAttemptsReached = attempts >= env.WORKER_MAX_ATTEMPTS;
+      const durableProvisionReconciliation =
+        maxAttemptsReached &&
+        payload &&
+        (payload.job_type === "sandbox.provision" || payload.job_type === "sandbox.reconcile") &&
+        (await db
+          .select({ status: sandboxes.status })
+          .from(sandboxes)
+          .where(eq(sandboxes.id, payload.sandbox_id))
+          .then((rows) => rows[0]?.status)) === "provision_unknown";
+      const terminal = maxAttemptsReached && !durableProvisionReconciliation;
+      const retryDelayMs = durableProvisionReconciliation
+        ? 5 * 60_000
+        : payload?.job_type === "sandbox.cost.sync" && payload.final
           ? 2 * 60_000
           : backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS);
       if (

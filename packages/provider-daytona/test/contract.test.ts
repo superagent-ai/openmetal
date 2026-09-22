@@ -218,6 +218,28 @@ it("does not advertise recording when FFmpeg is unavailable", async () => {
   expect(capabilities.computer?.recording).toBeUndefined();
 });
 
+it("keeps desktop capabilities when the recording probe is unavailable", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.endsWith("/computeruse/status")) return Response.json({ status: "running" });
+    if (url.endsWith("/process/session")) return new Response(null, { status: 503 });
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const capabilities = await provider.discoverRuntimeCapabilities("sandbox-1");
+
+  expect(capabilities.computer?.screenshot).toBeDefined();
+  expect(capabilities.computer?.actions.length).toBeGreaterThan(0);
+  expect(capabilities.computer?.recording).toBeUndefined();
+});
+
 it("marks Daytona analytics prices as provider reported", async () => {
   const row = {
     sandboxId: "sandbox-1",

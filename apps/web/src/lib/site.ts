@@ -1,7 +1,7 @@
 import { siteOrigin } from "./auth-redirect";
 
 export const siteName = "OpenMetal";
-export const siteTagline = "Unified compute for AI agents";
+export const siteTagline = "The Compute Gateway for AI Agents";
 export const siteDescription =
   "Give AI agents access to OpenMetal with one skill, one CLI, and one portable API.";
 

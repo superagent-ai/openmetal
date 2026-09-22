@@ -9,7 +9,7 @@ import {
 
 describe("page metadata", () => {
   it("uses the branded home title on the root path", () => {
-    expect(resolvePageTitle("Home", "/")).toBe("OpenMetal — Unified compute for AI agents");
+    expect(resolvePageTitle("Home", "/")).toBe("OpenMetal — The Compute Gateway for AI Agents");
     expect(resolvePageTitle("Create a sandbox", "/guides/create-sandbox")).toBe("Create a sandbox");
   });
 

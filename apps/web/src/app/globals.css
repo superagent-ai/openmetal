@@ -158,6 +158,35 @@ html > body[data-scroll-locked] {
   box-shadow: none;
 }
 
+a[data-card] {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+a[data-card]:hover,
+a[data-card]:focus-visible {
+  border-color: color-mix(in srgb, var(--color-fd-foreground) 28%, transparent);
+  background-color: color-mix(in srgb, var(--color-fd-foreground) 6%, var(--color-fd-card));
+  box-shadow: 0 8px 22px -10px color-mix(in srgb, var(--color-fd-foreground) 35%, transparent);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a[data-card] {
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease;
+  }
+
+  a[data-card]:hover,
+  a[data-card]:focus-visible {
+    transform: none;
+  }
+}
+
 .docs-home > h2 {
   margin-top: 4rem !important;
   margin-bottom: 0 !important;

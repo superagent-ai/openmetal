@@ -211,4 +211,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('cli-v{0}', inputs.version) }}
-        run: gh release create "$TAG" dist/* --generate-notes --title "OpenMetal CLI ${TAG#cli-v}"
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* \
+              --generate-notes \
+              --title "OpenMetal CLI ${TAG#cli-v}" \
+              --repo "$GITHUB_REPOSITORY"
+          fi

@@ -13,7 +13,7 @@ Use OpenMetal as a hosted control plane for creating and managing sandboxes acro
 
 ## Current Boundary
 
-OpenMetal supports sandbox lifecycle; asynchronous argv-based processes with ordered persisted output; binary filesystem read, write, list, and delete; and leased HTTP endpoints. Read [references/runtime.md](references/runtime.md) for exact routes, SDK methods, CLI commands, limits, asynchronous behavior, and provider gating.
+OpenMetal supports sandbox lifecycle; asynchronous argv-based processes with persisted output; binary filesystem read, write, list, and delete; and leased HTTP endpoints. Process output streams live when the provider supports it and appears after completion for buffered providers. Read [references/runtime.md](references/runtime.md) for exact routes, SDK methods, CLI commands, limits, asynchronous behavior, and provider gating.
 
 Interactive PTY/terminal sessions, streaming stdin, SSH, WebSocket, and general connection/session APIs remain unsupported. Do not invent methods such as `sandbox.exec()`, `sandbox.files`, `sandbox.connect()`, or `sandbox.ports`; the shipped SDK uses `processes`, `filesystem`, `runtimeOperations`, and `endpoints`.
 

@@ -35,7 +35,7 @@ Create accepts an argv array, optional absolute `cwd`, optional environment map,
 
 The initial state is `queued`; terminal states are `succeeded`, `failed`, `cancelled`, and `timed_out`. A nonzero exit produces state `failed`, preserves `exit_code`, and uses error code `process_exit_nonzero`. `output_truncated` is true when either the provider reports truncation or OpenMetal discards stdout/stderr after `max_output_bytes`. Cancellation is provider-dependent and is only recorded as `cancelled` after the provider confirms remote termination, or when a queued process is atomically prevented from starting. A timeout is recorded as `timed_out` only when supported remote cancellation is confirmed; an unverified outcome is recorded as a failure instead. Cancelling an already terminal process returns `409 process_terminal`.
 
-Process events have monotonically increasing positive `sequence` values and types `queued`, `started`, `stdout`, `stderr`, `exited`, `cancelled`, `timed_out`, or `failed`. Output is base64-encoded and includes a byte count and per-stream byte offset.
+Process events have monotonically increasing positive `sequence` values and types `queued`, `started`, `stdout`, `stderr`, `exited`, `cancelled`, `timed_out`, or `failed`. Output is base64-encoded and includes a byte count and per-stream byte offset. Providers with ordered streaming persist output while the command runs. Buffered providers persist output after completion; their stdout and stderr channels remain separate, but event sequence does not represent the original cross-stream timing.
 
 The events route returns a finite `text/event-stream` batch and closes; it is not one permanently open HTTP response. Each response contains at most 100 events and at most 1 MiB of event JSON. Supply `Last-Event-ID: <sequence>` to receive only later events, then reconnect until a terminal event arrives. The TypeScript SDK's `processes.events()` async iterable performs those reconnects and rejects sequence gaps. Process events are retained until seven days after the process completes by default and are then removed in bounded worker cleanup batches. Events for queued, running, or cancelling processes are never removed by retention cleanup, regardless of process or event age. Clients should persist output they need beyond the terminal-process retention window.
 
@@ -79,18 +79,18 @@ Delete returns `202` and moves an active lease toward `revoked`; repeated deleti
 
 | Provider    | Processes                     | Filesystem                     | HTTP endpoints |
 | ----------- | ----------------------------- | ------------------------------ | -------------- |
-| Blaxel      | No ordered stream             | Read, write, list, delete      | Yes            |
+| Blaxel      | Execute; buffered output      | Read, write, list, delete      | Yes            |
 | Cloudflare  | Execute and stream; no cancel | Read/write within `/workspace` | No             |
 | CodeSandbox | No                            | No                             | No             |
-| Daytona     | No ordered stream             | Read, write, list, delete      | No             |
+| Daytona     | Execute; buffered output      | Read, write, list, delete      | No             |
 | E2B         | Execute and stream; no cancel | Read, write, list, delete      | No             |
-| Freestyle   | No ordered stream             | Read, write, list, delete      | No             |
+| Freestyle   | Execute; buffered output      | Read, write, list, delete      | No             |
 | Modal       | Execute and stream; no cancel | Read, write, list, delete      | No             |
 | Northflank  | No                            | No                             | No             |
-| Runloop     | No ordered stream             | Read and write                 | No             |
+| Runloop     | Execute; buffered output      | Read and write                 | No             |
 | Vercel      | Execute and stream; no cancel | Read and write                 | No             |
 
-The worker requires ordered process streaming, so Blaxel, Daytona, Freestyle, and Runloop's buffered adapters are rejected. Cloudflare supports an omitted or empty environment but rejects non-empty environment overrides. E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Daytona, E2B, Freestyle, Modal, Runloop, and Vercel reject append writes; Freestyle supports only overwrite writes, and Runloop rejects parent creation. Blaxel, Daytona, E2B, Freestyle, and Modal implement file list/delete. Freestyle's native buffered exec is limited to 300 seconds.
+The worker accepts both streaming and buffered process adapters. Blaxel, Daytona, Freestyle, and Runloop return output after command completion, so callers cannot react to their output while the command runs and should not infer stdout/stderr interleaving from event sequence. Cloudflare supports an omitted or empty environment but rejects non-empty environment overrides. E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Daytona, E2B, Freestyle, Modal, Runloop, and Vercel reject append writes; Freestyle supports only overwrite writes, and Runloop rejects parent creation. Blaxel, Daytona, E2B, Freestyle, and Modal implement file list/delete. Freestyle's native buffered exec is limited to 300 seconds.
 
 Only Blaxel exposes portable HTTP endpoints with a verified native expiry and revocation path. If an endpoint-create job is reclaimed after exposure may have started, the worker does not call the exposure method again: it records a failed resource with an unknown provider outcome and makes a best-effort revoke when a durable lease ID was stored. Native provider expiry bounds an orphan when the crash occurred before that identity became durable. Other adapters' endpoint capabilities are disabled when live verification cannot prove the complete lease contract. See the OpenMetal skill's [provider reference](../skills/openmetal/references/providers-and-billing.md) for adapter ceilings and additional details.
 

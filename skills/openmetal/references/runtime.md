@@ -6,7 +6,7 @@ Read this reference before running commands, moving files, exposing a port, resu
 
 OpenMetal ships:
 
-- Asynchronous argv-based processes with persisted ordered stdout/stderr events, status, timeout, exit code, and provider-dependent cancellation.
+- Asynchronous argv-based processes with persisted stdout/stderr events, status, timeout, exit code, and provider-dependent cancellation. Output streams live from providers that support ordered streaming and appears after completion from buffered providers.
 - Asynchronous binary file read, write, list, and delete operations.
 - Time-limited HTTP endpoint creation, listing, expiry, and revocation.
 

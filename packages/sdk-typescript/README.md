@@ -84,7 +84,7 @@ The API returns finite SSE batches. The async iterable reconnects with `Last-Eve
 
 Process timeout defaults to 300 seconds and permits 1 through 3,600; captured output defaults to 10 MiB and permits up to 100 MiB before lower provider limits.
 
-The public contract runs argv-based processes and captures ordered stdout/stderr; it does not expose an interactive PTY/terminal, streaming stdin, SSH, WebSocket, or general connection API.
+The public contract runs argv-based processes and captures separate stdout/stderr. Output streams while the command runs when the provider supports ordered streaming and appears after completion for buffered providers. It does not expose an interactive PTY/terminal, streaming stdin, SSH, WebSocket, or general connection API.
 
 ## Filesystem
 

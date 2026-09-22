@@ -1110,18 +1110,13 @@ async function executeProcess(
     row.sandbox.status !== "ready" ||
     !row.sandbox.providerResourceId ||
     !capabilities?.exec ||
-    !capabilities.streams ||
     !provider.exec
   ) {
     await failProcess(
       db,
       processId,
       guard,
-      new ProviderError(
-        "provider does not support ordered process execution",
-        "unsupported",
-        false,
-      ),
+      new ProviderError("provider does not support process execution", "unsupported", false),
       row.process.timeoutSeconds,
     );
     return;

@@ -147,6 +147,71 @@ describe("runtime worker", () => {
     expect(afterDuplicate?.count).toBe(events.length);
   });
 
+  it("executes providers that return buffered output", async () => {
+    const bufferedProvider = new Proxy(provider, {
+      get(target, property) {
+        if (property === "capabilities") {
+          return {
+            ...target.capabilities,
+            runtime: {
+              ...target.capabilities.runtime,
+              process: {
+                ...target.capabilities.runtime?.process,
+                streams: false,
+              },
+            },
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const processId = crypto.randomUUID();
+    const [job] = await database.sql`
+      with inserted_process as (
+        insert into metal.sandbox_processes (
+          id, organization_id, project_id, sandbox_id, command, max_output_bytes
+        )
+        values (
+          ${processId}, ${organizationId}, ${projectId}, ${sandboxId},
+          '["buffered-output"]'::jsonb, 1024
+        )
+      ), inserted_event as (
+        insert into metal.process_events (process_id, sequence, type)
+        values (${processId}, 1, 'queued')
+      )
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload)
+      values (
+        'process.execute',
+        ${`runtime-process-buffered-${processId}`},
+        ${JSON.stringify({ job_type: "process.execute", process_id: processId })}::jsonb
+      )
+      returning id
+    `;
+
+    expect(await runUntil(String(job!.id), bufferedProvider)).toBe("succeeded");
+    const [process] = await database.sql`
+      select state, provider_capabilities, error
+      from metal.sandbox_processes where id = ${processId}
+    `;
+    expect(process).toMatchObject({
+      state: "succeeded",
+      provider_capabilities: {
+        process: {
+          execute: true,
+          ordered_output: false,
+        },
+      },
+      error: null,
+    });
+    const events = await database.sql`
+      select type from metal.process_events
+      where process_id = ${processId}
+      order by sequence
+    `;
+    expect(events.map((event) => event.type)).toEqual(["queued", "started", "stdout", "exited"]);
+  });
+
   it("fails a process when the provider stream ends without an exit event", async () => {
     const providerWithoutExit = new Proxy(provider, {
       get(target, property) {

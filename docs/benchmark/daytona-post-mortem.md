@@ -22,13 +22,13 @@ Outside this narrow harness, custom environments and computer use are meaningful
 
 Integration maintenance was high. I encountered ESM/CJS compatibility issues, SDK and type churn, and provider-specific organization, target, and toolbox details. Workspace ownership and environment-boundary behavior also required care instead of behaving like neutral Linux primitives.
 
-Execution is buffered, and separate stderr was not reliable on the first live run. The current adapter requests split output and can decode framed output, but it still cannot provide ordered streaming while the process runs. There is no confirmed cancellation or portable endpoint lease.
+Execution is buffered, and separate stderr was not reliable on the first live run. The adapter requests split output and can decode framed output, but it still cannot provide ordered streaming while the process runs. At benchmark time it had no confirmed cancellation or portable endpoint lease; cancellation now uses Daytona's session deletion after persisting a restart-safe execution identity.
 
 Lifecycle behavior was the larger concern. Cleanup needed explicit handling for repeated deletion and `409` responses, creation needed reconciliation around conflicts, and pause capability reporting remained inconsistent: the method exists, but the adapter disables pause by default and BYOK cannot enable it.
 
 ## What would improve the ranking
 
-I would raise Daytona with a stable ESM-first SDK and versioned types, a simpler documented model for organization, target, toolbox, workspace ownership, and environment propagation, and consistent lifecycle semantics. Native ordered stdout/stderr streaming with durable execution IDs and confirmed cancellation would remove the largest runtime gap. Pause should be reliably discoverable and configurable. Idempotent lifecycle responses should converge on one terminal representation.
+I would raise Daytona with a stable ESM-first SDK and versioned types, a simpler documented model for organization, target, toolbox, workspace ownership, and environment propagation, and consistent lifecycle semantics. Native ordered stdout/stderr streaming would remove the remaining process-runtime gap. Pause should be reliably discoverable and configurable. Idempotent lifecycle responses should converge on one terminal representation.
 
 ## Bottom line
 

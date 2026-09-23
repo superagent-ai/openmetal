@@ -466,7 +466,7 @@ it("marks Daytona analytics prices as provider reported", async () => {
   });
 });
 
-it("executes asynchronously beyond one request timeout and returns buffered output", async () => {
+it("decodes Daytona 0.163 plain-text logs after asynchronous execution", async () => {
   let commandPolls = 0;
   const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
@@ -493,10 +493,8 @@ it("executes asynchronously beyond one request timeout and returns buffered outp
       return Response.json({ cmdId: "command-1" });
     }
     if (url.endsWith("/command/command-1/logs")) {
-      return Response.json({
-        output: "\x01\x01\x01hello world\x02\x02\x02warning",
-        stdout: null,
-        stderr: null,
+      return new Response("\x01\x01\x01hello world\x02\x02\x02warning", {
+        headers: { "content-type": "text/plain; charset=utf-8" },
       });
     }
     if (url.endsWith("/command/command-1")) {

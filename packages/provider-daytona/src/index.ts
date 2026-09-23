@@ -480,15 +480,13 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         }
       }
 
-      const logs = DaytonaCommandLogsSchema.parse(
-        await this.toolboxJson(
-          providerResourceId,
-          `/process/session/${encodeURIComponent(sessionId)}/command/${encodeURIComponent(commandId)}/logs`,
-          {
-            method: "GET",
-            signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
-          },
-        ),
+      const logs = await this.toolboxCommandLogs(
+        providerResourceId,
+        `/process/session/${encodeURIComponent(sessionId)}/command/${encodeURIComponent(commandId)}/logs`,
+        {
+          method: "GET",
+          signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
+        },
       );
       const separated =
         logs.stdout !== null && logs.stdout !== undefined
@@ -1113,6 +1111,41 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     if (!response.ok) throw new DaytonaRequestError(response.status);
     if (parseError) throw parseError;
     return parsed;
+  }
+
+  private async toolboxCommandLogs(
+    providerResourceId: string,
+    path: string,
+    init: RequestInit,
+  ): Promise<z.infer<typeof DaytonaCommandLogsSchema>> {
+    const response = await this.toolboxFetch(providerResourceId, path, init);
+    const text = await response.text();
+    const contentType = response.headers.get("content-type");
+    const structured = contentType?.toLowerCase().includes("application/json") === true;
+    let logs: z.infer<typeof DaytonaCommandLogsSchema> | undefined;
+    let parseError: unknown;
+    if (response.ok) {
+      try {
+        logs = DaytonaCommandLogsSchema.parse(
+          structured ? (text ? JSON.parse(text) : {}) : { output: text },
+        );
+      } catch (error) {
+        parseError = error;
+      }
+    }
+    // #region agent log
+    try {
+      appendFileSync(
+        "/opt/cursor/logs/debug.log",
+        `${JSON.stringify({ hypothesisId: "E", location: "packages/provider-daytona/src/index.ts:toolboxCommandLogs", message: "Daytona command logs response received", data: { providerResourceId, path, status: response.status, ok: response.ok, contentType, structured, responseBytes: text.length, parseError: parseError instanceof Error ? parseError.name : null }, timestamp: Date.now() })}\n`,
+      );
+    } catch {
+      // Diagnostic logging must not affect execution.
+    }
+    // #endregion
+    if (!response.ok) throw new DaytonaRequestError(response.status);
+    if (parseError) throw parseError;
+    return logs!;
   }
 
   private async ensureComputerUse(providerResourceId: string, signal: AbortSignal): Promise<void> {

@@ -4,6 +4,8 @@ Server-side Drizzle access to the shared PostgreSQL database.
 
 Connections are created only by `createDatabase()`. Importing this package does not open a pool.
 
+Direct Postgres URLs keep a pool of 10. Supabase pooler hosts (`*.pooler.supabase.com`) default to 3 so the API and worker stay under Supavisor session mode (`pool_size` 15). Transaction-mode pooler URLs (port `6543`, or `pgbouncer=true`) also disable prepared statements. Set `DATABASE_POOL_MAX` to override the cap after raising the pooler limit.
+
 ## Synchronization
 
 1. Canonical DDL lives in `supabase/migrations/`.

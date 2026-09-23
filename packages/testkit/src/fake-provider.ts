@@ -25,6 +25,7 @@ import {
   type ProviderSandbox,
   type ProviderSandboxCost,
   type ProviderSandboxCostInput,
+  type ProviderSandboxInspection,
   type ProviderStartRecordingInput,
   type ProviderStopRecordingInput,
   type ProviderWriteFileInput,
@@ -77,6 +78,7 @@ export type FakeProviderBehavior = {
     signal?: string;
     dropStreamAfterEvents?: number;
   };
+  reportsSandboxState?: boolean;
   now?: Date;
 };
 
@@ -99,12 +101,23 @@ export class FakeSandboxProvider implements SandboxProvider {
   private executionSequence = 0;
   private endpointSequence = 0;
   costMicrousd: bigint | null = null;
+  readonly inspect?: (providerResourceId: string) => Promise<ProviderSandboxInspection>;
 
   constructor(
     readonly name: SandboxProviderName = "e2b",
     private readonly behavior: FakeProviderBehavior = {},
   ) {
     this.failures = [...(behavior.failures ?? [])];
+    if (behavior.reportsSandboxState) {
+      this.inspect = async (providerResourceId) => {
+        const resource = this.findResource(providerResourceId);
+        return {
+          state: !resource ? "absent" : resource.paused ? "paused" : "running",
+          providerState: null,
+          reason: null,
+        };
+      };
+    }
     const unsupported = new Set(behavior.unsupportedRuntimeOperations ?? []);
     this.capabilities = {
       pause: true,
@@ -605,11 +618,15 @@ export class FakeSandboxProvider implements SandboxProvider {
     );
   }
 
-  private find(providerResourceId: string) {
-    const resource = [...this.resources.values()].find(
+  private findResource(providerResourceId: string) {
+    return [...this.resources.values()].find(
       (candidate) => candidate.providerResourceId === providerResourceId,
     );
-    if (!resource) throw new Error("fake resource not found");
+  }
+
+  private find(providerResourceId: string) {
+    const resource = this.findResource(providerResourceId);
+    if (!resource) throw new ProviderError("fake sandbox is not running", "unavailable", false);
     return resource;
   }
 }

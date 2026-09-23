@@ -3,8 +3,9 @@ title: Home
 description: Give your agent access to OpenMetal with one skill, one CLI, and one API.
 ---
 
-<section className="not-prose flex w-full flex-col items-center py-16 text-center @container">
-  <h1 className="flex max-w-4xl flex-col items-center gap-1 text-[clamp(1.75rem,9cqi,3rem)] font-semibold leading-none tracking-tight sm:gap-2">
+<section className="not-prose relative isolate flex min-h-80 w-full flex-col items-center justify-center overflow-hidden py-20 text-center @container">
+  <ShootingStars />
+  <h1 className="relative z-10 flex max-w-4xl flex-col items-center gap-1 text-[clamp(1.75rem,9cqi,3rem)] font-semibold leading-none tracking-tight sm:gap-2">
     <span className="bg-linear-to-r from-black to-[#666666] bg-clip-text text-transparent dark:from-white dark:to-[#9B9B9B]">
       {"The Compute Gateway"}
     </span>
@@ -12,7 +13,7 @@ description: Give your agent access to OpenMetal with one skill, one CLI, and on
       {"for AI Agents"}
     </span>
   </h1>
-  <p className="mt-6 max-w-3xl text-lg text-pretty text-muted-foreground">
+  <p className="relative z-10 mt-6 max-w-3xl text-lg text-pretty text-muted-foreground">
     {
       "One API for agent compute across providers, from sandboxes and CPUs to GPUs and persistent machines."
     }

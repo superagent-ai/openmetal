@@ -21,6 +21,7 @@ import {
   CursorMark,
   PiAgentMark,
 } from "@/components/agent-marks";
+import { ShootingStars } from "@/components/shooting-stars";
 import type { MDXComponents } from "mdx/types";
 
 export function getMDXComponents(components?: MDXComponents) {
@@ -45,6 +46,7 @@ export function getMDXComponents(components?: MDXComponents) {
     CodexMark,
     CopilotMark,
     PiAgentMark,
+    ShootingStars,
     ...components,
   } satisfies MDXComponents;
 }

@@ -27,18 +27,18 @@ Cloudflare managed eligibility requires both account identification and analytic
 
 The worker accepts any adapter that implements process execution. Adapters with `streams: false` remain usable through the public process API, but their output appears only after command completion and does not preserve cross-stream timing.
 
-| Provider    | Public process API            | Filesystem API            | Leased HTTP endpoints |
-| ----------- | ----------------------------- | ------------------------- | --------------------- |
-| Blaxel      | Execute; buffered output      | Read, write, list, delete | Create and revoke     |
-| Cloudflare  | Execute and stream; no cancel | Read and write            | No                    |
-| CodeSandbox | No                            | No                        | No                    |
-| Daytona     | Execute; buffered output      | Read, write, list, delete | No                    |
-| E2B         | Execute and stream; no cancel | Read, write, list, delete | No                    |
-| Freestyle   | Execute; buffered output      | Read, write, list, delete | No                    |
-| Modal       | Execute and stream; no cancel | Read, write, list, delete | No                    |
-| Northflank  | No                            | No                        | No                    |
-| Runloop     | Execute; buffered output      | Read and write            | No                    |
-| Vercel      | Execute and stream; no cancel | Read and write            | No                    |
+| Provider    | Public process API               | Filesystem API            | Leased HTTP endpoints |
+| ----------- | -------------------------------- | ------------------------- | --------------------- |
+| Blaxel      | Execute; buffered output         | Read, write, list, delete | Create and revoke     |
+| Cloudflare  | Execute and stream; no cancel    | Read and write            | No                    |
+| CodeSandbox | No                               | No                        | No                    |
+| Daytona     | Execute; buffered output; cancel | Read, write, list, delete | No                    |
+| E2B         | Execute and stream; no cancel    | Read, write, list, delete | No                    |
+| Freestyle   | Execute; buffered output         | Read, write, list, delete | No                    |
+| Modal       | Execute and stream; no cancel    | Read, write, list, delete | No                    |
+| Northflank  | No                               | No                        | No                    |
+| Runloop     | Execute; buffered output         | Read and write            | No                    |
+| Vercel      | Execute and stream; no cancel    | Read and write            | No                    |
 
 Global contract ceilings are 100 MiB process output, 10 MiB per file read/write, 10,000 list entries, and 86,400-second endpoint leases. Current adapter ceilings are:
 
@@ -51,7 +51,7 @@ Global contract ceilings are 100 MiB process output, 10 MiB per file read/write,
 
 Provider-specific runtime limitations:
 
-- Blaxel, Daytona, Freestyle, and Runloop return buffered process output. Commands execute through the public process API, but stdout/stderr events become available only after completion and their sequence does not reconstruct cross-stream timing.
+- Blaxel, Daytona, Freestyle, and Runloop return buffered process output. Commands execute through the public process API, but stdout/stderr events become available only after completion and their sequence does not reconstruct cross-stream timing. Daytona starts commands asynchronously and confirms cancellation by deleting the command's temporary session.
 - Cloudflare supports ordered process execution with an omitted or empty environment, but rejects non-empty environment overrides. It has no process cancellation.
 - E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Runloop supports provider-level cancellation even though its output is buffered.
 - Daytona, E2B, and Modal reject append writes. Runloop and Vercel also reject append; Runloop rejects `create_parents: true`.

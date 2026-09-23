@@ -6,6 +6,8 @@ import type {
   ProviderComputerRecording,
   ProviderComputerScreenshot,
   ProviderComputerScreenshotInput,
+  ProviderCancelExecInput,
+  ProviderCancelExecResult,
   ProviderDeleteFileInput,
   ProviderDeleteFileResult,
   ProviderExecEvent,
@@ -33,6 +35,8 @@ const MAX_FILE_BYTES = 10 * 1_024 * 1_024;
 const MAX_LIST_ENTRIES = 10_000;
 const IMAGE_READY_TIMEOUT_MS = 15 * 60_000;
 const IMAGE_POLL_INTERVAL_MS = 2_000;
+const PROCESS_POLL_INTERVAL_MS = 250;
+const DAYTONA_EXECUTION_ID_PREFIX = "daytona:";
 const DAYTONA_IMAGE_DISK_GB = 16;
 const DAYTONA_PENDING_STATES = new Set([
   "creating",
@@ -101,8 +105,44 @@ const DaytonaRecordingsSchema = z
   })
   .passthrough();
 
+const DaytonaSessionExecuteSchema = z
+  .object({
+    cmdId: z.string().min(1),
+  })
+  .passthrough();
+
+const DaytonaCommandSchema = z
+  .object({
+    id: z.string().min(1),
+    command: z.string(),
+    exitCode: z.number().int().nullish(),
+  })
+  .passthrough();
+
+const DaytonaCommandLogsSchema = z
+  .object({
+    output: z.string().nullish(),
+    stdout: z.string().nullish(),
+    stderr: z.string().nullish(),
+  })
+  .passthrough();
+
 function shellQuote(argument: string): string {
   return `'${argument.replaceAll("'", `'\\''`)}'`;
+}
+
+function operationSignal(
+  callerSignal: AbortSignal | undefined,
+  deadline: Date | undefined,
+): AbortSignal {
+  const signals: AbortSignal[] = [];
+  if (callerSignal) signals.push(callerSignal);
+  if (deadline) signals.push(AbortSignal.timeout(Math.max(0, deadline.getTime() - Date.now())));
+  return signals.length === 0
+    ? new AbortController().signal
+    : signals.length === 1
+      ? signals[0]!
+      : AbortSignal.any(signals);
 }
 
 function deadlineSignal(
@@ -140,6 +180,7 @@ export type DaytonaProviderOptions = {
   pauseSupported?: boolean;
   requestTimeoutMs?: number;
   imageReadyTimeoutMs?: number;
+  processPollIntervalMs?: number;
   fetchImpl?: typeof fetch;
 };
 
@@ -158,6 +199,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   private readonly target?: string;
   private readonly requestTimeoutMs: number;
   private readonly imageReadyTimeoutMs: number;
+  private readonly processPollIntervalMs: number;
   private readonly fetchImpl: typeof fetch;
   private organizationId?: string;
   private readonly toolboxUrls = new Map<string, string>();
@@ -172,7 +214,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         process: {
           exec: true,
           streams: false,
-          cancel: false,
+          cancel: true,
           maxOutputBytes: MAX_OUTPUT_BYTES,
         },
         files: {
@@ -221,6 +263,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     this.organizationId = options.organizationId;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
     this.imageReadyTimeoutMs = options.imageReadyTimeoutMs ?? IMAGE_READY_TIMEOUT_MS;
+    this.processPollIntervalMs = options.processPollIntervalMs ?? PROCESS_POLL_INTERVAL_MS;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -313,7 +356,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     }
     if (input.stdin !== undefined) {
       throw new ProviderError(
-        "Daytona synchronous process execution does not support stdin",
+        "Daytona process execution does not support portable stdin",
         "unsupported",
         false,
       );
@@ -322,55 +365,110 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     if (maxOutputBytes < 1 || maxOutputBytes > MAX_OUTPUT_BYTES) {
       throw new ProviderError("Invalid Daytona output limit", "invalid_request", false);
     }
-    const signal = deadlineSignal(input.signal, input.deadline, this.requestTimeoutMs);
+    const signal = operationSignal(input.signal, input.deadline);
     const sessionId = `metal-${crypto.randomUUID()}`;
     await this.toolboxJson(input.providerResourceId, "/process/session", {
       method: "POST",
       body: JSON.stringify({ sessionId }),
-      signal,
+      signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
     });
-    let response: unknown;
+    let parsed: z.infer<typeof DaytonaSessionExecuteSchema>;
     try {
-      response = await this.toolboxJson(
-        input.providerResourceId,
-        `/process/session/${encodeURIComponent(sessionId)}/exec`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            command: daytonaSessionCommand(input),
-            runAsync: false,
-          }),
-          signal,
-        },
+      parsed = DaytonaSessionExecuteSchema.parse(
+        await this.toolboxJson(
+          input.providerResourceId,
+          `/process/session/${encodeURIComponent(sessionId)}/exec`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              command: daytonaSessionCommand(input),
+              runAsync: true,
+            }),
+            signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
+          },
+        ),
       );
-    } finally {
-      await this.toolboxJson(
-        input.providerResourceId,
-        `/process/session/${encodeURIComponent(sessionId)}`,
-        {
-          method: "DELETE",
-          signal: deadlineSignal(undefined, undefined, this.requestTimeoutMs),
-        },
-      );
+    } catch (error) {
+      await this.deleteProcessSession(input.providerResourceId, sessionId).catch(() => undefined);
+      throw error;
     }
-    const parsed = z
-      .object({
-        cmdId: z.string().min(1),
-        output: z.string().nullish(),
-        stdout: z.string().nullish(),
-        stderr: z.string().nullish(),
-        exitCode: z.number().int(),
-      })
-      .passthrough()
-      .parse(response);
-    const separated =
-      parsed.stdout !== null && parsed.stdout !== undefined
-        ? { stdout: parsed.stdout, stderr: parsed.stderr ?? "" }
-        : splitDaytonaOutput(parsed.output ?? "");
-    const stdout = new TextEncoder().encode(separated.stdout);
-    const stderr = new TextEncoder().encode(separated.stderr);
-    const executionId = parsed.cmdId;
-    async function* events(): AsyncGenerator<ProviderExecEvent> {
+    const executionId = encodeExecutionId(sessionId, parsed.cmdId);
+    return {
+      executionId,
+      events: this.processEvents(
+        input.providerResourceId,
+        sessionId,
+        parsed.cmdId,
+        maxOutputBytes,
+        signal,
+      ),
+    };
+  }
+
+  async cancelExec(input: ProviderCancelExecInput): Promise<ProviderCancelExecResult> {
+    const { sessionId } = decodeExecutionId(input.executionId);
+    await this.deleteProcessSession(
+      input.providerResourceId,
+      sessionId,
+      operationSignal(input.signal, input.deadline),
+    );
+    return { executionId: input.executionId, cancelled: true };
+  }
+
+  private async *processEvents(
+    providerResourceId: string,
+    sessionId: string,
+    commandId: string,
+    maxOutputBytes: number,
+    signal: AbortSignal,
+  ): AsyncGenerator<ProviderExecEvent> {
+    let sessionDeleted = false;
+    try {
+      let exitCode: number | undefined;
+      while (exitCode === undefined) {
+        const command = DaytonaCommandSchema.parse(
+          await this.toolboxJson(
+            providerResourceId,
+            `/process/session/${encodeURIComponent(sessionId)}/command/${encodeURIComponent(commandId)}`,
+            {
+              method: "GET",
+              signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
+            },
+          ),
+        );
+        if (command.id !== commandId) {
+          throw new ProviderError(
+            "Daytona returned a different command identity",
+            "unknown_outcome",
+            false,
+          );
+        }
+        exitCode = command.exitCode ?? undefined;
+        if (exitCode === undefined) {
+          await abortableDelay(this.processPollIntervalMs, signal);
+        }
+      }
+
+      const logs = DaytonaCommandLogsSchema.parse(
+        await this.toolboxJson(
+          providerResourceId,
+          `/process/session/${encodeURIComponent(sessionId)}/command/${encodeURIComponent(commandId)}/logs`,
+          {
+            method: "GET",
+            signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
+          },
+        ),
+      );
+      const separated =
+        logs.stdout !== null && logs.stdout !== undefined
+          ? { stdout: logs.stdout, stderr: logs.stderr ?? "" }
+          : splitDaytonaOutput(logs.output ?? "");
+
+      await this.deleteProcessSession(providerResourceId, sessionId);
+      sessionDeleted = true;
+
+      const stdout = new TextEncoder().encode(separated.stdout);
+      const stderr = new TextEncoder().encode(separated.stderr);
       let sequence = 0;
       let remaining = maxOutputBytes;
       let truncated = false;
@@ -393,13 +491,33 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       yield {
         type: "exit",
         sequence,
-        exitCode: parsed.exitCode,
+        exitCode,
         signal: null,
         cancelled: false,
         outputTruncated: truncated,
       };
+    } finally {
+      if (!sessionDeleted) {
+        await this.deleteProcessSession(providerResourceId, sessionId).catch(() => undefined);
+      }
     }
-    return { executionId, events: events() };
+  }
+
+  private async deleteProcessSession(
+    providerResourceId: string,
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const response = await this.toolboxFetch(
+      providerResourceId,
+      `/process/session/${encodeURIComponent(sessionId)}`,
+      {
+        method: "DELETE",
+        signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
+      },
+    );
+    if (response.status === 404) return;
+    if (!response.ok) throw new DaytonaRequestError(response.status);
   }
 
   async readFile(input: ProviderReadFileInput): Promise<ProviderReadFileResult> {
@@ -1051,6 +1169,26 @@ function daytonaSessionCommand(input: ProviderExecInput): string {
   });
   const invoked = environment.length > 0 ? `env ${environment.join(" ")} ${command}` : command;
   return input.cwd ? `cd -- ${shellQuote(input.cwd)} && ${invoked}` : invoked;
+}
+
+function encodeExecutionId(sessionId: string, commandId: string): string {
+  const encoded = Buffer.from(JSON.stringify([sessionId, commandId])).toString("base64url");
+  return `${DAYTONA_EXECUTION_ID_PREFIX}${encoded}`;
+}
+
+function decodeExecutionId(executionId: string): { sessionId: string; commandId: string } {
+  try {
+    if (!executionId.startsWith(DAYTONA_EXECUTION_ID_PREFIX)) throw new Error("invalid prefix");
+    const decoded = JSON.parse(
+      Buffer.from(executionId.slice(DAYTONA_EXECUTION_ID_PREFIX.length), "base64url").toString(
+        "utf8",
+      ),
+    );
+    const [sessionId, commandId] = z.tuple([z.string().min(1), z.string().min(1)]).parse(decoded);
+    return { sessionId, commandId };
+  } catch {
+    throw new ProviderError("Invalid Daytona execution ID", "invalid_request", false);
+  }
 }
 
 function daytonaPath(path: string): string {

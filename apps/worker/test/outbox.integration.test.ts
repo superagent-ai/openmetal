@@ -646,6 +646,131 @@ describe("worker outbox", () => {
     expect(Number(unchanged?.balance_microusd)).toBe(750_000);
   });
 
+  it("stops recurring cost syncs once a sandbox is stopped", async () => {
+    const user = await createConfirmedUser(env);
+    users.push(user.user.id);
+    const orgId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const readyId = crypto.randomUUID();
+    const stoppedId = crypto.randomUUID();
+    await database.sql`
+      insert into public.organizations (id, name, slug)
+      values (${orgId}, 'Cost Chain Org', ${`cc-${orgId.slice(0, 8)}`})
+    `;
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values (${orgId}, ${user.user.id}, 'owner')
+    `;
+    await database.sql`
+      insert into public.projects (id, public_id, organization_id, name, slug)
+      values (
+        ${projectId},
+        ${`prj_${projectId.replaceAll("-", "")}`},
+        ${orgId},
+        'Cost Chain Project',
+        ${`p-${projectId.slice(0, 8)}`}
+      )
+    `;
+    for (const [id, status] of [
+      [readyId, "ready"],
+      [stoppedId, "stopped"],
+    ] as const) {
+      await database.sql`
+        insert into metal.sandboxes (
+          id, public_id, organization_id, project_id, provider, primary_provider,
+          status, source, resource_requirements, lifecycle, fallback,
+          provider_options, environment, secret_refs, metadata, created_by,
+          provider_resource_id, billing_mode, ready_at, deleted_at
+        )
+        values (
+          ${id},
+          ${`sbx_${id.replaceAll("-", "")}`},
+          ${orgId},
+          ${projectId},
+          'e2b',
+          'e2b',
+          ${status},
+          ${JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" })}::jsonb,
+          ${JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" })}::jsonb,
+          ${JSON.stringify({ runtime_timeout_seconds: 300 })}::jsonb,
+          ${JSON.stringify({ providers: [] })}::jsonb,
+          '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+          ${user.user.id},
+          ${`fake-sbx_${id.replaceAll("-", "")}`},
+          'byok',
+          now() - interval '10 minutes',
+          ${status === "stopped" ? new Date().toISOString() : null}
+        )
+      `;
+    }
+    const jobs = await Promise.all(
+      [readyId, stoppedId].map(async (id) => {
+        const [job] = await database.sql`
+          insert into metal.outbox_jobs (job_type, dedupe_key, payload, status)
+          values (
+            'sandbox.cost.sync',
+            ${`sandbox:cost:${id}:chain`},
+            ${JSON.stringify({ job_type: "sandbox.cost.sync", sandbox_id: id, final: false })}::jsonb,
+            'pending'
+          )
+          returning id
+        `;
+        return String(job!.id);
+      }),
+    );
+    const provider = new FakeSandboxProvider("e2b");
+    provider.setCost(40_000n);
+    const workerEnv = loadWorkerEnv({
+      ...process.env,
+      DATABASE_URL: env.DATABASE_URL,
+      SUPABASE_URL: env.SUPABASE_URL,
+      SUPABASE_SECRET_KEY: env.SUPABASE_SECRET_KEY,
+      WORKER_ID: "cost-chain-worker",
+      WORKER_LEASE_MS: "5000",
+      WORKER_POLL_MS: "50",
+      WORKER_BATCH_SIZE: "50",
+      WORKER_MAX_ATTEMPTS: "8",
+      WORKER_BASE_BACKOFF_MS: "10",
+      LOG_LEVEL: "silent",
+      METAL_ENVIRONMENT: "test",
+    });
+    for (const jobId of jobs) {
+      await processUntilJob(
+        jobId,
+        { publish: async () => {} },
+        workerEnv,
+        (row) => row.status === "succeeded",
+        { e2b: provider },
+      );
+    }
+
+    const pendingSyncs = await database.sql`
+      select payload->>'sandbox_id' as sandbox_id, count(*)::int as count
+      from metal.outbox_jobs
+      where job_type = 'sandbox.cost.sync'
+        and status = 'pending'
+        and payload->>'sandbox_id' in (${readyId}, ${stoppedId})
+      group by 1
+    `;
+    const pendingBySandbox = new Map(
+      pendingSyncs.map((row) => [String(row.sandbox_id), Number(row.count)]),
+    );
+    expect(pendingBySandbox.get(readyId)).toBe(1);
+    expect(pendingBySandbox.get(stoppedId)).toBeUndefined();
+
+    const [stopped] = await database.sql`
+      select provider_cost_microusd from metal.sandboxes where id = ${stoppedId}
+    `;
+    expect(Number(stopped?.provider_cost_microusd)).toBe(40_000);
+    const [events] = await database.sql`
+      select count(*)::int as count
+      from metal.domain_events
+      where type = 'sandbox.cost_updated'
+        and payload->>'sandbox_id' = ${`sbx_${stoppedId.replaceAll("-", "")}`}
+    `;
+    expect(Number(events?.count)).toBe(1);
+  });
+
   it("observes BYOK cost without charging, corrects usage, tops up, and enforces spend", async () => {
     const user = await createConfirmedUser(env);
     users.push(user.user.id);

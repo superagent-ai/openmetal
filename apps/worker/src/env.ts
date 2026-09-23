@@ -2,8 +2,6 @@ import { z } from "zod";
 
 export const WorkerEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
-  SUPABASE_URL: z.string().url(),
-  SUPABASE_SECRET_KEY: z.string().min(1),
   BL_API_KEY: z.string().min(1).optional(),
   BL_WORKSPACE: z.string().min(1).optional(),
   BLAXEL_API_KEY: z.string().min(1).optional(),
@@ -99,8 +97,6 @@ export function loadWorkerEnv(rawSource: NodeJS.ProcessEnv = process.env): Worke
   ) as NodeJS.ProcessEnv;
   return WorkerEnvSchema.parse({
     DATABASE_URL: source.DATABASE_URL,
-    SUPABASE_URL: source.SUPABASE_URL,
-    SUPABASE_SECRET_KEY: source.SUPABASE_SECRET_KEY,
     BL_API_KEY: source.BL_API_KEY,
     BL_WORKSPACE: source.BL_WORKSPACE,
     BLAXEL_API_KEY: source.BLAXEL_API_KEY,

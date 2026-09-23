@@ -5,6 +5,7 @@ export * from "./schema.js";
 export * from "./client.js";
 export * from "./outbox.js";
 export * from "./domain-events.js";
+export * from "./realtime.js";
 export type { Database } from "./database.types.js";
 
 export { loadDatabaseEnv };

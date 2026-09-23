@@ -1,37 +1,14 @@
+import { sendRealtimeBroadcast, type MetalDb } from "@openmetal/db";
 import { parseTopic, RealtimeBroadcastJobPayloadSchema } from "@openmetal/events";
 
 export type BroadcastPublisher = {
   publish: (topic: string, eventName: string, payload: unknown) => Promise<void>;
 };
 
-export function createRealtimePublisher(input: {
-  supabaseUrl: string;
-  secretKey: string;
-  fetchImpl?: typeof fetch;
-}): BroadcastPublisher {
-  const fetchImpl = input.fetchImpl ?? fetch;
+export function createRealtimePublisher(db: MetalDb): BroadcastPublisher {
   return {
-    async publish(topic, eventName, payload) {
-      parseTopic(topic);
-      const url = new URL(
-        `/realtime/v1/api/broadcast/${encodeURIComponent(topic)}/events/${encodeURIComponent(eventName)}`,
-        input.supabaseUrl,
-      );
-      url.searchParams.set("private", "true");
-      const response = await fetchImpl(url, {
-        method: "POST",
-        headers: {
-          apikey: input.secretKey,
-          authorization: `Bearer ${input.secretKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(8_000),
-      });
-      if (!response.ok) {
-        throw new Error(`realtime publish failed (${response.status})`);
-      }
-    },
+    publish: (topic, eventName, payload) =>
+      sendRealtimeBroadcast(db, { topic, event: eventName, payload }),
   };
 }
 

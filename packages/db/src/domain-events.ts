@@ -3,7 +3,6 @@ import {
   matchesWebhookEndpoint,
   organizationTopic,
   projectTopic,
-  publicationDedupeKey,
   serializeCursor,
   toPublicEvent,
   webhookDedupeKey,
@@ -12,6 +11,7 @@ import {
 import type { DurableEventEnvelope } from "@openmetal/contracts";
 import { domainEvents, outboxJobs, webhookDeliveries, webhookEndpoints } from "./schema.js";
 import type { MetalDb } from "./client.js";
+import { sendRealtimeBroadcast } from "./realtime.js";
 
 export type DomainEventFanoutInput = {
   type: string;
@@ -57,16 +57,12 @@ export async function insertDomainEventAndBroadcast(
     occurredAt: event.occurredAt,
     data: event.payload,
   });
-  await tx.insert(outboxJobs).values({
-    jobType: "realtime.broadcast",
-    dedupeKey: publicationDedupeKey(event.eventId),
-    payload: {
-      job_type: "realtime.broadcast",
-      topic:
-        input.topic ??
-        (projectPublicId ? projectTopic(projectPublicId) : organizationTopic(event.organizationId)),
-      event: publicEvent,
-    },
+  await sendRealtimeBroadcast(tx, {
+    topic:
+      input.topic ??
+      (projectPublicId ? projectTopic(projectPublicId) : organizationTopic(event.organizationId)),
+    event: publicEvent.type,
+    payload: publicEvent,
   });
   const deliveries = await enqueueWebhookDeliveries(tx, {
     organizationId: event.organizationId,

@@ -15,10 +15,7 @@ const logger = createLogger({
   level: env.LOG_LEVEL,
 });
 const database = createDatabase({ DATABASE_URL: env.DATABASE_URL });
-const publisher = createRealtimePublisher({
-  supabaseUrl: env.SUPABASE_URL,
-  secretKey: env.SUPABASE_SECRET_KEY,
-});
+const publisher = createRealtimePublisher(database.db);
 const sandboxProviders = buildSandboxProviders(env);
 const abort = new AbortController();
 logger.info({ worker_id: env.WORKER_ID }, "worker started");

@@ -56,6 +56,8 @@ it("boots the default Daytona snapshot when no image is requested", async () => 
       name: "metal-sbx_1",
       ephemeral: true,
       autoDeleteInterval: 0,
+      autoStopInterval: 0,
+      ttlMinutes: 60,
       labels: {
         "metal.sandbox_id": "sbx_1",
         "metal.organization_id": "org",
@@ -88,6 +90,8 @@ it("builds a Daytona sandbox from the requested OCI image and waits until it sta
         name: "metal-sbx_1",
         ephemeral: true,
         autoDeleteInterval: 0,
+        autoStopInterval: 0,
+        ttlMinutes: 46,
         buildInfo: { dockerfileContent: `FROM ${DIGEST_IMAGE}\n` },
         cpu: 2,
         memory: 4,

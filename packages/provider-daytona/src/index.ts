@@ -38,6 +38,7 @@ const IMAGE_POLL_INTERVAL_MS = 2_000;
 const PROCESS_POLL_INTERVAL_MS = 250;
 const DAYTONA_EXECUTION_ID_PREFIX = "daytona:";
 const DAYTONA_IMAGE_DISK_GB = 16;
+const DAYTONA_TTL_GRACE_MINUTES = 15;
 const DAYTONA_PENDING_STATES = new Set([
   "creating",
   "pending_build",
@@ -279,6 +280,14 @@ export class DaytonaSandboxProvider implements SandboxProvider {
           name,
           ephemeral: true,
           autoDeleteInterval: 0,
+          // Daytona's default idle auto-stop ignores detached processes, and stopping an
+          // ephemeral sandbox deletes it. Metal enforces the runtime timeout, so the TTL is
+          // only a backstop; Daytona counts it from creation, before an image build finishes.
+          autoStopInterval: 0,
+          ttlMinutes:
+            input.ttlMinutes +
+            Math.ceil(this.imageReadyTimeoutMs / 60_000) +
+            DAYTONA_TTL_GRACE_MINUTES,
           ...(image
             ? {
                 // CreateSandbox has no image field. The Daytona SDK sends a registry

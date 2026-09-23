@@ -6,7 +6,8 @@ import {
   enqueueWebhookDeliveries,
   insertDomainEventAndBroadcast,
 } from "@openmetal/db";
-import { serializeCursor, verifyWebhookSignature } from "@openmetal/events";
+import { serializeCursor } from "@openmetal/events";
+import { verifyWebhookSignature } from "@openmetal/events/webhooks-node";
 import {
   createConfirmedUser,
   deleteUser,

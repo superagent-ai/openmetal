@@ -449,15 +449,13 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         }
       }
 
-      const logs = DaytonaCommandLogsSchema.parse(
-        await this.toolboxJson(
-          providerResourceId,
-          `/process/session/${encodeURIComponent(sessionId)}/command/${encodeURIComponent(commandId)}/logs`,
-          {
-            method: "GET",
-            signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
-          },
-        ),
+      const logs = await this.toolboxCommandLogs(
+        providerResourceId,
+        `/process/session/${encodeURIComponent(sessionId)}/command/${encodeURIComponent(commandId)}/logs`,
+        {
+          method: "GET",
+          signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
+        },
       );
       const separated =
         logs.stdout !== null && logs.stdout !== undefined
@@ -1016,6 +1014,21 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     if (!response.ok) throw new DaytonaRequestError(response.status);
     const text = await response.text();
     return text ? JSON.parse(text) : {};
+  }
+
+  private async toolboxCommandLogs(
+    providerResourceId: string,
+    path: string,
+    init: RequestInit,
+  ): Promise<z.infer<typeof DaytonaCommandLogsSchema>> {
+    const response = await this.toolboxFetch(providerResourceId, path, init);
+    if (!response.ok) throw new DaytonaRequestError(response.status);
+    const text = await response.text();
+    const contentType = response.headers.get("content-type");
+    const structured = contentType?.toLowerCase().includes("application/json") === true;
+    return DaytonaCommandLogsSchema.parse(
+      structured ? (text ? JSON.parse(text) : {}) : { output: text },
+    );
   }
 
   private async ensureComputerUse(providerResourceId: string, signal: AbortSignal): Promise<void> {

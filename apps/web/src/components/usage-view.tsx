@@ -42,6 +42,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { paginateItems } from "@/lib/pagination";
 import type { UsageFilters, UsageRange } from "@/lib/usage-filters";
 
 type ProjectOption = {
@@ -113,6 +114,8 @@ const chartConfig = {
     color: "#8b5cf6",
   },
 } satisfies ChartConfig;
+
+const ACTIVITY_PAGE_SIZE = 20;
 
 function usd(value: { microusd: string }): number {
   return Number(value.microusd) / 1_000_000;
@@ -247,6 +250,91 @@ function FilterSubmenu({
         ))}
       </DropdownMenuSubContent>
     </DropdownMenuSub>
+  );
+}
+
+function ActivityTable({ activity }: { activity: OrganizationUsage["activity"] }) {
+  const [page, setPage] = useState(1);
+  const paged = paginateItems(activity, page, ACTIVITY_PAGE_SIZE);
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader className="bg-muted/50">
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Provider</TableHead>
+              <TableHead>Project</TableHead>
+              <TableHead>Billing</TableHead>
+              <TableHead>Total cost</TableHead>
+              <TableHead>Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {paged.total === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="h-40 text-center text-muted-foreground">
+                  No cost activity matches the selected range and filters.
+                </TableCell>
+              </TableRow>
+            ) : (
+              paged.rows.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {activityDate(item.measured_through)}
+                  </TableCell>
+                  <TableCell>
+                    <ProviderName provider={item.provider} />
+                  </TableCell>
+                  <TableCell>{item.project_name}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {item.billing_mode === "byok" ? "BYOK" : "Managed"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{money(item.cumulative_cost)}</TableCell>
+                  <TableCell className="capitalize">{item.status.replaceAll("_", " ")}</TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t px-4 py-2">
+        <p className="text-sm text-muted-foreground">
+          {paged.total === 0
+            ? "No cost snapshots"
+            : `Showing ${paged.from}–${paged.to} of the latest ${paged.total} cost snapshots`}
+        </p>
+        {paged.total > paged.pageSize ? (
+          <div
+            className="flex items-center gap-2"
+            role="navigation"
+            aria-label="Cost activity pages"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={paged.page <= 1}
+              onClick={() => setPage(paged.page - 1)}
+            >
+              Previous
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={paged.page >= paged.pageCount}
+              onClick={() => setPage(paged.page + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -526,53 +614,19 @@ export function UsageView({
               </BarChart>
             </ChartContainer>
           </div>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader className="bg-muted/50">
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Provider</TableHead>
-                  <TableHead>Project</TableHead>
-                  <TableHead>Billing</TableHead>
-                  <TableHead>Total cost</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {usage.activity.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="h-40 text-center text-muted-foreground">
-                      No cost activity matches the selected range and filters.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  usage.activity.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {activityDate(item.measured_through)}
-                      </TableCell>
-                      <TableCell>
-                        <ProviderName provider={item.provider} />
-                      </TableCell>
-                      <TableCell>{item.project_name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {item.billing_mode === "byok" ? "BYOK" : "Managed"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{money(item.cumulative_cost)}</TableCell>
-                      <TableCell className="capitalize">
-                        {item.status.replaceAll("_", " ")}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-          <div className="border-t px-4 py-3 text-xs text-muted-foreground">
-            Showing the latest {usage.activity.length} cost snapshots
-          </div>
+          <ActivityTable
+            key={[
+              filters.range,
+              filters.projectId ?? "",
+              filters.provider ?? "",
+              filters.billingMode,
+              filters.status ?? "",
+              filters.costProvenance ?? "",
+              usage.period.from,
+              usage.period.through,
+            ].join("\0")}
+            activity={usage.activity}
+          />
         </div>
       ) : null}
 

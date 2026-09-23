@@ -30,7 +30,7 @@ it("declares the Daytona provider contract", () => {
   expect(provider.name).toBe("daytona");
   expect(provider.capabilities.pause).toBe(false);
   expect(provider.capabilities.runtime).toMatchObject({
-    process: { exec: true, streams: false, cancel: false },
+    process: { exec: true, streams: false, cancel: true },
     files: {
       read: true,
       write: true,
@@ -391,11 +391,17 @@ it("does not advertise recording when FFmpeg is unavailable", async () => {
     if (url.includes("/process/session/") && url.endsWith("/exec")) {
       expect(JSON.parse(String(init?.body))).toMatchObject({
         command: expect.stringContaining("command -v ffmpeg"),
+        runAsync: true,
       });
+      return Response.json({ cmdId: "ffmpeg-probe" });
+    }
+    if (url.endsWith("/command/ffmpeg-probe/logs")) {
+      return Response.json({ stdout: "", stderr: "" });
+    }
+    if (url.endsWith("/command/ffmpeg-probe")) {
       return Response.json({
-        cmdId: "ffmpeg-probe",
-        stdout: "",
-        stderr: "",
+        id: "ffmpeg-probe",
+        command: "command -v ffmpeg",
         exitCode: 127,
       });
     }
@@ -460,7 +466,8 @@ it("marks Daytona analytics prices as provider reported", async () => {
   });
 });
 
-it("executes through a Daytona session with separate buffered stdout and stderr", async () => {
+it("executes asynchronously beyond one request timeout and returns buffered output", async () => {
+  let commandPolls = 0;
   const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
     if (url.endsWith("/sandbox/sandbox-1")) {
@@ -481,14 +488,23 @@ it("executes through a Daytona session with separate buffered stdout and stderr"
       expect(new Headers(init?.headers).get("x-daytona-split-output")).toBe("true");
       expect(JSON.parse(String(init?.body))).toMatchObject({
         command: "cd -- '/workspace' && 'printf' '%s' 'hello world'",
-        runAsync: false,
+        runAsync: true,
       });
+      return Response.json({ cmdId: "command-1" });
+    }
+    if (url.endsWith("/command/command-1/logs")) {
       return Response.json({
-        cmdId: "command-1",
         output: "\x01\x01\x01hello world\x02\x02\x02warning",
         stdout: null,
         stderr: null,
-        exitCode: 0,
+      });
+    }
+    if (url.endsWith("/command/command-1")) {
+      commandPolls += 1;
+      return Response.json({
+        id: "command-1",
+        command: "printf",
+        ...(commandPolls > 1 ? { exitCode: 0 } : {}),
       });
     }
     if (url.includes("/toolbox/sandbox-1/process/session/") && init?.method === "DELETE") {
@@ -496,7 +512,12 @@ it("executes through a Daytona session with separate buffered stdout and stderr"
     }
     throw new Error(`Unexpected URL: ${url}`);
   });
-  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const provider = new DaytonaSandboxProvider({
+    apiKey: "test",
+    fetchImpl,
+    requestTimeoutMs: 5,
+    processPollIntervalMs: 20,
+  });
 
   const result = await provider.exec({
     providerResourceId: "sandbox-1",
@@ -505,10 +526,52 @@ it("executes through a Daytona session with separate buffered stdout and stderr"
   });
   const events = [];
   for await (const event of result.events) events.push(event);
-  expect(result.executionId).toBe("command-1");
+  expect(result.executionId).toMatch(/^daytona:/);
+  expect(commandPolls).toBe(2);
   expect(events.map((event) => event.type)).toEqual(["stdout", "stderr", "exit"]);
   expect(events.map((event) => event.sequence)).toEqual([0, 1, 2]);
   expect(events.at(-1)).toMatchObject({ exitCode: 0, outputTruncated: false });
+  expect(
+    fetchImpl.mock.calls.some(([url, init]) => {
+      return String(url).includes("/process/session/") && init?.method === "DELETE";
+    }),
+  ).toBe(true);
+});
+
+it("cancels a Daytona execution after an adapter restart", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.endsWith("/toolbox/sandbox-1/process/session") && init?.method === "POST") {
+      return new Response(null, { status: 200 });
+    }
+    if (url.endsWith("/exec") && init?.method === "POST") {
+      return Response.json({ cmdId: "command-1" });
+    }
+    if (url.includes("/process/session/") && init?.method === "DELETE") {
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const execution = await provider.exec({
+    providerResourceId: "sandbox-1",
+    command: ["sleep", "30"],
+  });
+  const restarted = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(
+    restarted.cancelExec({
+      providerResourceId: "sandbox-1",
+      executionId: execution.executionId,
+    }),
+  ).resolves.toEqual({ executionId: execution.executionId, cancelled: true });
   expect(
     fetchImpl.mock.calls.some(([url, init]) => {
       return String(url).includes("/process/session/") && init?.method === "DELETE";

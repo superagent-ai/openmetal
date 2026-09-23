@@ -284,10 +284,11 @@ describe("metal api integration", () => {
           where organization_id = ${first.id} and type = 'organization.created'
         ) as events,
         (
-          select count(*)::int from metal.outbox_jobs
-          where payload->'event'->>'organization_id' = ${first.id}
-            and payload->'event'->>'type' = 'organization.created'
-        ) as jobs,
+          select count(*)::int from realtime.messages
+          where topic = ${`organization:${first.id}`}
+            and private
+            and payload->>'type' = 'organization.created'
+        ) as broadcasts,
         (
           select count(*)::int from metal.idempotency_keys
           where principal_id = ${owner.user.id} and operation = 'organizations.create'
@@ -297,7 +298,7 @@ describe("metal api integration", () => {
       resources: 1,
       memberships: 1,
       events: 1,
-      jobs: 1,
+      broadcasts: 1,
       idempotency: 1,
     });
 
@@ -312,10 +313,11 @@ describe("metal api integration", () => {
           where project_id = ${projectInternalId} and type = 'project.created'
         ) as events,
         (
-          select count(*)::int from metal.outbox_jobs
-          where payload->'event'->>'project_id' = ${project.id}
-            and payload->'event'->>'type' = 'project.created'
-        ) as jobs,
+          select count(*)::int from realtime.messages
+          where topic = ${`project:${project.id}`}
+            and private
+            and payload->>'type' = 'project.created'
+        ) as broadcasts,
         (
           select count(*)::int from metal.idempotency_keys
           where principal_id = ${owner.user.id}
@@ -325,7 +327,7 @@ describe("metal api integration", () => {
     expect(projectAtomicCounts[0]).toMatchObject({
       resources: 1,
       events: 1,
-      jobs: 1,
+      broadcasts: 1,
       idempotency: 1,
     });
 
@@ -864,7 +866,7 @@ describe("metal api integration", () => {
     );
   });
 
-  it("creates organization, event, and outbox job atomically", async () => {
+  it("creates organization, event, and broadcast atomically", async () => {
     const owner = await createConfirmedUser(env);
     users.push(owner.user.id);
     const ownerClient = clientFor(owner.accessToken);
@@ -879,14 +881,14 @@ describe("metal api integration", () => {
       from metal.domain_events
       where organization_id = ${organization.id}
     `;
-    const jobCount = await database.sql`
+    const broadcastCount = await database.sql`
       select count(*)::int as count
-      from metal.outbox_jobs
-      where payload->>'topic' = ${`organization:${organization.id}`}
-         or payload->'event'->>'organization_id' = ${organization.id}
+      from realtime.messages
+      where topic = ${`organization:${organization.id}`}
+        and payload->>'organization_id' = ${organization.id}
     `;
     expect(eventCount[0]?.count).toBeGreaterThan(0);
-    expect(jobCount[0]?.count).toBeGreaterThan(0);
+    expect(broadcastCount[0]?.count).toBe(eventCount[0]?.count);
   });
 
   it("rolls project, event, outbox, and idempotency state back on injected failures", async () => {
@@ -907,9 +909,13 @@ describe("metal api integration", () => {
             where payload->>'slug' = ${slug}
           ) as events,
           (
-            select count(*)::int from metal.outbox_jobs
-            where payload->'event'->'data'->>'slug' = ${slug}
-          ) as jobs,
+            select count(*)::int from metal.webhook_deliveries
+            where event->'data'->>'slug' = ${slug}
+          ) as deliveries,
+          (
+            select count(*)::int from realtime.messages
+            where payload->'data'->>'slug' = ${slug}
+          ) as broadcasts,
           (
             select count(*)::int from metal.idempotency_keys
             where principal_id = ${owner.user.id}
@@ -919,10 +925,17 @@ describe("metal api integration", () => {
       expect(counts).toMatchObject({
         projects: 0,
         events: 0,
-        jobs: 0,
+        deliveries: 0,
+        broadcasts: 0,
         idempotency: 0,
       });
     }
+
+    await ownerClient.webhooks.create(organization.id, {
+      name: "Failure injection hook",
+      url: "https://93.184.216.34/failure-injection",
+      event_types: ["project.created"],
+    });
 
     await database.sql`
       create or replace function metal.validation_fail_event()

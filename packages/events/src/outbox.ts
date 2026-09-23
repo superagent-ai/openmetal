@@ -155,10 +155,6 @@ export function validateOutboxPayload(input: unknown): OutboxJobPayload {
   return OutboxJobPayloadSchema.parse(input);
 }
 
-export function publicationDedupeKey(eventId: string): string {
-  return `broadcast:${eventId}`;
-}
-
 export function isDuplicateDelivery(seen: Set<string>, eventId: string, cursor: string): boolean {
   const key = `${eventId}:${cursor}`;
   if (seen.has(key) || seen.has(eventId)) {

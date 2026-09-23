@@ -1,12 +1,19 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
 import { DurableEventEnvelopeSchema } from "@openmetal/contracts";
-import { createDatabase } from "@openmetal/db";
+import { createDatabase, insertDomainEventAndBroadcast, withTransaction } from "@openmetal/db";
 import { organizationTopic, projectTopic, serializeCursor } from "@openmetal/events";
 import { createConfirmedUser, deleteUser, loadTestEnv, waitUntil } from "../src/index.js";
 import { createRealtimePublisher } from "../../../apps/worker/src/publisher.ts";
 
 const env = loadTestEnv();
+
+function hasEventId(items: unknown[], eventId: string | undefined): boolean {
+  return items.some(
+    (item) =>
+      typeof item === "object" && item !== null && "event_id" in item && item.event_id === eventId,
+  );
+}
 
 describe("private realtime", () => {
   const users: string[] = [];
@@ -17,7 +24,7 @@ describe("private realtime", () => {
     await database.shutdown();
   });
 
-  it("delivers to members, rejects unauthorized joins and customer publishes", async () => {
+  it("delivers committed events to members, rejects unauthorized joins and customer publishes", async () => {
     const owner = await createConfirmedUser(env);
     const outsider = await createConfirmedUser(env);
     users.push(owner.user.id, outsider.user.id);
@@ -90,77 +97,69 @@ describe("private realtime", () => {
       },
     );
     expect(restPublish.ok).toBe(false);
-    expect(
-      received.some(
-        (item) =>
-          typeof item === "object" &&
-          item !== null &&
-          "event_id" in item &&
-          item.event_id === "should-fail",
-      ),
-    ).toBe(false);
+    expect(hasEventId(received, "should-fail")).toBe(false);
 
-    const publisher = createRealtimePublisher({
-      supabaseUrl: env.SUPABASE_URL,
-      secretKey: env.SUPABASE_SECRET_KEY,
+    let rolledBackEventId: string | undefined;
+    await expect(
+      withTransaction(database.db, async (tx) => {
+        const rolledBack = await insertDomainEventAndBroadcast(tx, {
+          type: "project.updated",
+          organizationId,
+          projectId,
+          projectPublicId,
+          actorId: owner.user.id,
+          data: {},
+        });
+        rolledBackEventId = rolledBack.eventId;
+        throw new Error("rollback after broadcast");
+      }),
+    ).rejects.toThrow("rollback after broadcast");
+    expect(rolledBackEventId).toBeDefined();
+
+    const committed = await withTransaction(database.db, (tx) =>
+      insertDomainEventAndBroadcast(tx, {
+        type: "project.created",
+        organizationId,
+        projectId,
+        projectPublicId,
+        actorId: owner.user.id,
+        data: {},
+      }),
+    );
+    await waitUntil(async () => hasEventId(received, committed.eventId), { timeoutMs: 12_000 });
+    const delivered = received.find((item) => hasEventId([item], committed.eventId));
+    expect(DurableEventEnvelopeSchema.parse(delivered)).toEqual(committed.publicEvent);
+    expect(JSON.stringify(delivered)).not.toMatch(
+      /authorization|cookie|token|secret|password|api[_-]?key|database[_-]?url|signed[_-]?url/i,
+    );
+    // Realtime delivers realtime.messages in commit order, so the later commit arriving
+    // proves the rolled-back broadcast was never published.
+    expect(hasEventId(received, rolledBackEventId)).toBe(false);
+
+    const organizationEvent = await withTransaction(database.db, (tx) =>
+      insertDomainEventAndBroadcast(tx, {
+        type: "organization.updated",
+        organizationId,
+        actorId: owner.user.id,
+        data: {},
+      }),
+    );
+    await waitUntil(async () => hasEventId(organizationReceived, organizationEvent.eventId), {
+      timeoutMs: 12_000,
     });
-    const eventId = crypto.randomUUID();
-    const publicEvent = {
+    expect(hasEventId(received, organizationEvent.eventId)).toBe(false);
+
+    const legacyEventId = crypto.randomUUID();
+    await createRealtimePublisher(database.db).publish(topic, "project.created", {
       cursor: serializeCursor(1n),
-      event_id: eventId,
+      event_id: legacyEventId,
       type: "project.created",
       organization_id: organizationId,
       project_id: projectPublicId,
       occurred_at: new Date().toISOString(),
       data: {},
-    };
-    await publisher.publish(topic, "project.created", publicEvent);
-
-    await waitUntil(
-      async () =>
-        received.some(
-          (item) =>
-            typeof item === "object" &&
-            item !== null &&
-            "event_id" in item &&
-            item.event_id === eventId,
-        ),
-      {
-        timeoutMs: 12_000,
-      },
-    );
-    const delivered = received.find(
-      (item) =>
-        typeof item === "object" &&
-        item !== null &&
-        "event_id" in item &&
-        item.event_id === eventId,
-    );
-    expect(DurableEventEnvelopeSchema.parse(delivered)).toEqual(publicEvent);
-    expect(JSON.stringify(delivered)).not.toMatch(
-      /authorization|cookie|token|secret|password|api[_-]?key|database[_-]?url|signed[_-]?url/i,
-    );
-
-    const organizationEventId = crypto.randomUUID();
-    await publisher.publish(organizationTopic(organizationId), "organization.created", {
-      cursor: serializeCursor(2n),
-      event_id: organizationEventId,
-      type: "organization.created",
-      organization_id: organizationId,
-      occurred_at: new Date().toISOString(),
-      data: {},
     });
-    await waitUntil(
-      async () =>
-        organizationReceived.some(
-          (item) =>
-            typeof item === "object" &&
-            item !== null &&
-            "event_id" in item &&
-            item.event_id === organizationEventId,
-        ),
-      { timeoutMs: 12_000 },
-    );
+    await waitUntil(async () => hasEventId(received, legacyEventId), { timeoutMs: 12_000 });
 
     const outsiderClient = createClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },

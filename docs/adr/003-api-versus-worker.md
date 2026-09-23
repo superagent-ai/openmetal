@@ -17,3 +17,5 @@ The API writes durable desired state, an append-only event, and an outbox job in
 ## Consequences
 
 HTTP handlers stay bounded. Worker crashes do not lose committed jobs. Duplicate delivery is expected and must be idempotent.
+
+Realtime publishing moved out of the worker in [ADR 013](013-publish-realtime-from-postgres.md).

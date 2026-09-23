@@ -4,8 +4,6 @@ import { loadWorkerEnv } from "../src/env.js";
 it("treats empty optional provider environment values as unset", () => {
   const env = loadWorkerEnv({
     DATABASE_URL: "postgresql://localhost/test",
-    SUPABASE_URL: "https://example.supabase.co",
-    SUPABASE_SECRET_KEY: "secret",
     WORKER_ID: "worker",
     FREESTYLE_API_KEY: "freestyle-key",
     BLAXEL_ACCOUNT_ID: "",

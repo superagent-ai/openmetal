@@ -17,3 +17,5 @@ Dashboard updates must survive worker crashes. Realtime cannot be the only copy 
 ## Consequences
 
 Clients recover missed events by cursor. Reprocessing a job cannot insert a second domain event with the same `event_id`.
+
+Realtime publication no longer uses `metal.outbox_jobs`; see [ADR 013](013-publish-realtime-from-postgres.md).

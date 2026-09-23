@@ -1,4 +1,3 @@
-import { appendFileSync } from "node:fs";
 import { z } from "zod";
 import { resolveProviderResources } from "@openmetal/provider-core";
 import type {
@@ -368,16 +367,6 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     }
     const signal = operationSignal(input.signal, input.deadline);
     const sessionId = `metal-${crypto.randomUUID()}`;
-    // #region agent log
-    try {
-      appendFileSync(
-        "/opt/cursor/logs/debug.log",
-        `${JSON.stringify({ hypothesisId: "A,C,D", location: "packages/provider-daytona/src/index.ts:exec", message: "Daytona exec entered", data: { providerResourceId: input.providerResourceId, sessionId, commandArgCount: input.command.length, environmentCount: Object.keys(input.environment ?? {}).length, cwdPresent: input.cwd !== undefined, deadlineRemainingMs: input.deadline ? input.deadline.getTime() - Date.now() : null, callerSignalAborted: input.signal?.aborted ?? false }, timestamp: Date.now() })}\n`,
-      );
-    } catch {
-      // Diagnostic logging must not affect execution.
-    }
-    // #endregion
     await this.toolboxJson(input.providerResourceId, "/process/session", {
       method: "POST",
       body: JSON.stringify({ sessionId }),
@@ -404,16 +393,6 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       throw error;
     }
     const executionId = encodeExecutionId(sessionId, parsed.cmdId);
-    // #region agent log
-    try {
-      appendFileSync(
-        "/opt/cursor/logs/debug.log",
-        `${JSON.stringify({ hypothesisId: "A,D", location: "packages/provider-daytona/src/index.ts:exec:accepted", message: "Daytona async command accepted", data: { providerResourceId: input.providerResourceId, sessionId, commandId: parsed.cmdId, executionIdLength: executionId.length, operationSignalAborted: signal.aborted }, timestamp: Date.now() })}\n`,
-      );
-    } catch {
-      // Diagnostic logging must not affect execution.
-    }
-    // #endregion
     return {
       executionId,
       events: this.processEvents(
@@ -444,16 +423,6 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     signal: AbortSignal,
   ): AsyncGenerator<ProviderExecEvent> {
     let sessionDeleted = false;
-    // #region agent log
-    try {
-      appendFileSync(
-        "/opt/cursor/logs/debug.log",
-        `${JSON.stringify({ hypothesisId: "B,C,D,E", location: "packages/provider-daytona/src/index.ts:processEvents", message: "Daytona event consumption started", data: { providerResourceId, sessionId, commandId, maxOutputBytes, signalAborted: signal.aborted }, timestamp: Date.now() })}\n`,
-      );
-    } catch {
-      // Diagnostic logging must not affect execution.
-    }
-    // #endregion
     try {
       let exitCode: number | undefined;
       while (exitCode === undefined) {
@@ -525,18 +494,6 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         cancelled: false,
         outputTruncated: truncated,
       };
-    } catch (error) {
-      // #region agent log
-      try {
-        appendFileSync(
-          "/opt/cursor/logs/debug.log",
-          `${JSON.stringify({ hypothesisId: "A,B,C,D,E", location: "packages/provider-daytona/src/index.ts:processEvents:error", message: "Daytona event consumption failed", data: { providerResourceId, sessionId, commandId, errorName: error instanceof Error ? error.name : typeof error, requestStatus: error instanceof DaytonaRequestError ? error.status : null, providerErrorKind: error instanceof ProviderError ? error.kind : null, signalAborted: signal.aborted, signalReasonName: signal.aborted && signal.reason instanceof Error ? signal.reason.name : null, sessionDeleted }, timestamp: Date.now() })}\n`,
-        );
-      } catch {
-        // Diagnostic logging must not affect execution.
-      }
-      // #endregion
-      throw error;
     } finally {
       if (!sessionDeleted) {
         await this.deleteProcessSession(providerResourceId, sessionId).catch(() => undefined);
@@ -557,16 +514,6 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         signal: deadlineSignal(signal, undefined, this.requestTimeoutMs),
       },
     );
-    // #region agent log
-    try {
-      appendFileSync(
-        "/opt/cursor/logs/debug.log",
-        `${JSON.stringify({ hypothesisId: "B,E", location: "packages/provider-daytona/src/index.ts:deleteProcessSession", message: "Daytona session delete response", data: { providerResourceId, sessionId, status: response.status, ok: response.ok }, timestamp: Date.now() })}\n`,
-      );
-    } catch {
-      // Diagnostic logging must not affect execution.
-    }
-    // #endregion
     if (response.status === 404) return;
     if (!response.ok) throw new DaytonaRequestError(response.status);
   }
@@ -1063,54 +1010,10 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   ): Promise<unknown> {
     const headers = new Headers(init.headers);
     if (init.body) headers.set("content-type", "application/json");
-    const startedAt = Date.now();
-    let response: Response;
-    try {
-      response = await this.toolboxFetch(providerResourceId, path, { ...init, headers });
-    } catch (error) {
-      if (path.startsWith("/process/session")) {
-        // #region agent log
-        try {
-          appendFileSync(
-            "/opt/cursor/logs/debug.log",
-            `${JSON.stringify({ hypothesisId: "B,C", location: "packages/provider-daytona/src/index.ts:toolboxJson:transport", message: "Daytona process request rejected before response", data: { providerResourceId, path, method: init.method ?? "GET", elapsedMs: Date.now() - startedAt, errorName: error instanceof Error ? error.name : typeof error, signalAborted: init.signal instanceof AbortSignal ? init.signal.aborted : null, signalReasonName: init.signal instanceof AbortSignal && init.signal.aborted && init.signal.reason instanceof Error ? init.signal.reason.name : null }, timestamp: Date.now() })}\n`,
-          );
-        } catch {
-          // Diagnostic logging must not affect execution.
-        }
-        // #endregion
-      }
-      throw error;
-    }
-    const text = await response.text();
-    let parsed: unknown = {};
-    let parseError: unknown;
-    if (text) {
-      try {
-        parsed = JSON.parse(text);
-      } catch (error) {
-        parseError = error;
-      }
-    }
-    if (path.startsWith("/process/session")) {
-      const record =
-        typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-          ? (parsed as Record<string, unknown>)
-          : undefined;
-      // #region agent log
-      try {
-        appendFileSync(
-          "/opt/cursor/logs/debug.log",
-          `${JSON.stringify({ hypothesisId: "A,B,D,E", location: "packages/provider-daytona/src/index.ts:toolboxJson:response", message: "Daytona process response received", data: { providerResourceId, path, method: init.method ?? "GET", status: response.status, ok: response.ok, elapsedMs: Date.now() - startedAt, responseBytes: text.length, responseKeys: record ? Object.keys(record).sort() : [], id: typeof record?.id === "string" ? record.id : null, cmdId: typeof record?.cmdId === "string" ? record.cmdId : null, exitCode: typeof record?.exitCode === "number" ? record.exitCode : record?.exitCode === null ? null : "absent", statusField: typeof record?.status === "string" ? record.status : null, errorCode: typeof record?.code === "string" ? record.code : null, parseError: parseError instanceof Error ? parseError.name : null }, timestamp: Date.now() })}\n`,
-        );
-      } catch {
-        // Diagnostic logging must not affect execution.
-      }
-      // #endregion
-    }
+    const response = await this.toolboxFetch(providerResourceId, path, { ...init, headers });
     if (!response.ok) throw new DaytonaRequestError(response.status);
-    if (parseError) throw parseError;
-    return parsed;
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
   }
 
   private async toolboxCommandLogs(
@@ -1119,33 +1022,13 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     init: RequestInit,
   ): Promise<z.infer<typeof DaytonaCommandLogsSchema>> {
     const response = await this.toolboxFetch(providerResourceId, path, init);
+    if (!response.ok) throw new DaytonaRequestError(response.status);
     const text = await response.text();
     const contentType = response.headers.get("content-type");
     const structured = contentType?.toLowerCase().includes("application/json") === true;
-    let logs: z.infer<typeof DaytonaCommandLogsSchema> | undefined;
-    let parseError: unknown;
-    if (response.ok) {
-      try {
-        logs = DaytonaCommandLogsSchema.parse(
-          structured ? (text ? JSON.parse(text) : {}) : { output: text },
-        );
-      } catch (error) {
-        parseError = error;
-      }
-    }
-    // #region agent log
-    try {
-      appendFileSync(
-        "/opt/cursor/logs/debug.log",
-        `${JSON.stringify({ hypothesisId: "E", location: "packages/provider-daytona/src/index.ts:toolboxCommandLogs", message: "Daytona command logs response received", data: { providerResourceId, path, status: response.status, ok: response.ok, contentType, structured, responseBytes: text.length, parseError: parseError instanceof Error ? parseError.name : null }, timestamp: Date.now() })}\n`,
-      );
-    } catch {
-      // Diagnostic logging must not affect execution.
-    }
-    // #endregion
-    if (!response.ok) throw new DaytonaRequestError(response.status);
-    if (parseError) throw parseError;
-    return logs!;
+    return DaytonaCommandLogsSchema.parse(
+      structured ? (text ? JSON.parse(text) : {}) : { output: text },
+    );
   }
 
   private async ensureComputerUse(providerResourceId: string, signal: AbortSignal): Promise<void> {

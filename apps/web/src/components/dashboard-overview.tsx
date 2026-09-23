@@ -43,7 +43,7 @@ const providerLabels: Record<string, string> = {
 const legendColors = ["bg-violet-500", "bg-blue-500", "bg-emerald-500"] as const;
 const sandboxStatusStyles = {
   active: { label: "Active", dot: "bg-emerald-500" },
-  stopped: { label: "Stopped", dot: "bg-blue-500" },
+  stopped: { label: "Stopped", dot: "bg-muted-foreground/40" },
   failed: { label: "Failed", dot: "bg-red-500" },
 } as const;
 const sandboxStatuses = Object.keys(sandboxStatusStyles) as Array<keyof typeof sandboxStatusStyles>;

@@ -74,6 +74,15 @@ export type ProviderDestroyResult = {
   providerMetadata?: Record<string, unknown>;
 };
 
+export type ProviderSandboxState =
+  "starting" | "running" | "paused" | "stopped" | "failed" | "absent" | "unknown";
+
+export type ProviderSandboxInspection = {
+  state: ProviderSandboxState;
+  providerState: string | null;
+  reason: string | null;
+};
+
 export type ProviderRuntimeOperation = {
   deadline?: Date;
   signal?: AbortSignal;
@@ -423,6 +432,7 @@ export interface SandboxProvider extends SandboxRuntimeProvider {
   pause(providerResourceId: string, signal?: AbortSignal): Promise<void>;
   resume?(providerResourceId: string, signal?: AbortSignal): Promise<ProviderSandbox | void>;
   reconcileCreate?(metalSandboxId: string, signal?: AbortSignal): Promise<ProviderSandbox | null>;
+  inspect?(providerResourceId: string, signal?: AbortSignal): Promise<ProviderSandboxInspection>;
   destroy(providerResourceId: string, signal?: AbortSignal): Promise<ProviderDestroyResult | void>;
 }
 

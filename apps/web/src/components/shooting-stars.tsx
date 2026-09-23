@@ -46,8 +46,8 @@ function createStars(width: number, height: number): Star[] {
     return {
       x: Math.random() * width,
       y: Math.random() * height,
-      radius: 0.35 + depth * 1.15,
-      alpha: 0.2 + depth * 0.6,
+      radius: 0.45 + depth * 1.25,
+      alpha: 0.35 + depth * 0.55,
       phase: Math.random() * Math.PI * 2,
       driftX: (0.35 + depth * 1.2) * (Math.random() < 0.5 ? -1 : 1),
       driftY: 1.2 + depth * 3.2,
@@ -57,34 +57,34 @@ function createStars(width: number, height: number): Star[] {
 
 function spawnMeteor(width: number, height: number): Meteor {
   const roll = Math.random();
-  const speed = 480 + Math.random() * 440;
+  const speed = 520 + Math.random() * 360;
   let x = 0;
   let y = 0;
   let angle = 0;
 
-  if (roll < 0.42) {
+  if (roll < 0.46) {
     x = -24;
-    y = Math.random() * height * 0.7;
-    angle = ((8 + Math.random() * 24) * Math.PI) / 180;
-  } else if (roll < 0.84) {
+    y = Math.random() * height * 0.62;
+    angle = ((6 + Math.random() * 16) * Math.PI) / 180;
+  } else if (roll < 0.92) {
     x = width + 24;
-    y = Math.random() * height * 0.7;
-    angle = Math.PI - ((8 + Math.random() * 24) * Math.PI) / 180;
+    y = Math.random() * height * 0.62;
+    angle = Math.PI - ((6 + Math.random() * 16) * Math.PI) / 180;
   } else {
     x = Math.random() * width;
     y = -24;
-    const tilt = ((Math.random() < 0.5 ? -1 : 1) * ((12 + Math.random() * 26) * Math.PI)) / 180;
+    const tilt = ((Math.random() < 0.5 ? -1 : 1) * ((8 + Math.random() * 18) * Math.PI)) / 180;
     angle = Math.PI / 2 + tilt;
   }
 
-  const length = 110 + Math.random() * 120;
+  const length = 140 + Math.random() * 110;
   return {
     x,
     y,
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
     length,
-    width: 1.05 + Math.random() * 0.65,
+    width: 1.35 + Math.random() * 0.7,
     life: 0,
     maxLife: (Math.hypot(width, height) + length + 60) / speed,
     brightness: 0.7 + Math.random() * 0.3,
@@ -151,9 +151,9 @@ export function ShootingStars({ className }: { className?: string }) {
 
       if (!animate) return;
 
-      if (time >= nextSpawn && meteors.length < 2) {
+      if (time >= nextSpawn && meteors.length < 3) {
         meteors.push(spawnMeteor(width, height));
-        nextSpawn = time + 650 + Math.random() * 1300;
+        nextSpawn = time + 500 + Math.random() * 1100;
       }
 
       for (let index = meteors.length - 1; index >= 0; index -= 1) {
@@ -173,19 +173,16 @@ export function ShootingStars({ className }: { className?: string }) {
         const alpha = fadeIn * fadeOut * meteor.brightness;
         const gradient = context.createLinearGradient(tailX, tailY, meteor.x, meteor.y);
         gradient.addColorStop(0, `rgba(${color}, 0)`);
-        gradient.addColorStop(0.45, `rgba(${color}, ${0.12 * alpha})`);
-        gradient.addColorStop(0.82, `rgba(${color}, ${0.55 * alpha})`);
+        gradient.addColorStop(0.55, `rgba(${color}, ${0.28 * alpha})`);
+        gradient.addColorStop(0.86, `rgba(${color}, ${0.72 * alpha})`);
         gradient.addColorStop(1, `rgba(${color}, ${alpha})`);
-        context.strokeStyle = gradient;
-        context.lineWidth = meteor.width;
         context.lineCap = "round";
-        context.shadowColor = `rgba(${color}, ${0.45 * alpha})`;
-        context.shadowBlur = 8;
         context.beginPath();
         context.moveTo(tailX, tailY);
         context.lineTo(meteor.x, meteor.y);
+        context.strokeStyle = gradient;
+        context.lineWidth = meteor.width;
         context.stroke();
-        context.shadowBlur = 0;
         context.beginPath();
         context.fillStyle = `rgba(${color}, ${alpha})`;
         context.arc(meteor.x, meteor.y, meteor.width * 0.8, 0, Math.PI * 2);

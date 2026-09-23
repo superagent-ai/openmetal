@@ -10,25 +10,28 @@ export type SandboxStatusCounts = {
   failed: number;
 };
 
+function sandboxStatusGroup(state: string): keyof SandboxStatusCounts {
+  if (state === "failed" || state === "cleanup_failed") return "failed";
+  if (state === "paused" || state === "stopped") return "stopped";
+  return "active";
+}
+
 export function summarizeSandboxStatuses(sandboxes: DashboardSandbox[]): SandboxStatusCounts {
   const counts = { active: 0, stopped: 0, failed: 0 };
   for (const sandbox of sandboxes) {
-    if (sandbox.state === "failed" || sandbox.state === "cleanup_failed") {
-      counts.failed += 1;
-    } else if (sandbox.state === "paused" || sandbox.state === "stopped") {
-      counts.stopped += 1;
-    } else {
-      counts.active += 1;
-    }
+    counts[sandboxStatusGroup(sandbox.state)] += 1;
   }
   return counts;
 }
 
-export function sandboxCreationsByDate(sandboxes: DashboardSandbox[], dates: string[]): number[] {
-  const counts = new Map(dates.map((date) => [date, 0]));
+export function sandboxStatusesByDate(
+  sandboxes: DashboardSandbox[],
+  dates: string[],
+): SandboxStatusCounts[] {
+  const counts = new Map(dates.map((date) => [date, { active: 0, stopped: 0, failed: 0 }]));
   for (const sandbox of sandboxes) {
-    const date = sandbox.created_at.slice(0, 10);
-    if (counts.has(date)) counts.set(date, (counts.get(date) ?? 0) + 1);
+    const day = counts.get(sandbox.created_at.slice(0, 10));
+    if (day) day[sandboxStatusGroup(sandbox.state)] += 1;
   }
-  return dates.map((date) => counts.get(date) ?? 0);
+  return dates.map((date) => counts.get(date) ?? { active: 0, stopped: 0, failed: 0 });
 }

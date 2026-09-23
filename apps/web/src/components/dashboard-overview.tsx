@@ -16,7 +16,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@/components/ui/button";
 import {
-  sandboxCreationsByDate,
+  sandboxStatusesByDate,
   summarizeSandboxStatuses,
   type DashboardSandbox,
 } from "@/lib/sandbox-status";
@@ -46,6 +46,10 @@ const sandboxStatusStyles = {
   stopped: { label: "Stopped", dot: "bg-blue-500" },
   failed: { label: "Failed", dot: "bg-red-500" },
 } as const;
+const sandboxStatuses = Object.keys(sandboxStatusStyles) as Array<keyof typeof sandboxStatusStyles>;
+
+type ChartSegment = { value: number; color: string };
+type ChartBar = { height: number; segments: ChartSegment[] };
 
 function money(value: string): string {
   const amount = Number(value);
@@ -62,28 +66,30 @@ function moneyFromMicrousd(value: string): string {
   return money(String(Number(value) / 1_000_000));
 }
 
-function chartHeights(values: number[]): number[] {
-  const recent = values.slice(-8);
-  const maximum = Math.max(...recent, 0);
+function chartBars(stacks: ChartSegment[][]): ChartBar[] {
+  const recent = stacks.slice(-8).map((segments) => ({
+    segments: segments.filter((segment) => segment.value > 0),
+    total: segments.reduce((sum, segment) => sum + Math.max(segment.value, 0), 0),
+  }));
+  const maximum = Math.max(...recent.map((bar) => bar.total), 0);
   if (maximum === 0) {
-    return Array.from({ length: 8 }, () => 8);
+    return Array.from({ length: 8 }, () => ({ height: 8, segments: [] }));
   }
-  return recent.map((value) => Math.max(10, Math.round((value / maximum) * 100)));
+  return recent.map(({ segments, total }) => ({
+    height: Math.max(10, Math.round((total / maximum) * 100)),
+    segments,
+  }));
 }
 
 function MetricCard({
   title,
   value,
   bars,
-  barColor,
-  empty,
   items,
 }: {
   title: string;
   value: string;
-  bars: number[];
-  barColor?: string;
-  empty: boolean;
+  bars: ChartBar[];
   items: Array<{ label: string; value: string; color?: string }>;
 }) {
   return (
@@ -91,12 +97,22 @@ function MetricCard({
       <p className="text-sm text-muted-foreground">{title}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight tabular-nums">{value}</p>
       <div className="mt-6 flex h-16 items-end gap-2" aria-hidden="true">
-        {bars.map((height, index) => (
+        {bars.map((bar, index) => (
           <span
             key={`${title}-${index}`}
-            className={`flex-1 rounded-sm ${empty ? "bg-muted" : (barColor ?? "bg-foreground/75")}`}
-            style={{ height: `${height}%` }}
-          />
+            className={`flex min-h-min flex-1 flex-col-reverse gap-0.5 ${
+              bar.segments.length === 0 ? "rounded-sm bg-muted" : ""
+            }`}
+            style={{ height: `${bar.height}%` }}
+          >
+            {bar.segments.map((segment, segmentIndex) => (
+              <span
+                key={segmentIndex}
+                className={`min-h-1 rounded-sm ${segment.color}`}
+                style={{ flexGrow: segment.value }}
+              />
+            ))}
+          </span>
         ))}
       </div>
       <dl className="mt-6 space-y-2">
@@ -135,15 +151,11 @@ export function DashboardOverview({
   const basePath = `/dashboard/${organization.slug}`;
   const dailySpend = usage.daily.map((day) => Number(day.total_cost.microusd) / 1_000_000);
   const sandboxCounts = summarizeSandboxStatuses(sandboxes);
-  const sandboxActivity = sandboxCreationsByDate(
+  const sandboxActivity = sandboxStatusesByDate(
     sandboxes,
     usage.daily.map((day) => day.date),
   );
-  const dominantSandboxStatus = (
-    Object.keys(sandboxStatusStyles) as Array<keyof typeof sandboxStatusStyles>
-  ).reduce((current, status) =>
-    sandboxCounts[status] > sandboxCounts[current] ? status : current,
-  );
+  const creditBarColor = billing.auto_topup.enabled ? legendColors[0] : legendColors[1];
   const creditActivity = billing.ledger.map((entry) => Math.abs(Number(entry.amount_usd)));
   const navigation = [
     {
@@ -257,9 +269,7 @@ export function DashboardOverview({
           <MetricCard
             title="Spend this week"
             value={moneyFromMicrousd(usage.summary.total_cost.current.microusd)}
-            bars={chartHeights(dailySpend)}
-            barColor={legendColors[0]}
-            empty={dailySpend.every((value) => value === 0)}
+            bars={chartBars(dailySpend.map((value) => [{ value, color: legendColors[0] }]))}
             items={usage.by_provider.map((provider) => ({
               label: providerLabels[provider.provider] ?? provider.provider,
               value: moneyFromMicrousd(provider.cost.microusd),
@@ -268,9 +278,14 @@ export function DashboardOverview({
           <MetricCard
             title="Resources"
             value={sandboxes.length.toLocaleString("en-US")}
-            bars={chartHeights(sandboxActivity)}
-            barColor={sandboxStatusStyles[dominantSandboxStatus].dot}
-            empty={sandboxActivity.every((value) => value === 0)}
+            bars={chartBars(
+              sandboxActivity.map((counts) =>
+                sandboxStatuses.map((status) => ({
+                  value: counts[status],
+                  color: sandboxStatusStyles[status].dot,
+                })),
+              ),
+            )}
             items={[
               {
                 label: sandboxStatusStyles.active.label,
@@ -292,9 +307,7 @@ export function DashboardOverview({
           <MetricCard
             title="Credit balance"
             value={money(billing.balance_usd)}
-            bars={chartHeights(creditActivity)}
-            barColor={billing.auto_topup.enabled ? legendColors[0] : legendColors[1]}
-            empty={creditActivity.every((value) => value === 0)}
+            bars={chartBars(creditActivity.map((value) => [{ value, color: creditBarColor }]))}
             items={[
               {
                 label: "Automatic top up",

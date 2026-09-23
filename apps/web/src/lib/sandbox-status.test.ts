@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sandboxCreationsByDate, summarizeSandboxStatuses } from "./sandbox-status";
+import { sandboxStatusesByDate, summarizeSandboxStatuses } from "./sandbox-status";
 
 const createdAt = "2026-09-11T12:00:00.000Z";
 
@@ -28,17 +28,25 @@ describe("summarizeSandboxStatuses", () => {
       failed: 0,
     });
   });
+});
 
-  it("counts sandbox creations against the supplied chart dates", () => {
+describe("sandboxStatusesByDate", () => {
+  it("groups sandbox creations on each chart date by current status", () => {
     expect(
-      sandboxCreationsByDate(
+      sandboxStatusesByDate(
         [
           { id: "one", state: "ready", created_at: "2026-09-10T23:59:00.000Z" },
           { id: "two", state: "stopped", created_at: "2026-09-11T00:01:00.000Z" },
+          { id: "three", state: "provisioning", created_at: "2026-09-11T08:00:00.000Z" },
+          { id: "four", state: "cleanup_failed", created_at: "2026-09-11T09:00:00.000Z" },
           { id: "outside", state: "failed", created_at: "2026-09-09T23:59:00.000Z" },
         ],
-        ["2026-09-10", "2026-09-11"],
+        ["2026-09-10", "2026-09-11", "2026-09-12"],
       ),
-    ).toEqual([1, 1]);
+    ).toEqual([
+      { active: 1, stopped: 0, failed: 0 },
+      { active: 1, stopped: 1, failed: 1 },
+      { active: 0, stopped: 0, failed: 0 },
+    ]);
   });
 });

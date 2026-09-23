@@ -131,4 +131,6 @@ HTTP errors use:
 
 Common runtime codes include `idempotency_key_required`, `idempotency_mismatch`, `invalid_sandbox_state`, `process_terminal`, `endpoint_conflict`, `capability_unsupported`, `not_found`, and `validation_error`. Provider execution failures are recorded on the process, runtime operation, or endpoint instead of changing the already returned `202`.
 
+When a runtime call fails because the provider is unavailable or the outcome is unknown, and on each routine cost sync of a `ready` sandbox, the worker asks adapters that implement `inspect` for the provider-side sandbox state. If the provider reports the sandbox stopped, failed, or absent, the worker moves it from `ready` to `stopping` with `state_reason` `provider_stopped` and runs the existing destroy job immediately. That job records `sandbox.deleted` with the same reason and schedules the final cost sync. Daytona is currently the only adapter that implements `inspect`.
+
 Every newly provisioned sandbox stores an observed `provider_capabilities` snapshot. Runtime resources copy that snapshot for auditability. Treat it as a guarantee for that sandbox snapshot only, not for another provider, image, or future sandbox. See the provider matrix in the OpenMetal skill's [provider reference](../skills/openmetal/references/providers-and-billing.md) for current adapter limitations.

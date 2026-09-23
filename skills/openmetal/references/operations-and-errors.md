@@ -57,6 +57,8 @@ cleanup_failed
 
 Use the operation as the source of truth for mutation completion and the sandbox as the source of truth for current resource state. A successful create should end with a `ready` sandbox. A successful destroy should end with `stopped`.
 
+A `ready` sandbox can also move to `stopping` and then `stopped` without a destroy request when the provider stopped or deleted it on its own. OpenMetal checks the provider after a runtime call fails because the provider is unavailable, and during routine cost syncs. That sandbox has `state_reason` `provider_stopped`, and its `sandbox.deleted` event includes `reason: "provider_stopped"`. The sandbox cannot be recovered; create a new one. Currently only Daytona reports provider-side sandbox state.
+
 Do not request pause unless the sandbox is ready and its provider supports pause. Do not request resume unless it is paused and the provider supports resume.
 
 ## Event Batches

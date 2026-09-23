@@ -33,6 +33,8 @@ Only `succeeded`, `failed`, and `cancelled` are terminal.
 
 A successful create should end with a `ready` sandbox. A successful delete should end with a `stopped` sandbox.
 
+If the provider stops or deletes a `ready` sandbox on its own, OpenMetal moves it to `stopping` and then `stopped` with `state_reason` `provider_stopped`. Create a new sandbox to continue.
+
 ## Events
 
 Operation events use increasing positive sequence numbers. The events endpoint returns finite SSE batches. Resume by passing the last handled sequence through `Last-Event-ID`, the SDK option, or CLI `--after`.

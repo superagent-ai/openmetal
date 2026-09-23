@@ -56,6 +56,7 @@ Provider-specific runtime limitations:
 - E2B, Modal, and Vercel stream output but do not advertise confirmed process cancellation. Runloop supports provider-level cancellation even though its output is buffered.
 - Daytona, E2B, and Modal reject append writes. Runloop and Vercel also reject append; Runloop rejects `create_parents: true`.
 - Daytona applies an OCI image as a declarative `FROM <image>` build and waits until the sandbox state is `started`. Omitted `disk_mb` is sent as 16 GiB because Daytona's own default disk is 3 GiB.
+- Daytona runs each command in its own process group through `setsid`, so processes a command leaves running in the background survive the cleanup of its temporary session. Cancellation still terminates the running command. Images with no `setsid` at all keep the old behavior: background processes stop when the command exits.
 - Daytona sandboxes are created with Daytona's idle auto-stop disabled, so detached background processes keep running until the Metal runtime timeout. Daytona also receives a wall-clock TTL of the runtime timeout plus the image build window and 15 minutes, as a backstop if Metal's own destroy fails.
 - Daytona runtime failures carry Daytona's error code and message, for example `SANDBOX_NOT_RUNNING` or `SANDBOX_NOT_FOUND`, in the process or runtime-operation `error.message`.
 - Modal managed cost uses cumulative CPU core nanoseconds and memory GiB nanoseconds from the

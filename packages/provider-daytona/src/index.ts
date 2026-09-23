@@ -48,6 +48,13 @@ const DAYTONA_SANDBOX_UNAVAILABLE_CODES = new Set(["SANDBOX_NOT_FOUND", "SANDBOX
 const LOST_SANDBOX_STATES = new Set<ProviderSandboxState>(["stopped", "failed", "absent"]);
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]+/g;
+// Deleting a Daytona session kills the session's process group, including processes a
+// command left running in the background. setsid gives each command its own group; a running
+// command is still a descendant of the session, so deleting the session still cancels it.
+// setsid without -w (BusyBox) forks and loses the exit code only for a process group leader,
+// which a command cannot be unless the session shell has job control enabled.
+const DAYTONA_LAUNCHER = "metal_exec";
+const DAYTONA_LAUNCHER_FUNCTION = `${DAYTONA_LAUNCHER}() { if setsid -w true 2>/dev/null; then setsid -w "$@"; elif [ "\${-#*m}" = "$-" ] && command -v setsid >/dev/null 2>&1; then setsid "$@"; else "$@"; fi; };`;
 const DAYTONA_PENDING_STATES = new Set([
   "creating",
   "pending_build",
@@ -1397,7 +1404,8 @@ function daytonaSessionCommand(input: ProviderExecInput): string {
     return `${key}=${shellQuote(value)}`;
   });
   const invoked = environment.length > 0 ? `env ${environment.join(" ")} ${command}` : command;
-  return input.cwd ? `cd -- ${shellQuote(input.cwd)} && ${invoked}` : invoked;
+  const cd = input.cwd ? `cd -- ${shellQuote(input.cwd)} && ` : "";
+  return `${DAYTONA_LAUNCHER_FUNCTION} ${cd}${DAYTONA_LAUNCHER} ${invoked}`;
 }
 
 function encodeExecutionId(sessionId: string, commandId: string): string {

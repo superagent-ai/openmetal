@@ -491,7 +491,9 @@ it("decodes Daytona 0.163 plain-text logs after asynchronous execution", async (
       expect(new Headers(init?.headers).get("x-daytona-sdk-version")).toBe("0.163.0");
       expect(new Headers(init?.headers).get("x-daytona-split-output")).toBe("true");
       expect(JSON.parse(String(init?.body))).toMatchObject({
-        command: "cd -- '/workspace' && 'printf' '%s' 'hello world'",
+        command: expect.stringMatching(
+          /^metal_exec\(\) \{ .+ \}; cd -- '\/workspace' && metal_exec 'printf' '%s' 'hello world'$/,
+        ),
         runAsync: true,
       });
       return Response.json({ cmdId: "command-1" });

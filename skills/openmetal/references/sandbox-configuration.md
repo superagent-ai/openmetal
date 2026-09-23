@@ -76,6 +76,8 @@ Recognized environments are `metal/base`, `metal/node`, and `metal/python`. The 
 
 The image string has a 500-character maximum. The optional command has at most 4096 elements, each at most 131072 characters. Current adapters do not apply the OCI command, so do not rely on it to start a workload.
 
+Daytona starts an OCI image by building `FROM <image>` and does not return the sandbox until Daytona reports it started. The first pull can take minutes. Set `disk_mb` to at least the uncompressed image size; when it is omitted, Daytona receives 16 GiB instead of its 3 GiB default.
+
 Only providers declaring OCI support are eligible.
 
 ### Provider Template

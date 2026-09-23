@@ -807,8 +807,7 @@ it("maps a sandbox lookup miss after an adapter restart to an unavailable sandbo
     provider.listFiles({ providerResourceId: "sandbox-1", path: "/workspace" }),
   ).rejects.toMatchObject({
     kind: "unavailable",
-    message:
-      "Daytona API request failed (404 SANDBOX_NOT_FOUND): Sandbox with ID or name sandbox-1 not found",
+    message: "Daytona API request failed (404): Sandbox with ID or name sandbox-1 not found",
   });
 });
 
@@ -922,4 +921,90 @@ it("keeps Daytona API failures classified for provider fallback", async () => {
     retryable: false,
     message: "Daytona API request failed (400): request rejected",
   });
+});
+
+it("confirms an ambiguous toolbox 404 against the Daytona API before reporting the sandbox gone", async () => {
+  let sandboxLookups = 0;
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      sandboxLookups += 1;
+      return sandboxLookups === 1
+        ? Response.json({
+            id: "sandbox-1",
+            organizationId: "org-1",
+            state: "started",
+            toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+          })
+        : daytonaError(404, { error: "Not Found", message: "Sandbox not found" });
+    }
+    if (url.includes("/files?")) {
+      return daytonaError(404, {
+        message: "not found: sandbox sandbox-1 not found",
+        code: "NOT_FOUND",
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(
+    provider.listFiles({ providerResourceId: "sandbox-1", path: "/workspace" }),
+  ).rejects.toMatchObject({
+    kind: "unavailable",
+    retryable: false,
+    message:
+      "Daytona toolbox request failed (404 NOT_FOUND): not found: sandbox sandbox-1 not found",
+  });
+  expect(sandboxLookups).toBe(2);
+});
+
+it("trusts in-sandbox daemon 404s without another Daytona API call", async () => {
+  let sandboxLookups = 0;
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      sandboxLookups += 1;
+      return toolboxSandbox();
+    }
+    if (url.includes("/files/info?")) {
+      return daytonaError(404, {
+        message: "stat /tmp/missing.txt: no such file or directory",
+        source: "DAYTONA_DAEMON",
+        code: "FILE_NOT_FOUND",
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(
+    provider.readFile({ providerResourceId: "sandbox-1", path: "/tmp/missing.txt" }),
+  ).rejects.toMatchObject({
+    kind: "customer",
+    message:
+      "Daytona toolbox request failed (404 FILE_NOT_FOUND): stat /tmp/missing.txt: no such file or directory",
+  });
+  expect(sandboxLookups).toBe(1);
+});
+
+it("treats a sourceless 404 from a running Daytona sandbox as a missing file", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        state: "started",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.includes("/files/info?")) return new Response("file not found", { status: 404 });
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(
+    provider.deleteFile({ providerResourceId: "sandbox-1", path: "/workspace/missing.txt" }),
+  ).resolves.toEqual({ path: "/workspace/missing.txt", deleted: false });
 });

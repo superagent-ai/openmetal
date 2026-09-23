@@ -45,6 +45,7 @@ const DAYTONA_TTL_GRACE_MINUTES = 15;
 const MAX_ERROR_BODY_BYTES = 8 * 1_024;
 const MAX_ERROR_DETAIL_CHARS = 300;
 const DAYTONA_SANDBOX_UNAVAILABLE_CODES = new Set(["SANDBOX_NOT_FOUND", "SANDBOX_NOT_RUNNING"]);
+const LOST_SANDBOX_STATES = new Set<ProviderSandboxState>(["stopped", "failed", "absent"]);
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]+/g;
 const DAYTONA_PENDING_STATES = new Set([
@@ -140,6 +141,7 @@ const DaytonaErrorBodySchema = z
   .object({
     code: z.string().optional(),
     message: z.union([z.string(), z.array(z.string())]).optional(),
+    source: z.string().optional(),
   })
   .passthrough();
 
@@ -202,18 +204,36 @@ export type DaytonaProviderOptions = {
 
 type DaytonaSurface = "API" | "analytics" | "toolbox";
 
+type DaytonaErrorDetails = {
+  code?: string;
+  detail?: string;
+  fromDaemon?: boolean;
+  sandboxUnavailable?: boolean;
+};
+
 class DaytonaRequestError extends ProviderError {
+  readonly code?: string;
+  readonly detail?: string;
+  readonly fromDaemon: boolean;
+  readonly sandboxUnavailable: boolean;
+
   constructor(
     readonly status: number,
     readonly surface: DaytonaSurface,
-    readonly code?: string,
-    readonly detail?: string,
+    details: DaytonaErrorDetails = {},
   ) {
+    const sandboxUnavailable =
+      details.sandboxUnavailable ??
+      (details.code !== undefined && DAYTONA_SANDBOX_UNAVAILABLE_CODES.has(details.code));
     super(
-      `Daytona ${surface} request failed (${status}${code ? ` ${code}` : ""})${detail ? `: ${detail}` : ""}`,
-      daytonaFailureKind(status, code),
+      `Daytona ${surface} request failed (${status}${details.code ? ` ${details.code}` : ""})${details.detail ? `: ${details.detail}` : ""}`,
+      sandboxUnavailable ? "unavailable" : daytonaFailureKind(status),
       status === 429 || status >= 500,
     );
+    this.code = details.code;
+    this.detail = details.detail;
+    this.fromDaemon = details.fromDaemon ?? false;
+    this.sandboxUnavailable = sandboxUnavailable;
   }
 }
 
@@ -550,7 +570,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       },
     );
     if (response.status === 404) return;
-    if (!response.ok) throw await daytonaRequestError(response, "toolbox");
+    if (!response.ok) throw await this.toolboxError(providerResourceId, response);
   }
 
   async readFile(input: ProviderReadFileInput): Promise<ProviderReadFileResult> {
@@ -577,7 +597,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         signal,
       },
     );
-    if (!response.ok) throw await daytonaRequestError(response, "toolbox");
+    if (!response.ok) throw await this.toolboxError(input.providerResourceId, response);
     if (response.status !== 206 && info.size > MAX_FILE_BYTES) {
       await response.body?.cancel();
       throw new ProviderError(
@@ -650,7 +670,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         signal,
       },
     );
-    if (!response.ok) throw await daytonaRequestError(response, "toolbox");
+    if (!response.ok) throw await this.toolboxError(input.providerResourceId, response);
     return { path: input.path, bytesWritten: bytes.length, created: !existed };
   }
 
@@ -691,7 +711,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       `/files?path=${encodeURIComponent(providerPath)}&recursive=${String(input.recursive ?? false)}`,
       { method: "DELETE", signal },
     );
-    if (!response.ok) throw await daytonaRequestError(response, "toolbox");
+    if (!response.ok) throw await this.toolboxError(input.providerResourceId, response);
     return { path: input.path, deleted: true };
   }
 
@@ -1042,7 +1062,11 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       });
     } catch (error) {
       if (error instanceof DaytonaRequestError && error.status === 404) {
-        throw new DaytonaRequestError(404, "API", "SANDBOX_NOT_FOUND", error.detail);
+        throw new DaytonaRequestError(404, "API", {
+          code: error.code,
+          detail: error.detail,
+          sandboxUnavailable: true,
+        });
       }
       throw error;
     }
@@ -1053,6 +1077,29 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     const url = this.resolveToolboxUrl(sandbox.toolboxProxyUrl, providerResourceId);
     this.toolboxUrls.set(providerResourceId, url);
     return url;
+  }
+
+  private async toolboxError(
+    providerResourceId: string,
+    response: Response,
+  ): Promise<DaytonaRequestError> {
+    const error = await daytonaRequestError(response, "toolbox");
+    // The toolbox proxy's codes for a stopped or deleted sandbox vary between proxies, so
+    // a 400 or 404 that did not come from the in-sandbox daemon is checked against the API.
+    if (
+      (error.status !== 400 && error.status !== 404) ||
+      error.sandboxUnavailable ||
+      error.fromDaemon
+    ) {
+      return error;
+    }
+    const inspection = await this.inspect(providerResourceId).catch(() => null);
+    if (!inspection || !LOST_SANDBOX_STATES.has(inspection.state)) return error;
+    return new DaytonaRequestError(error.status, "toolbox", {
+      code: error.code,
+      detail: error.detail,
+      sandboxUnavailable: true,
+    });
   }
 
   private async toolboxFetch(
@@ -1078,7 +1125,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     const headers = new Headers(init.headers);
     if (init.body) headers.set("content-type", "application/json");
     const response = await this.toolboxFetch(providerResourceId, path, { ...init, headers });
-    if (!response.ok) throw await daytonaRequestError(response, "toolbox");
+    if (!response.ok) throw await this.toolboxError(providerResourceId, response);
     const text = await response.text();
     return text ? JSON.parse(text) : {};
   }
@@ -1089,7 +1136,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     init: RequestInit,
   ): Promise<z.infer<typeof DaytonaCommandLogsSchema>> {
     const response = await this.toolboxFetch(providerResourceId, path, init);
-    if (!response.ok) throw await daytonaRequestError(response, "toolbox");
+    if (!response.ok) throw await this.toolboxError(providerResourceId, response);
     const text = await response.text();
     const contentType = response.headers.get("content-type");
     const structured = contentType?.toLowerCase().includes("application/json") === true;
@@ -1116,7 +1163,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       { method: "GET", signal },
     );
     if (!response.ok) {
-      const error = await daytonaRequestError(response, "toolbox");
+      const error = await this.toolboxError(providerResourceId, response);
       if (isToolboxNotFound(error)) return false;
       throw error;
     }
@@ -1269,8 +1316,7 @@ function daytonaSandboxState(state: string | undefined): ProviderSandboxState {
   }
 }
 
-function daytonaFailureKind(status: number, code: string | undefined): ProviderFailureKind {
-  if (code && DAYTONA_SANDBOX_UNAVAILABLE_CODES.has(code)) return "unavailable";
+function daytonaFailureKind(status: number): ProviderFailureKind {
   if (status === 401 || status === 403) return "auth";
   if (status === 429) return "capacity";
   if (status >= 500) return "unavailable";
@@ -1279,11 +1325,7 @@ function daytonaFailureKind(status: number, code: string | undefined): ProviderF
 }
 
 function isToolboxNotFound(error: unknown): boolean {
-  return (
-    error instanceof DaytonaRequestError &&
-    error.status === 404 &&
-    !(error.code && DAYTONA_SANDBOX_UNAVAILABLE_CODES.has(error.code))
-  );
+  return error instanceof DaytonaRequestError && error.status === 404 && !error.sandboxUnavailable;
 }
 
 async function daytonaRequestError(
@@ -1300,7 +1342,11 @@ async function daytonaRequestError(
   }
   const code = body?.code && /^[A-Z][A-Z0-9_]{0,63}$/.test(body.code) ? body.code : undefined;
   const message = Array.isArray(body?.message) ? body.message.join("; ") : body?.message;
-  return new DaytonaRequestError(response.status, surface, code, boundedDetail(message));
+  return new DaytonaRequestError(response.status, surface, {
+    code,
+    detail: boundedDetail(message),
+    fromDaemon: body?.source === "DAYTONA_DAEMON",
+  });
 }
 
 async function readErrorText(response: Response): Promise<string> {

@@ -17,3 +17,5 @@ Use private Supabase Realtime Broadcast. Authorize `SELECT` on `realtime.message
 ## Consequences
 
 Unauthorized users cannot join `project:<id>`. Duplicate broadcasts are suppressed in the UI by event ID. Disconnect recovery is proven through the API, not through Realtime replay.
+
+Publishing moved from the worker to `realtime.send` in the event transaction in [ADR 013](013-publish-realtime-from-postgres.md).

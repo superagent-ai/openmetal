@@ -30,14 +30,15 @@ OpenMetal is expanding one portable compute interface in stages:
 ## Architecture
 
 ```text
-apps/web  --Auth/Realtime-->  Supabase
-apps/web  --MetalClient---->  apps/api  --Drizzle-->  PostgreSQL
-apps/api  --outbox-------->  apps/worker --Broadcast--> Supabase Realtime
+apps/web    --Auth/Realtime-->  Supabase
+apps/web    --MetalClient---->  apps/api  --Drizzle-->  PostgreSQL
+apps/api    --outbox--------->  apps/worker
+PostgreSQL  --realtime.send-->  Supabase Realtime  --Broadcast-->  apps/web
 ```
 
 - `apps/web` is the Next.js dashboard. It uses Supabase only for login, logout, confirmation, session refresh, and authorized private Realtime channels.
-- `apps/api` is the only public product API. It authenticates Supabase JWTs, authorizes every org/project operation, and writes product state, a durable event, and an outbox job in one transaction.
-- `apps/worker` claims outbox jobs with `FOR UPDATE SKIP LOCKED` and publishes committed events to private Broadcast topics.
+- `apps/api` is the only public product API. It authenticates Supabase JWTs, authorizes every org/project operation, and writes product state, a durable event, its private Broadcast, and any outbox jobs in one transaction.
+- `apps/worker` claims outbox jobs with `FOR UPDATE SKIP LOCKED` and runs provider, billing, and webhook work. Events it records are broadcast the same way.
 - `packages/sdk-typescript` (`@openmetal/sdk`) is the only way the dashboard talks to the OpenMetal API.
 - `packages/contracts` holds runtime Zod schemas shared by the API and SDK.
 - `packages/billing` holds credit purchase fees, the organization ledger, Stripe Checkout, and automatic top ups.
@@ -193,7 +194,7 @@ Do not run `supabase config push` after changing hosted SMTP; local `config.toml
 
 ## API and worker division
 
-The API never calls providers and does not publish Realtime events inside the originating HTTP request. The worker is the trusted publisher. Duplicate job delivery is safe: domain events are append-only and unique on `event_id`, and the dashboard deduplicates by event ID and cursor.
+The API never calls providers. Realtime broadcasts are written by Postgres in the same transaction as their domain event, so they go out only after commit and never for rolled-back work. Duplicate job delivery is safe: domain events are append-only and unique on `event_id`, and the dashboard deduplicates by event ID and cursor.
 
 ## SDK usage
 
@@ -215,7 +216,7 @@ The SDK also exposes `processes`, `filesystem`, `runtimeOperations`, and `endpoi
 
 ## Realtime delivery and cursor recovery
 
-The worker broadcasts to private topics `organization:<id>` and `project:<id>` after the event is committed. Clients subscribe with `{ private: true }`. On subscribe or reconnect they call `GET /v1/events?project_id=&after=`. Realtime is never the only copy of an event.
+Every domain event is broadcast to its private topic, `organization:<id>` or `project:<id>`, by calling `realtime.send` inside the transaction that records it. Supabase Realtime delivers the message only after that transaction commits, so no service needs the Supabase secret key to publish. Clients subscribe with `{ private: true }`. On subscribe or reconnect they call `GET /v1/events?project_id=&after=`. Realtime is never the only copy of an event.
 
 ## Testing
 

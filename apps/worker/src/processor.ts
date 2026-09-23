@@ -1108,7 +1108,7 @@ async function syncSandboxCost(
         });
       }
     }
-    if (!final && sandbox.status !== "deleted") {
+    if (!final && sandbox.status !== "stopped" && sandbox.status !== "deleted") {
       const delayMs = sandbox.status === "paused" ? 5 * 60_000 : 60_000;
       await scheduleCostSync(tx, sandbox.id, new Date(Date.now() + delayMs), false);
     }
@@ -3181,6 +3181,7 @@ async function scheduleMissingSandboxCosts(db: MetalDb, providers: SandboxProvid
       continue;
     }
     const final =
+      sandbox.status === "stopped" ||
       sandbox.status === "deleted" ||
       ((provider.name === "codesandbox" || provider.name === "northflank") &&
         sandbox.status === "paused");

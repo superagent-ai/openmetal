@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { parsePublicEvent, projectTopic } from "@openmetal/events";
 import {
   ArrowDown01Icon,
@@ -43,9 +43,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ResourceSearchInput } from "@/components/resource-search-input";
+import { coalesceAsync } from "@/lib/coalesce";
 import { createMetalClient } from "@/lib/metal";
 import {
   applyResourceTableState,
+  applySandboxCostUpdate,
   parseResourceSearchQuery,
   PENDING_PROVIDER_FILTER,
   providerLabel,
@@ -304,6 +306,7 @@ export function ProjectResourcesTable({
   const [busySandboxId, setBusySandboxId] = useState<string>();
   const [deletingSandbox, setDeletingSandbox] = useState<Sandbox>();
   const [error, setError] = useState<string>();
+  const [refreshError, setRefreshError] = useState<string>();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<ResourceTableSort>(null);
   const [page, setPage] = useState(1);
@@ -374,25 +377,38 @@ export function ProjectResourcesTable({
     setPage(1);
   }
 
-  const refreshSandboxes = useCallback(async () => {
-    const result = await metal.sandboxes.list(projectId);
-    setSandboxRows(result.sandboxes);
-  }, [metal, projectId]);
+  const refreshSandboxes = useMemo(
+    () =>
+      coalesceAsync(async () => {
+        const result = await metal.sandboxes.list(projectId);
+        setSandboxRows(result.sandboxes);
+        setRefreshError(undefined);
+      }),
+    [metal, projectId],
+  );
 
   useEffect(() => {
     let cancelled = false;
+    const refresh = () => {
+      void refreshSandboxes().catch((caught) => {
+        if (!cancelled) {
+          setRefreshError(caught instanceof Error ? caught.message : "Could not refresh resources");
+        }
+      });
+    };
     const channel = supabase.channel(projectTopic(projectId), {
       config: { private: true },
     });
     channel.on("broadcast", { event: "*" }, (message) => {
       try {
         const event = parsePublicEvent(message.payload);
-        if (event.project_id === projectId && event.type.startsWith("sandbox.") && !cancelled) {
-          void refreshSandboxes().catch((caught) => {
-            if (!cancelled) {
-              setError(caught instanceof Error ? caught.message : "Could not refresh resources");
-            }
-          });
+        if (event.project_id !== projectId || !event.type.startsWith("sandbox.") || cancelled) {
+          return;
+        }
+        if (event.type === "sandbox.cost_updated") {
+          setSandboxRows((current) => applySandboxCostUpdate(current, event.data));
+        } else {
+          refresh();
         }
       } catch {
         // Ignore unrelated or malformed broadcasts on this project channel.
@@ -406,13 +422,9 @@ export function ProjectResourcesTable({
       if (!cancelled) {
         channel.subscribe((status) => {
           if (!cancelled && status === "SUBSCRIBED") {
-            void refreshSandboxes().catch((caught) => {
-              if (!cancelled) {
-                setError(caught instanceof Error ? caught.message : "Could not refresh resources");
-              }
-            });
+            refresh();
           } else if (!cancelled && (status === "CHANNEL_ERROR" || status === "TIMED_OUT")) {
-            setError("Realtime resource updates disconnected");
+            setRefreshError("Realtime resource updates disconnected");
           }
         });
       }
@@ -482,9 +494,9 @@ export function ProjectResourcesTable({
   return (
     <>
       <div className="space-y-3">
-        {error ? (
+        {error || refreshError ? (
           <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{error ?? refreshError}</AlertDescription>
           </Alert>
         ) : null}
         <ResourceSearchInput

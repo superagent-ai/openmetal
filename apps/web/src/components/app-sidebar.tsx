@@ -252,7 +252,12 @@ export function AppSidebar({
       channel.on("broadcast", { event: "*" }, (message) => {
         try {
           const event = parsePublicEvent(message.payload);
-          if (event.project_id === project.id && event.type.startsWith("sandbox.") && !cancelled) {
+          if (
+            event.project_id === project.id &&
+            event.type.startsWith("sandbox.") &&
+            event.type !== "sandbox.cost_updated" &&
+            !cancelled
+          ) {
             void refreshRunningProject(project).catch(() => undefined);
           }
         } catch {

@@ -1921,5 +1921,13 @@ describe("metal api integration", () => {
       select id from vault.secrets where id = ${stored[0]!.secret_id}
     `;
     expect(secretsAfterDelete).toHaveLength(0);
+    const [deletedEndpoint] = await database.sql`
+      select secret_id, deleted_at,
+        (select count(*)::int from metal.webhook_deliveries where endpoint_id = ${created.id})
+          as deliveries
+      from metal.webhook_endpoints where id = ${created.id}
+    `;
+    expect(deletedEndpoint).toMatchObject({ secret_id: null, deliveries: 2 });
+    expect(deletedEndpoint!.deleted_at).not.toBeNull();
   });
 });

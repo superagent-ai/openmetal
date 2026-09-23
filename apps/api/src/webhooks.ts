@@ -264,9 +264,11 @@ export async function deleteWebhookEndpoint(
     const now = new Date();
     await tx
       .update(webhookEndpoints)
-      .set({ enabled: false, disabledAt: now, deletedAt: now, updatedAt: now })
+      .set({ enabled: false, disabledAt: now, deletedAt: now, updatedAt: now, secretId: null })
       .where(eq(webhookEndpoints.id, existing.id));
-    await tx.execute(sql`delete from vault.secrets where id = ${existing.secretId}`);
+    if (existing.secretId) {
+      await tx.execute(sql`delete from vault.secrets where id = ${existing.secretId}`);
+    }
     return { id: existing.id, deleted: true as const };
   });
 }

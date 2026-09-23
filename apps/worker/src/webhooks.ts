@@ -155,7 +155,11 @@ export type WebhookDeliveryDisposition =
   | { kind: "retry"; deliveryId: string; availableAt: Date }
   | { kind: "failed"; deliveryId: string };
 
-async function readWebhookSecret(tx: MetalDb, secretId: string): Promise<string | undefined> {
+async function readWebhookSecret(
+  tx: MetalDb,
+  secretId: string | null,
+): Promise<string | undefined> {
+  if (!secretId) return undefined;
   const rows = (await tx.execute(sql`
     select decrypted_secret as "decryptedSecret"
     from vault.decrypted_secrets

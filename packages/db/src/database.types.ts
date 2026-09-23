@@ -1414,7 +1414,7 @@ export type Database = {
           organization_id: string
           rotated_at: string | null
           rotated_by: string | null
-          secret_id: string
+          secret_id: string | null
           secret_prefix: string
           updated_at: string
           url: string
@@ -1433,7 +1433,7 @@ export type Database = {
           organization_id: string
           rotated_at?: string | null
           rotated_by?: string | null
-          secret_id: string
+          secret_id?: string | null
           secret_prefix: string
           updated_at?: string
           url: string
@@ -1452,7 +1452,7 @@ export type Database = {
           organization_id?: string
           rotated_at?: string | null
           rotated_by?: string | null
-          secret_id?: string
+          secret_id?: string | null
           secret_prefix?: string
           updated_at?: string
           url?: string

@@ -46,8 +46,8 @@ function createStars(width: number, height: number): Star[] {
     return {
       x: Math.random() * width,
       y: Math.random() * height,
-      radius: 0.45 + depth * 1.25,
-      alpha: 0.35 + depth * 0.55,
+      radius: 0.8 + depth * 1.6,
+      alpha: 0.45 + depth * 0.5,
       phase: Math.random() * Math.PI * 2,
       driftX: (0.35 + depth * 1.2) * (Math.random() < 0.5 ? -1 : 1),
       driftY: 1.2 + depth * 3.2,
@@ -84,7 +84,7 @@ function spawnMeteor(width: number, height: number): Meteor {
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
     length,
-    width: 1.35 + Math.random() * 0.7,
+    width: 2.2 + Math.random() * 1.1,
     life: 0,
     maxLife: (Math.hypot(width, height) + length + 60) / speed,
     brightness: 0.7 + Math.random() * 0.3,
@@ -181,11 +181,15 @@ export function ShootingStars({ className }: { className?: string }) {
         context.moveTo(tailX, tailY);
         context.lineTo(meteor.x, meteor.y);
         context.strokeStyle = gradient;
+        context.globalAlpha = 0.35;
+        context.lineWidth = meteor.width * 3.2;
+        context.stroke();
+        context.globalAlpha = 1;
         context.lineWidth = meteor.width;
         context.stroke();
         context.beginPath();
         context.fillStyle = `rgba(${color}, ${alpha})`;
-        context.arc(meteor.x, meteor.y, meteor.width * 0.8, 0, Math.PI * 2);
+        context.arc(meteor.x, meteor.y, meteor.width * 1.15, 0, Math.PI * 2);
         context.fill();
 
         const gone =

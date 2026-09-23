@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import { FakeStripeGateway, grantCredits } from "@openmetal/billing";
 import { createDatabase, withTransaction } from "@openmetal/db";
 import { parseCursor, serializeCursor } from "@openmetal/events";
@@ -1784,19 +1785,23 @@ describe("metal api integration", () => {
       }),
     ).rejects.toMatchObject({ status: 403 });
 
-    await expect(
-      ownerClient.webhooks.create(organization.id, {
-        name: "bad scheme",
-        url: "ftp://93.184.216.34/hook",
-      }),
-    ).rejects.toMatchObject({ status: 422 });
-    await expect(
-      ownerClient.webhooks.create(organization.id, {
-        name: "bad events",
-        url: "https://93.184.216.34/hook",
-        event_types: ["not.an.event"],
-      }),
-    ).rejects.toMatchObject({ status: 422 });
+    const invalidWebhooks = [
+      { name: "bad scheme", url: "ftp://93.184.216.34/hook" },
+      { name: "bad events", url: "https://93.184.216.34/hook", event_types: ["not.an.event"] },
+    ];
+    for (const invalid of invalidWebhooks) {
+      expect(() => ownerClient.webhooks.create(organization.id, invalid as never)).toThrow(
+        ZodError,
+      );
+      const response = await runningApp.inject({
+        method: "POST",
+        url: `/v1/organizations/${organization.id}/webhooks`,
+        headers: { authorization: `Bearer ${owner.accessToken}` },
+        payload: invalid,
+      });
+      expect(response.statusCode).toBe(422);
+      expect(response.json()).toMatchObject({ code: "validation_error" });
+    }
 
     const created = await ownerClient.webhooks.create(organization.id, {
       name: "Deploy hook",

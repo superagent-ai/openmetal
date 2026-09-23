@@ -15,4 +15,5 @@ RUN pnpm install --frozen-lockfile \
 
 ENV NODE_ENV="production"
 
-CMD ["sh", "-c", "exec pnpm --filter @openmetal/$SERVICE start"]
+# Run node as PID 1: pnpm exits on SIGTERM without waiting for the app to drain.
+CMD ["sh", "-c", "cd apps/$SERVICE && exec node dist/index.js"]

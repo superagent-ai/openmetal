@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyResourceTableState,
+  applySandboxCostUpdate,
   deleteResourceSearchQualifierAtCaret,
   getResourceSearchSuggestionMode,
   parseResourceSearchQuery,
@@ -372,5 +373,41 @@ describe("applyResourceTableState", () => {
     expect(result.rows).toEqual([]);
     expect(result.from).toBe(0);
     expect(result.to).toBe(0);
+  });
+});
+
+describe("applySandboxCostUpdate", () => {
+  const costRows = [
+    { ...row({ id: "sbx_a", cost_microusd: "100" }), cost_updated_at: "2026-08-01T00:05:00.000Z" },
+    { ...row({ id: "sbx_b", cost_microusd: null }), cost_updated_at: null },
+  ];
+
+  it("patches the matching row from a sandbox.cost_updated payload", () => {
+    const next = applySandboxCostUpdate(costRows, {
+      provider: "daytona",
+      sandbox_id: "sbx_b",
+      cost_microusd: "40520",
+      cost_updated_at: "2026-08-01T00:06:00.000Z",
+    });
+    expect(next).not.toBe(costRows);
+    expect(next[0]).toBe(costRows[0]);
+    expect(next[1]).toMatchObject({
+      id: "sbx_b",
+      cost_microusd: "40520",
+      cost_updated_at: "2026-08-01T00:06:00.000Z",
+    });
+  });
+
+  it("keeps rows unchanged for unknown sandboxes or malformed payloads", () => {
+    expect(
+      applySandboxCostUpdate(costRows, {
+        sandbox_id: "sbx_missing",
+        cost_microusd: "1",
+        cost_updated_at: "2026-08-01T00:06:00.000Z",
+      }),
+    ).toBe(costRows);
+    expect(applySandboxCostUpdate(costRows, { sandbox_id: "sbx_a", cost_microusd: 1 })).toBe(
+      costRows,
+    );
   });
 });

@@ -480,6 +480,31 @@ export function applyResourceTableState<T extends ResourceTableRow>(
   };
 }
 
+export function applySandboxCostUpdate<
+  T extends { id: string; cost_microusd: string | null; cost_updated_at: string | null },
+>(rows: T[], data: Record<string, unknown>): T[] {
+  const {
+    sandbox_id: sandboxId,
+    cost_microusd: costMicrousd,
+    cost_updated_at: costUpdatedAt,
+  } = data;
+  if (
+    typeof sandboxId !== "string" ||
+    typeof costMicrousd !== "string" ||
+    typeof costUpdatedAt !== "string"
+  ) {
+    return rows;
+  }
+  const index = rows.findIndex((row) => row.id === sandboxId);
+  const current = rows[index];
+  if (!current) {
+    return rows;
+  }
+  const next = [...rows];
+  next[index] = { ...current, cost_microusd: costMicrousd, cost_updated_at: costUpdatedAt };
+  return next;
+}
+
 export function qualifierValueMatchesPrefix(option: ResourceSearchQualifierOption, prefix: string) {
   const needle = prefix.trim().toLowerCase();
   if (!needle) {

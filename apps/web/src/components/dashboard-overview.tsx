@@ -100,15 +100,15 @@ function MetricCard({
         {bars.map((bar, index) => (
           <span
             key={`${title}-${index}`}
-            className={`flex flex-1 flex-col-reverse overflow-hidden rounded-sm ${
-              bar.segments.length === 0 ? "bg-muted" : ""
+            className={`flex min-h-min flex-1 flex-col-reverse gap-0.5 ${
+              bar.segments.length === 0 ? "rounded-sm bg-muted" : ""
             }`}
             style={{ height: `${bar.height}%` }}
           >
             {bar.segments.map((segment, segmentIndex) => (
               <span
                 key={segmentIndex}
-                className={`min-h-0.5 ${segment.color}`}
+                className={`min-h-1 rounded-sm ${segment.color}`}
                 style={{ flexGrow: segment.value }}
               />
             ))}

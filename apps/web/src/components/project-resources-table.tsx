@@ -73,6 +73,7 @@ type Sandbox = {
     | "freestyle"
     | "modal"
     | "northflank"
+    | "prime"
     | "runloop"
     | "vercel"
     | null;

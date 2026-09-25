@@ -34,6 +34,7 @@ const providers = [
   "freestyle",
   "modal",
   "northflank",
+  "prime",
   "runloop",
   "vercel",
 ] as const;

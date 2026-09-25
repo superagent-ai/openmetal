@@ -4,18 +4,19 @@ Read this reference before choosing a provider, requiring pause/resume, configur
 
 ## Provider Capabilities
 
-| Provider    | Supported sources              | Pause                                           | Resume | Managed cost evidence                    |
-| ----------- | ------------------------------ | ----------------------------------------------- | ------ | ---------------------------------------- |
-| Blaxel      | Environment, OCI image         | No                                              | No     | Yes                                      |
-| Cloudflare  | Environment                    | No                                              | No     | Only with account ID and analytics token |
-| CodeSandbox | Environment, provider template | Yes                                             | Yes    | Yes                                      |
-| Daytona     | Environment, OCI image         | Attempted; capability reporting is inconsistent | No     | Yes                                      |
-| E2B         | Environment, provider template | Yes                                             | Yes    | Yes                                      |
-| Freestyle   | Environment, provider template | Yes                                             | Yes    | Estimated rate card (low confidence)     |
-| Modal       | Environment, OCI image         | No                                              | No     | Metered resource usage with rate card    |
-| Northflank  | Environment, OCI image         | Yes                                             | Yes    | Yes                                      |
-| Runloop     | Environment, provider template | Yes                                             | Yes    | Yes                                      |
-| Vercel      | Environment, OCI image         | No                                              | No     | Yes                                      |
+| Provider    | Supported sources                         | Pause                                           | Resume | Managed cost evidence                    |
+| ----------- | ----------------------------------------- | ----------------------------------------------- | ------ | ---------------------------------------- |
+| Blaxel      | Environment, OCI image                    | No                                              | No     | Yes                                      |
+| Cloudflare  | Environment                               | No                                              | No     | Only with account ID and analytics token |
+| CodeSandbox | Environment, provider template            | Yes                                             | Yes    | Yes                                      |
+| Daytona     | Environment, OCI image                    | Attempted; capability reporting is inconsistent | No     | Yes                                      |
+| E2B         | Environment, provider template            | Yes                                             | Yes    | Yes                                      |
+| Freestyle   | Environment, provider template            | Yes                                             | Yes    | Estimated rate card (low confidence)     |
+| Modal       | Environment, OCI image                    | No                                              | No     | Metered resource usage with rate card    |
+| Northflank  | Environment, OCI image                    | Yes                                             | Yes    | Yes                                      |
+| Prime       | Environment, OCI image, provider template | No                                              | No     | Estimated rate card (low confidence)     |
+| Runloop     | Environment, provider template            | Yes                                             | Yes    | Yes                                      |
+| Vercel      | Environment, OCI image                    | No                                              | No     | Yes                                      |
 
 This matrix describes current adapters, not future vision documents. If reliable pause/resume is required, use CodeSandbox, E2B, Northflank, or Runloop. The API currently attempts Daytona pause even though the adapter advertises pause as disabled by default, and BYOK configuration cannot enable that capability flag. Treat Daytona pause as inconsistent until the implementation is corrected.
 
@@ -25,7 +26,7 @@ Cloudflare managed eligibility requires both account identification and analytic
 
 ## Runtime Capabilities
 
-The worker accepts any adapter that implements process execution. Adapters with `streams: false` remain usable through the public process API, but their output appears only after command completion and does not preserve cross-stream timing.
+The worker accepts any adapter that implements process execution. Most adapters with `streams: false` buffer output until command completion. Prime emits ordered gateway frames while connected, but does not declare restart-safe replay; do not rely on `streams: false` adapters for portable incremental output.
 
 | Provider    | Public process API               | Filesystem API            | Leased HTTP endpoints |
 | ----------- | -------------------------------- | ------------------------- | --------------------- |
@@ -37,6 +38,7 @@ The worker accepts any adapter that implements process execution. Adapters with 
 | Freestyle   | Execute; buffered output         | Read, write, list, delete | No                    |
 | Modal       | Execute and stream; no cancel    | Read, write, list, delete | No                    |
 | Northflank  | No                               | No                        | No                    |
+| Prime       | Execute; no restart-safe replay  | Read and overwrite        | No                    |
 | Runloop     | Execute; buffered output         | Read and write            | No                    |
 | Vercel      | Execute and stream; no cancel    | Read and write            | No                    |
 
@@ -46,6 +48,7 @@ Global contract ceilings are 100 MiB process output, 10 MiB per file read/write,
 - Cloudflare: 10 MiB output and 10 MiB file read/write.
 - Daytona, E2B, and Modal: 100 MiB output, 10 MiB file read/write, 10,000 list entries.
 - Freestyle: 10 MiB output, 10 MiB file read/write, 10,000 list entries.
+- Prime: 10 MiB output and 16 MiB file read/write; no list or delete.
 - Runloop and Vercel: 10 MiB output and 10 MiB file read/write.
 - Endpoint-capable adapters advertise at most 86,400 seconds.
 
@@ -67,6 +70,7 @@ Provider-specific runtime limitations:
 - Cloudflare file paths must be within `/workspace`; it does not implement list or delete. Runloop and Vercel do not implement list or delete and require a file path rather than `/`.
 - Vercel file writes are additionally constrained by USTAR path-component limits.
 - Freestyle uses buffered native execution with a 300-second provider timeout ceiling. It supports atomic overwrite writes but not portable create-only or append modes. Its managed cost is a low-confidence cumulative rate-card estimate from provider runtime counters and fixed resources; it excludes transfer, plan credits, discounts, and enterprise pricing.
+- Prime's gateway carries ordered stdout/stderr frames but does not guarantee restart-safe output replay or cancellation through this adapter. Its upload overwrites without guaranteed parent creation; no portable list or delete is available. Its cumulative cost is estimated from a published CPU/memory/disk rate card valid through December 22, 2026; it is not an upstream billing record.
 - Only Blaxel exposes portable HTTP endpoints with a live-verified native expiry and revocation path. All other adapters keep the endpoint capability disabled when the upstream API cannot satisfy or live verification cannot prove the complete lease contract.
 
 Capability checks happen in the worker after the API accepts a process, filesystem operation, or endpoint. Always inspect the terminal resource and its `error`; HTTP 202 is not capability confirmation.
@@ -197,6 +201,16 @@ Northflank:
   "provider": "northflank",
   "api_token": "<secret>",
   "project_id": "<provider-project-id>",
+  "team_id": "<optional-team-id>"
+}
+```
+
+Prime:
+
+```json
+{
+  "provider": "prime",
+  "api_key": "<secret>",
   "team_id": "<optional-team-id>"
 }
 ```

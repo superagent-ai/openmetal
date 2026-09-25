@@ -51,6 +51,7 @@ type ProviderName =
   | "freestyle"
   | "modal"
   | "northflank"
+  | "prime"
   | "runloop"
   | "vercel";
 
@@ -239,6 +240,21 @@ const providers: ProviderDefinition[] = [
         required: true,
       },
       { name: "team_id", label: "Team ID", placeholder: "Optional team ID" },
+    ],
+  },
+  {
+    name: "prime",
+    label: "Prime Intellect",
+    logo: "/providers/prime.ico",
+    fields: [
+      {
+        name: "api_key",
+        label: "API key",
+        placeholder: "Enter your Prime API key",
+        type: "password",
+        required: true,
+      },
+      { name: "team_id", label: "Team ID", placeholder: "Optional Prime team ID" },
     ],
   },
   {

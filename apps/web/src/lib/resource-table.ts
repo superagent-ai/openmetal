@@ -10,6 +10,7 @@ export const KNOWN_SANDBOX_PROVIDERS = [
   "freestyle",
   "modal",
   "northflank",
+  "prime",
   "runloop",
   "vercel",
 ] as const;

@@ -2,6 +2,7 @@ node_modules
 .turbo
 dist
 .next
+.context
 coverage
 playwright-report
 test-results

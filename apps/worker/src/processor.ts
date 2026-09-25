@@ -432,6 +432,8 @@ async function provisionSandbox(
           onIdleTimeout: lifecycle.on_idle_timeout ?? "destroy",
         },
         providerOptions: options,
+        features: sandbox.features,
+        network: sandbox.network,
         environment: sandbox.environment,
         secretRefs: sandbox.secretRefs,
         metadata: sandbox.metadata,

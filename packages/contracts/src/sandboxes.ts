@@ -37,6 +37,7 @@ export const SandboxProviderSchema = z.enum([
   "freestyle",
   "modal",
   "northflank",
+  "prime",
   "runloop",
   "vercel",
 ]);
@@ -114,6 +115,7 @@ export const ProviderOptionsSchema = z.object({
       ephemeral_storage_mb: z.number().int().positive().optional(),
     })
     .optional(),
+  prime: z.object({ team_id: z.string().min(1).optional() }).optional(),
   runloop: z
     .object({
       resource_size: z

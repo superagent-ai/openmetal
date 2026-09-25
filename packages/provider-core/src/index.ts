@@ -26,6 +26,8 @@ export type ProviderCreateSandboxInput = {
     onIdleTimeout: "destroy" | "pause";
   };
   providerOptions?: Record<string, unknown>;
+  features?: Record<string, unknown>;
+  network?: Record<string, unknown>;
   environment?: Record<string, string>;
   secretRefs?: Record<string, string>;
   metadata?: Record<string, string>;
@@ -408,6 +410,7 @@ export type SandboxProviderName =
   | "freestyle"
   | "modal"
   | "northflank"
+  | "prime"
   | "runloop"
   | "vercel";
 

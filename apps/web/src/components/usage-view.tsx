@@ -62,6 +62,7 @@ const providerLabels: Record<string, string> = {
   freestyle: "Freestyle",
   modal: "Modal",
   northflank: "Northflank",
+  prime: "Prime Intellect",
   runloop: "Runloop",
   vercel: "Vercel",
 };
@@ -75,6 +76,7 @@ const providerLogos: Record<string, { src: string; invert?: boolean }> = {
   freestyle: { src: "/providers/freestyle.png" },
   modal: { src: "/providers/modal.svg" },
   northflank: { src: "/providers/northflank.svg" },
+  prime: { src: "/providers/prime.ico" },
   runloop: { src: "/providers/runloop.png" },
   vercel: { src: "/providers/vercel.ico", invert: true },
 };

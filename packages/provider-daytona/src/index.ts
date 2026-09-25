@@ -13,6 +13,7 @@ import type {
   ProviderExecEvent,
   ProviderExecInput,
   ProviderExecResult,
+  ProviderFailureKind,
   ProviderFileEntry,
   ProviderListFilesInput,
   ProviderListFilesResult,
@@ -22,6 +23,8 @@ import type {
   ProviderSandbox,
   ProviderSandboxCost,
   ProviderSandboxCostInput,
+  ProviderSandboxInspection,
+  ProviderSandboxState,
   ProviderStartRecordingInput,
   ProviderStopRecordingInput,
   ProviderWriteFileInput,
@@ -38,6 +41,20 @@ const IMAGE_POLL_INTERVAL_MS = 2_000;
 const PROCESS_POLL_INTERVAL_MS = 250;
 const DAYTONA_EXECUTION_ID_PREFIX = "daytona:";
 const DAYTONA_IMAGE_DISK_GB = 16;
+const DAYTONA_TTL_GRACE_MINUTES = 15;
+const MAX_ERROR_BODY_BYTES = 8 * 1_024;
+const MAX_ERROR_DETAIL_CHARS = 300;
+const DAYTONA_SANDBOX_UNAVAILABLE_CODES = new Set(["SANDBOX_NOT_FOUND", "SANDBOX_NOT_RUNNING"]);
+const LOST_SANDBOX_STATES = new Set<ProviderSandboxState>(["stopped", "failed", "absent"]);
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]+/g;
+// Deleting a Daytona session kills the session's process group, including processes a
+// command left running in the background. setsid gives each command its own group; a running
+// command is still a descendant of the session, so deleting the session still cancels it.
+// setsid without -w (BusyBox) forks and loses the exit code only for a process group leader,
+// which a command cannot be unless the session shell has job control enabled.
+const DAYTONA_LAUNCHER = "metal_exec";
+const DAYTONA_LAUNCHER_FUNCTION = `${DAYTONA_LAUNCHER}() { if setsid -w true 2>/dev/null; then setsid -w "$@"; elif [ "\${-#*m}" = "$-" ] && command -v setsid >/dev/null 2>&1; then setsid "$@"; else "$@"; fi; };`;
 const DAYTONA_PENDING_STATES = new Set([
   "creating",
   "pending_build",
@@ -127,6 +144,14 @@ const DaytonaCommandLogsSchema = z
   })
   .passthrough();
 
+const DaytonaErrorBodySchema = z
+  .object({
+    code: z.string().optional(),
+    message: z.union([z.string(), z.array(z.string())]).optional(),
+    source: z.string().optional(),
+  })
+  .passthrough();
+
 function shellQuote(argument: string): string {
   return `'${argument.replaceAll("'", `'\\''`)}'`;
 }
@@ -184,9 +209,38 @@ export type DaytonaProviderOptions = {
   fetchImpl?: typeof fetch;
 };
 
-class DaytonaRequestError extends Error {
-  constructor(readonly status: number) {
-    super(`Daytona request failed (${status})`);
+type DaytonaSurface = "API" | "analytics" | "toolbox";
+
+type DaytonaErrorDetails = {
+  code?: string;
+  detail?: string;
+  fromDaemon?: boolean;
+  sandboxUnavailable?: boolean;
+};
+
+class DaytonaRequestError extends ProviderError {
+  readonly code?: string;
+  readonly detail?: string;
+  readonly fromDaemon: boolean;
+  readonly sandboxUnavailable: boolean;
+
+  constructor(
+    readonly status: number,
+    readonly surface: DaytonaSurface,
+    details: DaytonaErrorDetails = {},
+  ) {
+    const sandboxUnavailable =
+      details.sandboxUnavailable ??
+      (details.code !== undefined && DAYTONA_SANDBOX_UNAVAILABLE_CODES.has(details.code));
+    super(
+      `Daytona ${surface} request failed (${status}${details.code ? ` ${details.code}` : ""})${details.detail ? `: ${details.detail}` : ""}`,
+      sandboxUnavailable ? "unavailable" : daytonaFailureKind(status),
+      status === 429 || status >= 500,
+    );
+    this.code = details.code;
+    this.detail = details.detail;
+    this.fromDaemon = details.fromDaemon ?? false;
+    this.sandboxUnavailable = sandboxUnavailable;
   }
 }
 
@@ -279,6 +333,14 @@ export class DaytonaSandboxProvider implements SandboxProvider {
           name,
           ephemeral: true,
           autoDeleteInterval: 0,
+          // Daytona's default idle auto-stop ignores detached processes, and stopping an
+          // ephemeral sandbox deletes it. Metal enforces the runtime timeout, so the TTL is
+          // only a backstop; Daytona counts it from creation, before an image build finishes.
+          autoStopInterval: 0,
+          ttlMinutes:
+            input.ttlMinutes +
+            Math.ceil(this.imageReadyTimeoutMs / 60_000) +
+            DAYTONA_TTL_GRACE_MINUTES,
           ...(image
             ? {
                 // CreateSandbox has no image field. The Daytona SDK sends a registry
@@ -515,7 +577,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       },
     );
     if (response.status === 404) return;
-    if (!response.ok) throw new DaytonaRequestError(response.status);
+    if (!response.ok) throw await this.toolboxError(providerResourceId, response);
   }
 
   async readFile(input: ProviderReadFileInput): Promise<ProviderReadFileResult> {
@@ -542,7 +604,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         signal,
       },
     );
-    if (!response.ok) throw new DaytonaRequestError(response.status);
+    if (!response.ok) throw await this.toolboxError(input.providerResourceId, response);
     if (response.status !== 206 && info.size > MAX_FILE_BYTES) {
       await response.body?.cancel();
       throw new ProviderError(
@@ -615,7 +677,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         signal,
       },
     );
-    if (!response.ok) throw new DaytonaRequestError(response.status);
+    if (!response.ok) throw await this.toolboxError(input.providerResourceId, response);
     return { path: input.path, bytesWritten: bytes.length, created: !existed };
   }
 
@@ -656,7 +718,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       `/files?path=${encodeURIComponent(providerPath)}&recursive=${String(input.recursive ?? false)}`,
       { method: "DELETE", signal },
     );
-    if (!response.ok) throw new DaytonaRequestError(response.status);
+    if (!response.ok) throw await this.toolboxError(input.providerResourceId, response);
     return { path: input.path, deleted: true };
   }
 
@@ -714,6 +776,31 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     });
   }
 
+  async inspect(
+    providerResourceId: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderSandboxInspection> {
+    let response: unknown;
+    try {
+      response = await this.request(`/sandbox/${encodeURIComponent(providerResourceId)}`, {
+        method: "GET",
+        signal,
+      });
+    } catch (error) {
+      if (error instanceof DaytonaRequestError && error.status === 404) {
+        this.toolboxUrls.delete(providerResourceId);
+        return { state: "absent", providerState: null, reason: null };
+      }
+      throw error;
+    }
+    const sandbox = DaytonaSandboxSchema.parse(response);
+    return {
+      state: daytonaSandboxState(sandbox.state),
+      providerState: sandbox.state ?? null,
+      reason: sandbox.errorReason ? (boundedDetail(sandbox.errorReason) ?? null) : null,
+    };
+  }
+
   async discoverRuntimeCapabilities(providerResourceId: string, signal?: AbortSignal) {
     const requestSignal = deadlineSignal(signal, undefined, this.requestTimeoutMs);
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -734,7 +821,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         const { recording: _recording, ...computer } = runtime.computer;
         return { ...runtime, computer };
       } catch (error) {
-        if (error instanceof DaytonaRequestError && error.status === 404) {
+        if (isToolboxNotFound(error)) {
           const { computer: _computer, ...runtime } = this.capabilities.runtime ?? {};
           return runtime;
         }
@@ -901,7 +988,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         ? daytonaRecording(recording, daytonaRecordingState(recording.status))
         : null;
     } catch (error) {
-      if (error instanceof DaytonaRequestError && error.status === 404) return null;
+      if (isToolboxNotFound(error)) return null;
       throw error;
     }
   }
@@ -974,18 +1061,52 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   private async toolboxUrl(providerResourceId: string, signal: AbortSignal): Promise<string> {
     const cached = this.toolboxUrls.get(providerResourceId);
     if (cached) return cached;
-    const sandbox = DaytonaSandboxSchema.parse(
-      await this.request(`/sandbox/${encodeURIComponent(providerResourceId)}`, {
+    let response: unknown;
+    try {
+      response = await this.request(`/sandbox/${encodeURIComponent(providerResourceId)}`, {
         method: "GET",
         signal,
-      }),
-    );
+      });
+    } catch (error) {
+      if (error instanceof DaytonaRequestError && error.status === 404) {
+        throw new DaytonaRequestError(404, "API", {
+          code: error.code,
+          detail: error.detail,
+          sandboxUnavailable: true,
+        });
+      }
+      throw error;
+    }
+    const sandbox = DaytonaSandboxSchema.parse(response);
     if (!sandbox.toolboxProxyUrl) {
       throw new ProviderError("Daytona sandbox has no toolbox proxy URL", "unsupported", false);
     }
     const url = this.resolveToolboxUrl(sandbox.toolboxProxyUrl, providerResourceId);
     this.toolboxUrls.set(providerResourceId, url);
     return url;
+  }
+
+  private async toolboxError(
+    providerResourceId: string,
+    response: Response,
+  ): Promise<DaytonaRequestError> {
+    const error = await daytonaRequestError(response, "toolbox");
+    // The toolbox proxy's codes for a stopped or deleted sandbox vary between proxies, so
+    // a 400 or 404 that did not come from the in-sandbox daemon is checked against the API.
+    if (
+      (error.status !== 400 && error.status !== 404) ||
+      error.sandboxUnavailable ||
+      error.fromDaemon
+    ) {
+      return error;
+    }
+    const inspection = await this.inspect(providerResourceId).catch(() => null);
+    if (!inspection || !LOST_SANDBOX_STATES.has(inspection.state)) return error;
+    return new DaytonaRequestError(error.status, "toolbox", {
+      code: error.code,
+      detail: error.detail,
+      sandboxUnavailable: true,
+    });
   }
 
   private async toolboxFetch(
@@ -1011,7 +1132,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     const headers = new Headers(init.headers);
     if (init.body) headers.set("content-type", "application/json");
     const response = await this.toolboxFetch(providerResourceId, path, { ...init, headers });
-    if (!response.ok) throw new DaytonaRequestError(response.status);
+    if (!response.ok) throw await this.toolboxError(providerResourceId, response);
     const text = await response.text();
     return text ? JSON.parse(text) : {};
   }
@@ -1022,7 +1143,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     init: RequestInit,
   ): Promise<z.infer<typeof DaytonaCommandLogsSchema>> {
     const response = await this.toolboxFetch(providerResourceId, path, init);
-    if (!response.ok) throw new DaytonaRequestError(response.status);
+    if (!response.ok) throw await this.toolboxError(providerResourceId, response);
     const text = await response.text();
     const contentType = response.headers.get("content-type");
     const structured = contentType?.toLowerCase().includes("application/json") === true;
@@ -1048,8 +1169,11 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       `/files/info?path=${encodeURIComponent(path)}`,
       { method: "GET", signal },
     );
-    if (response.status === 404) return false;
-    if (!response.ok) throw new DaytonaRequestError(response.status);
+    if (!response.ok) {
+      const error = await this.toolboxError(providerResourceId, response);
+      if (isToolboxNotFound(error)) return false;
+      throw error;
+    }
     return true;
   }
 
@@ -1086,7 +1210,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       return {};
     }
     if (!response.ok) {
-      throw new DaytonaRequestError(response.status);
+      throw await daytonaRequestError(response, "API");
     }
     const text = await response.text();
     return text ? JSON.parse(text) : {};
@@ -1103,7 +1227,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       signal,
     });
     if (!response.ok) {
-      throw new DaytonaRequestError(response.status);
+      throw await daytonaRequestError(response, "analytics");
     }
     return response.json();
   }
@@ -1168,6 +1292,105 @@ function daytonaRecordingState(status: string): "recording" | "stopped" {
   return /^(completed|finished|stopped)$/i.test(status) ? "stopped" : "recording";
 }
 
+function daytonaSandboxState(state: string | undefined): ProviderSandboxState {
+  switch (state) {
+    case "started":
+      return "running";
+    case "creating":
+    case "restoring":
+    case "starting":
+    case "resuming":
+    case "pending_build":
+    case "building_snapshot":
+    case "pulling_snapshot":
+      return "starting";
+    case "pausing":
+    case "paused":
+      return "paused";
+    case "stopping":
+    case "stopped":
+    case "archiving":
+    case "archived":
+      return "stopped";
+    case "destroying":
+    case "destroyed":
+      return "absent";
+    case "error":
+    case "build_failed":
+      return "failed";
+    default:
+      return "unknown";
+  }
+}
+
+function daytonaFailureKind(status: number): ProviderFailureKind {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 429) return "capacity";
+  if (status >= 500) return "unavailable";
+  if (status === 404 || status === 409) return "customer";
+  return "invalid_request";
+}
+
+function isToolboxNotFound(error: unknown): boolean {
+  return error instanceof DaytonaRequestError && error.status === 404 && !error.sandboxUnavailable;
+}
+
+async function daytonaRequestError(
+  response: Response,
+  surface: DaytonaSurface,
+): Promise<DaytonaRequestError> {
+  const text = await readErrorText(response);
+  let body: z.infer<typeof DaytonaErrorBodySchema> | undefined;
+  try {
+    const parsed = DaytonaErrorBodySchema.safeParse(text ? JSON.parse(text) : undefined);
+    body = parsed.success ? parsed.data : undefined;
+  } catch {
+    body = undefined;
+  }
+  const code = body?.code && /^[A-Z][A-Z0-9_]{0,63}$/.test(body.code) ? body.code : undefined;
+  const message = Array.isArray(body?.message) ? body.message.join("; ") : body?.message;
+  return new DaytonaRequestError(response.status, surface, {
+    code,
+    detail: boundedDetail(message),
+    fromDaemon: body?.source === "DAYTONA_DAEMON",
+  });
+}
+
+async function readErrorText(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (length < MAX_ERROR_BODY_BYTES) {
+      const next = await reader.read();
+      if (next.done) break;
+      chunks.push(next.value);
+      length += next.value.byteLength;
+    }
+  } catch {
+    return "";
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const bytes = new Uint8Array(Math.min(length, MAX_ERROR_BODY_BYTES));
+  let offset = 0;
+  for (const chunk of chunks) {
+    const slice = chunk.subarray(0, bytes.byteLength - offset);
+    bytes.set(slice, offset);
+    offset += slice.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function boundedDetail(value: string | undefined): string | undefined {
+  const detail = value?.replace(CONTROL_CHARACTERS, " ").replace(/\s+/g, " ").trim();
+  if (!detail) return undefined;
+  return detail.length > MAX_ERROR_DETAIL_CHARS
+    ? `${detail.slice(0, MAX_ERROR_DETAIL_CHARS - 3)}...`
+    : detail;
+}
+
 function daytonaSessionCommand(input: ProviderExecInput): string {
   const command = input.command.map(shellQuote).join(" ");
   const environment = Object.entries(input.environment ?? {}).map(([key, value]) => {
@@ -1181,7 +1404,8 @@ function daytonaSessionCommand(input: ProviderExecInput): string {
     return `${key}=${shellQuote(value)}`;
   });
   const invoked = environment.length > 0 ? `env ${environment.join(" ")} ${command}` : command;
-  return input.cwd ? `cd -- ${shellQuote(input.cwd)} && ${invoked}` : invoked;
+  const cd = input.cwd ? `cd -- ${shellQuote(input.cwd)} && ` : "";
+  return `${DAYTONA_LAUNCHER_FUNCTION} ${cd}${DAYTONA_LAUNCHER} ${invoked}`;
 }
 
 function encodeExecutionId(sessionId: string, commandId: string): string {

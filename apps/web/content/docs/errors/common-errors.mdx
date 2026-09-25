@@ -33,6 +33,8 @@ The same idempotency key was reused with different input. Never change the reque
 
 The action is not valid for the current state. Runtime operations require `ready`. Pause requires `ready` and resume requires `paused`.
 
+A sandbox with `state_reason` `provider_stopped` was stopped by its provider outside OpenMetal and cannot run more work.
+
 ### `not_found`
 
 The resource does not exist in the authenticated scope. Confirm both the ID and project context.

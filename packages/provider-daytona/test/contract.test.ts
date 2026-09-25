@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import type { ProviderCreateSandboxInput } from "@openmetal/provider-core";
+import { ProviderError, type ProviderCreateSandboxInput } from "@openmetal/provider-core";
 import { DaytonaSandboxProvider } from "../src/index.js";
 
 const DIGEST_IMAGE =
@@ -56,6 +56,8 @@ it("boots the default Daytona snapshot when no image is requested", async () => 
       name: "metal-sbx_1",
       ephemeral: true,
       autoDeleteInterval: 0,
+      autoStopInterval: 0,
+      ttlMinutes: 60,
       labels: {
         "metal.sandbox_id": "sbx_1",
         "metal.organization_id": "org",
@@ -88,6 +90,8 @@ it("builds a Daytona sandbox from the requested OCI image and waits until it sta
         name: "metal-sbx_1",
         ephemeral: true,
         autoDeleteInterval: 0,
+        autoStopInterval: 0,
+        ttlMinutes: 46,
         buildInfo: { dockerfileContent: `FROM ${DIGEST_IMAGE}\n` },
         cpu: 2,
         memory: 4,
@@ -487,7 +491,9 @@ it("decodes Daytona 0.163 plain-text logs after asynchronous execution", async (
       expect(new Headers(init?.headers).get("x-daytona-sdk-version")).toBe("0.163.0");
       expect(new Headers(init?.headers).get("x-daytona-split-output")).toBe("true");
       expect(JSON.parse(String(init?.body))).toMatchObject({
-        command: "cd -- '/workspace' && 'printf' '%s' 'hello world'",
+        command: expect.stringMatching(
+          /^metal_exec\(\) \{ .+ \}; cd -- '\/workspace' && metal_exec 'printf' '%s' 'hello world'$/,
+        ),
         runAsync: true,
       });
       return Response.json({ cmdId: "command-1" });
@@ -671,4 +677,336 @@ it("uploads Daytona files as multipart data", async () => {
       createParents: true,
     }),
   ).resolves.toEqual({ path: "/workspace/hello.txt", bytesWritten: 5, created: true });
+});
+
+function daytonaError(status: number, body: Record<string, unknown>): Response {
+  return Response.json(
+    { statusCode: status, timestamp: "2026-09-23T14:36:13.311Z", ...body },
+    {
+      status,
+    },
+  );
+}
+
+function toolboxSandbox(): Response {
+  return Response.json({
+    id: "sandbox-1",
+    organizationId: "org-1",
+    toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+  });
+}
+
+it("surfaces the Daytona failure when the sandbox is no longer running", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) return toolboxSandbox();
+    if (url.includes("/files/info?")) {
+      return daytonaError(400, {
+        message:
+          "bad request: failed to resolve container IP after 3 attempts: no IP address found. Is the Sandbox started?",
+        code: "SANDBOX_NOT_RUNNING",
+        path: "/sandboxes/sandbox-1/toolbox/files/info",
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  const failure = provider.readFile({ providerResourceId: "sandbox-1", path: "/tmp/a.txt" });
+  await expect(failure).rejects.toBeInstanceOf(ProviderError);
+  await expect(failure).rejects.toMatchObject({
+    kind: "unavailable",
+    retryable: false,
+    message:
+      "Daytona toolbox request failed (400 SANDBOX_NOT_RUNNING): bad request: failed to resolve container IP after 3 attempts: no IP address found. Is the Sandbox started?",
+  });
+});
+
+it("does not report a missing file when the Daytona sandbox was deleted", async () => {
+  let sandboxDeleted = false;
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) return toolboxSandbox();
+    if (url.includes("/files/info?")) {
+      return sandboxDeleted
+        ? daytonaError(404, {
+            message:
+              "not found: sandbox sandbox-1 not found, it may have been deleted or stopped - inspect audit logs for more info",
+            code: "SANDBOX_NOT_FOUND",
+          })
+        : daytonaError(404, {
+            message: "stat /workspace/missing.txt: no such file or directory",
+            source: "DAYTONA_DAEMON",
+            code: "FILE_NOT_FOUND",
+          });
+    }
+    throw new Error(`Unexpected URL: ${url} ${init?.method}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const input = { providerResourceId: "sandbox-1", path: "/workspace/missing.txt" };
+
+  await expect(provider.deleteFile(input)).resolves.toEqual({
+    path: "/workspace/missing.txt",
+    deleted: false,
+  });
+  sandboxDeleted = true;
+  await expect(provider.deleteFile(input)).rejects.toMatchObject({
+    kind: "unavailable",
+    message: expect.stringContaining("(404 SANDBOX_NOT_FOUND): not found: sandbox sandbox-1"),
+  });
+});
+
+it("fails a running Daytona command with the provider error when the sandbox disappears", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) return toolboxSandbox();
+    if (url.endsWith("/toolbox/sandbox-1/process/session") && init?.method === "POST") {
+      return new Response(null, { status: 200 });
+    }
+    if (url.endsWith("/exec")) return Response.json({ cmdId: "command-1" });
+    if (url.endsWith("/command/command-1")) {
+      return daytonaError(404, {
+        message: "not found: sandbox sandbox-1 not found, it may have been deleted or stopped",
+        code: "SANDBOX_NOT_FOUND",
+      });
+    }
+    if (url.includes("/process/session/") && init?.method === "DELETE") {
+      return daytonaError(404, { message: "sandbox not found", code: "SANDBOX_NOT_FOUND" });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const execution = await provider.exec({
+    providerResourceId: "sandbox-1",
+    command: ["./scanner", "--detach"],
+  });
+
+  const drain = async () => {
+    for await (const _event of execution.events) {
+      // The command never reports an exit code before the sandbox is removed.
+    }
+  };
+  await expect(drain()).rejects.toMatchObject({
+    kind: "unavailable",
+    message: expect.stringContaining("SANDBOX_NOT_FOUND"),
+  });
+});
+
+it("maps a sandbox lookup miss after an adapter restart to an unavailable sandbox", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return daytonaError(404, {
+        error: "Not Found",
+        message: "Sandbox with ID or name sandbox-1 not found",
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(
+    provider.listFiles({ providerResourceId: "sandbox-1", path: "/workspace" }),
+  ).rejects.toMatchObject({
+    kind: "unavailable",
+    message: "Daytona API request failed (404): Sandbox with ID or name sandbox-1 not found",
+  });
+});
+
+it("bounds untrusted Daytona error details", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) return toolboxSandbox();
+    if (url.includes("/files/info?")) {
+      return daytonaError(500, {
+        message: `line one\n\u0000line two ${"x".repeat(1_000)}`,
+        code: "lowercase code is not a Daytona code",
+      });
+    }
+    if (url.includes("/files?")) {
+      return new Response("<html>bad gateway</html>", { status: 502 });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  const bounded = await provider
+    .readFile({ providerResourceId: "sandbox-1", path: "/tmp/a.txt" })
+    .catch((error: unknown) => error as ProviderError);
+  expect(bounded).toMatchObject({ kind: "unavailable", retryable: true });
+  expect(
+    bounded.message.startsWith("Daytona toolbox request failed (500): line one line two x"),
+  ).toBe(true);
+  expect(bounded.message.length).toBeLessThan(400);
+  expect([...bounded.message].some((character) => character.charCodeAt(0) < 0x20)).toBe(false);
+
+  await expect(
+    provider.listFiles({ providerResourceId: "sandbox-1", path: "/workspace" }),
+  ).rejects.toMatchObject({
+    kind: "unavailable",
+    retryable: true,
+    message: "Daytona toolbox request failed (502)",
+  });
+});
+
+it("inspects provider-side Daytona sandbox state", async () => {
+  const states = new Map<string, Response>([
+    ["started", Response.json({ id: "started", organizationId: "org-1", state: "started" })],
+    ["stopped", Response.json({ id: "stopped", organizationId: "org-1", state: "stopped" })],
+    [
+      "destroying",
+      Response.json({ id: "destroying", organizationId: "org-1", state: "destroying" }),
+    ],
+    [
+      "error",
+      Response.json({
+        id: "error",
+        organizationId: "org-1",
+        state: "error",
+        errorReason: "runner\nunreachable",
+      }),
+    ],
+    ["missing", daytonaError(404, { error: "Not Found", message: "Sandbox not found" })],
+  ]);
+  const provider = new DaytonaSandboxProvider({
+    apiKey: "test",
+    fetchImpl: vi.fn<typeof fetch>(async (input) => {
+      const id = String(input).split("/").at(-1)!;
+      const response = states.get(id);
+      if (!response) throw new Error(`Unexpected URL: ${String(input)}`);
+      return response;
+    }),
+  });
+
+  await expect(provider.inspect("started")).resolves.toEqual({
+    state: "running",
+    providerState: "started",
+    reason: null,
+  });
+  await expect(provider.inspect("stopped")).resolves.toMatchObject({ state: "stopped" });
+  await expect(provider.inspect("destroying")).resolves.toMatchObject({ state: "absent" });
+  await expect(provider.inspect("error")).resolves.toEqual({
+    state: "failed",
+    providerState: "error",
+    reason: "runner unreachable",
+  });
+  await expect(provider.inspect("missing")).resolves.toEqual({
+    state: "absent",
+    providerState: null,
+    reason: null,
+  });
+});
+
+it("keeps Daytona API failures classified for provider fallback", async () => {
+  const provider = (status: number) =>
+    new DaytonaSandboxProvider({
+      apiKey: "test",
+      fetchImpl: vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(daytonaError(status, { message: "request rejected" })),
+    });
+
+  await expect(provider(401).create(createInput())).rejects.toMatchObject({
+    kind: "auth",
+    retryable: false,
+  });
+  await expect(provider(429).create(createInput())).rejects.toMatchObject({
+    kind: "capacity",
+    retryable: true,
+  });
+  await expect(provider(503).create(createInput())).rejects.toMatchObject({
+    kind: "unavailable",
+    retryable: true,
+  });
+  await expect(provider(400).create(createInput())).rejects.toMatchObject({
+    kind: "invalid_request",
+    retryable: false,
+    message: "Daytona API request failed (400): request rejected",
+  });
+});
+
+it("confirms an ambiguous toolbox 404 against the Daytona API before reporting the sandbox gone", async () => {
+  let sandboxLookups = 0;
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      sandboxLookups += 1;
+      return sandboxLookups === 1
+        ? Response.json({
+            id: "sandbox-1",
+            organizationId: "org-1",
+            state: "started",
+            toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+          })
+        : daytonaError(404, { error: "Not Found", message: "Sandbox not found" });
+    }
+    if (url.includes("/files?")) {
+      return daytonaError(404, {
+        message: "not found: sandbox sandbox-1 not found",
+        code: "NOT_FOUND",
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(
+    provider.listFiles({ providerResourceId: "sandbox-1", path: "/workspace" }),
+  ).rejects.toMatchObject({
+    kind: "unavailable",
+    retryable: false,
+    message:
+      "Daytona toolbox request failed (404 NOT_FOUND): not found: sandbox sandbox-1 not found",
+  });
+  expect(sandboxLookups).toBe(2);
+});
+
+it("trusts in-sandbox daemon 404s without another Daytona API call", async () => {
+  let sandboxLookups = 0;
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      sandboxLookups += 1;
+      return toolboxSandbox();
+    }
+    if (url.includes("/files/info?")) {
+      return daytonaError(404, {
+        message: "stat /tmp/missing.txt: no such file or directory",
+        source: "DAYTONA_DAEMON",
+        code: "FILE_NOT_FOUND",
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(
+    provider.readFile({ providerResourceId: "sandbox-1", path: "/tmp/missing.txt" }),
+  ).rejects.toMatchObject({
+    kind: "customer",
+    message:
+      "Daytona toolbox request failed (404 FILE_NOT_FOUND): stat /tmp/missing.txt: no such file or directory",
+  });
+  expect(sandboxLookups).toBe(1);
+});
+
+it("treats a sourceless 404 from a running Daytona sandbox as a missing file", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/sandbox/sandbox-1")) {
+      return Response.json({
+        id: "sandbox-1",
+        organizationId: "org-1",
+        state: "started",
+        toolboxProxyUrl: "https://proxy.daytona.test/toolbox",
+      });
+    }
+    if (url.includes("/files/info?")) return new Response("file not found", { status: 404 });
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(
+    provider.deleteFile({ providerResourceId: "sandbox-1", path: "/workspace/missing.txt" }),
+  ).resolves.toEqual({ path: "/workspace/missing.txt", deleted: false });
 });

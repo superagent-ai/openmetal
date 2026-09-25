@@ -5,7 +5,7 @@ import {
   enforceSpendLimit,
   type StripeGateway,
 } from "@openmetal/billing";
-import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
   claimOutboxJobs,
   insertDomainEventAndBroadcast,
@@ -36,6 +36,8 @@ import {
   type ProviderCreateSandboxInput,
   type ProviderExecEvent,
   type ProviderRuntimeCapabilities,
+  type ProviderSandboxInspection,
+  type ProviderSandboxState,
   type SandboxProvider,
   type SandboxProviderName,
 } from "@openmetal/provider-core";
@@ -791,6 +793,92 @@ async function provisionSandbox(
   });
 }
 
+const lostProviderSandboxStates = new Set<ProviderSandboxState>(["stopped", "failed", "absent"]);
+
+function providerSandboxLossSuspected(failure: unknown): boolean {
+  if (failure instanceof OutboxLeaseLostError) return false;
+  return (
+    !(failure instanceof ProviderError) ||
+    failure.kind === "unavailable" ||
+    failure.kind === "unknown_outcome"
+  );
+}
+
+function providerStoppedMessage(
+  provider: SandboxProviderName,
+  inspection: ProviderSandboxInspection,
+): string {
+  const observed =
+    inspection.state === "absent"
+      ? `${provider} no longer has this sandbox`
+      : `${provider} reported the sandbox as ${inspection.providerState ?? inspection.state}`;
+  return redactString(
+    `${observed}${inspection.reason ? `: ${inspection.reason}` : ""}`.slice(0, 500),
+  );
+}
+
+async function reconcileProviderSandboxState(
+  db: MetalDb,
+  provider: SandboxProvider,
+  sandboxId: string,
+  failure?: unknown,
+) {
+  if (!provider.inspect) return;
+  if (failure !== undefined && !providerSandboxLossSuspected(failure)) return;
+  const sandbox = await db
+    .select({ status: sandboxes.status, providerResourceId: sandboxes.providerResourceId })
+    .from(sandboxes)
+    .where(eq(sandboxes.id, sandboxId))
+    .then((rows) => rows[0]);
+  const providerResourceId = sandbox?.providerResourceId;
+  if (sandbox?.status !== "ready" || !providerResourceId) return;
+  const inspection = await provider.inspect(providerResourceId).catch(() => null);
+  if (!inspection || !lostProviderSandboxStates.has(inspection.state)) return;
+  await withTransaction(db, async (tx) => {
+    const now = new Date();
+    const [stopping] = await tx
+      .update(sandboxes)
+      .set({
+        status: "stopping",
+        errorCode: "provider_stopped",
+        errorMessage: providerStoppedMessage(provider.name, inspection),
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(sandboxes.id, sandboxId),
+          eq(sandboxes.status, "ready"),
+          eq(sandboxes.providerResourceId, providerResourceId),
+        ),
+      )
+      .returning({ id: sandboxes.id });
+    if (!stopping) return;
+    await tx
+      .insert(outboxJobs)
+      .values({
+        jobType: "sandbox.destroy",
+        dedupeKey: `sandbox:destroy:${sandboxId}`,
+        payload: { job_type: "sandbox.destroy", sandbox_id: sandboxId },
+        availableAt: now,
+      })
+      .onConflictDoUpdate({
+        target: outboxJobs.dedupeKey,
+        set: {
+          status: "pending",
+          attemptCount: 0,
+          availableAt: now,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          leaseToken: null,
+          lastError: null,
+          completedAt: null,
+          updatedAt: now,
+        },
+        setWhere: ne(outboxJobs.status, "leased"),
+      });
+  });
+}
+
 async function destroySandbox(
   db: MetalDb,
   provider: SandboxProvider,
@@ -806,6 +894,7 @@ async function destroySandbox(
     await setOperationState(db, operationId, "succeeded");
     return;
   }
+  const providerStopped = sandbox.errorCode === "provider_stopped";
   const destroyResult = sandbox.providerResourceId
     ? await provider.destroy(sandbox.providerResourceId)
     : undefined;
@@ -815,8 +904,8 @@ async function destroySandbox(
       .update(sandboxes)
       .set({
         status: "stopped",
-        errorCode: null,
-        errorMessage: null,
+        errorCode: providerStopped ? sandbox.errorCode : null,
+        errorMessage: providerStopped ? sandbox.errorMessage : null,
         providerMetadata: {
           ...sandbox.providerMetadata,
           ...(destroyResult?.providerMetadata ?? {}),
@@ -848,6 +937,7 @@ async function destroySandbox(
     if (updated) {
       await recordSandboxEvent(tx, updated, "sandbox.deleted", {
         provider: provider.name,
+        ...(providerStopped ? { reason: "provider_stopped" } : {}),
       });
       if (provider.capabilities.cost) {
         const availableAt =
@@ -1113,6 +1203,9 @@ async function syncSandboxCost(
       await scheduleCostSync(tx, sandbox.id, new Date(Date.now() + delayMs), false);
     }
   });
+  if (!final && sandbox.status === "ready") {
+    await reconcileProviderSandboxState(db, provider, sandbox.id);
+  }
 }
 
 const terminalProcessStates = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
@@ -1208,6 +1301,11 @@ function runtimeCapabilities(
         }
       : {}),
   };
+}
+
+function sandboxNotReady(sandbox: typeof sandboxes.$inferSelect): ProviderError {
+  const reason = sandbox.errorCode ? `: ${sandbox.errorCode}` : "";
+  return new ProviderError(`sandbox is not ready (${sandbox.status}${reason})`, "customer", false);
 }
 
 function runtimeError(error: unknown, fallbackCode = "runtime_operation_failed") {
@@ -1433,12 +1531,17 @@ async function executeProcess(
   if (!claimed) return;
   row = { ...row, process: claimed };
 
-  if (
-    row.sandbox.status !== "ready" ||
-    !row.sandbox.providerResourceId ||
-    !capabilities?.exec ||
-    !provider.exec
-  ) {
+  if (row.sandbox.status !== "ready" || !row.sandbox.providerResourceId) {
+    await failProcess(
+      db,
+      processId,
+      guard,
+      sandboxNotReady(row.sandbox),
+      row.process.timeoutSeconds,
+    );
+    return;
+  }
+  if (!capabilities?.exec || !provider.exec) {
     await failProcess(
       db,
       processId,
@@ -1685,9 +1788,11 @@ async function executeProcess(
           ),
           row.process.timeoutSeconds,
         );
+        await reconcileProviderSandboxState(db, provider, row.sandbox.id, error);
       }
     } else {
       await failProcess(db, processId, guard, error, row.process.timeoutSeconds);
+      await reconcileProviderSandboxState(db, provider, row.sandbox.id, error);
     }
   } finally {
     clearTimeout(timer);
@@ -1755,10 +1860,15 @@ async function cancelProcessExecution(
     return;
   }
   await guard.assertOwned();
-  const result = await provider.cancelExec({
-    providerResourceId: row.sandbox.providerResourceId,
-    executionId,
-  });
+  const result = await provider
+    .cancelExec({
+      providerResourceId: row.sandbox.providerResourceId,
+      executionId,
+    })
+    .catch(async (error: unknown) => {
+      await reconcileProviderSandboxState(db, provider, row.sandbox.id, error);
+      throw error;
+    });
   if (result.executionId !== executionId || !result.cancelled) {
     throw new ProviderError(
       "provider did not confirm process cancellation",
@@ -1820,7 +1930,7 @@ async function executeFilesystemOperation(
       );
     }
     if (row.sandbox.status !== "ready" || !row.sandbox.providerResourceId) {
-      throw new ProviderError("sandbox is not ready", "customer", false);
+      throw sandboxNotReady(row.sandbox);
     }
     let result: Record<string, unknown>;
     if (row.operation.kind === "filesystem_read") {
@@ -1947,6 +2057,7 @@ async function executeFilesystemOperation(
         code: safe.code,
       });
     });
+    await reconcileProviderSandboxState(db, provider, row.sandbox.id, error);
   }
 }
 
@@ -2001,7 +2112,7 @@ async function executeComputerOperation(
       );
     }
     if (row.sandbox.status !== "ready" || !row.sandbox.providerResourceId) {
-      throw new ProviderError("sandbox is not ready", "customer", false);
+      throw sandboxNotReady(row.sandbox);
     }
     let result: Record<string, unknown>;
     if (row.operation.kind === "computer_action") {
@@ -2145,6 +2256,7 @@ async function executeComputerOperation(
           eq(runtimeOperations.operationToken, guard.token),
         ),
       );
+    await reconcileProviderSandboxState(db, provider, row.sandbox.id, error);
   }
 }
 
@@ -2180,7 +2292,7 @@ async function executeRecordingOperation(
   if (!claimed) return;
   try {
     if (!row.sandbox.providerResourceId || row.sandbox.status !== "ready") {
-      throw new ProviderError("sandbox is not ready", "customer", false);
+      throw sandboxNotReady(row.sandbox);
     }
     const capabilities = provider.capabilities.runtime?.computer?.recording;
     const observed = snapshot as { computer?: { recording?: { formats?: string[] } } };
@@ -2253,6 +2365,7 @@ async function executeRecordingOperation(
       );
   } catch (error) {
     if (error instanceof OutboxLeaseLostError) throw error;
+    await reconcileProviderSandboxState(db, provider, row.sandbox.id, error);
     const classification = classifyProviderFailure(error);
     if (classification.retryable || classification.unknown) {
       throw error;
@@ -2482,6 +2595,7 @@ async function createHttpEndpoint(
         });
       }
     });
+    await reconcileProviderSandboxState(db, provider, row.sandbox.id, error);
   }
 }
 
@@ -2595,6 +2709,7 @@ async function revokeHttpEndpoint(
         });
       }
     });
+    await reconcileProviderSandboxState(db, provider, row.sandbox.id, error);
     if (safe.retryable) throw error;
   }
 }

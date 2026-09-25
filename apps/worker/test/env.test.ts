@@ -16,3 +16,19 @@ it("treats empty optional provider environment values as unset", () => {
   expect(env.RUNLOOP_BLUEPRINT_ID).toBeUndefined();
   expect(env.MODAL_ENVIRONMENT).toBeUndefined();
 });
+
+it("applies webhook delivery settings from the environment", () => {
+  const env = loadWorkerEnv({
+    DATABASE_URL: "postgresql://localhost/test",
+    WORKER_ID: "worker",
+    WORKER_WEBHOOK_MAX_ATTEMPTS: "3",
+    WORKER_WEBHOOK_BASE_BACKOFF_MS: "250",
+    WORKER_WEBHOOK_CONCURRENCY: "2",
+  });
+
+  expect(env).toMatchObject({
+    WORKER_WEBHOOK_MAX_ATTEMPTS: 3,
+    WORKER_WEBHOOK_BASE_BACKOFF_MS: 250,
+    WORKER_WEBHOOK_CONCURRENCY: 2,
+  });
+});

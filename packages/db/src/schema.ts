@@ -648,7 +648,7 @@ export const webhookEndpoints = metalSchema.table(
     url: text("url").notNull(),
     eventTypes: jsonb("event_types").$type<string[]>().notNull().default([]),
     enabled: boolean("enabled").notNull().default(true),
-    secretId: uuid("secret_id").notNull(),
+    secretId: uuid("secret_id"),
     secretPrefix: text("secret_prefix").notNull(),
     createdBy: uuid("created_by").notNull(),
     rotatedAt: timestamp("rotated_at", { withTimezone: true, mode: "date" }),

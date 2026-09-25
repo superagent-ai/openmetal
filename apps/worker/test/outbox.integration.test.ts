@@ -6,7 +6,8 @@ import {
   enqueueWebhookDeliveries,
   insertDomainEventAndBroadcast,
 } from "@openmetal/db";
-import { serializeCursor, verifyWebhookSignature } from "@openmetal/events";
+import { serializeCursor } from "@openmetal/events";
+import { verifyWebhookSignature } from "@openmetal/events/webhooks-node";
 import {
   createConfirmedUser,
   deleteUser,
@@ -1231,7 +1232,7 @@ describe("worker outbox", () => {
         WORKER_BATCH_SIZE: "10",
         WORKER_MAX_ATTEMPTS: "8",
         WORKER_BASE_BACKOFF_MS: "10",
-        WORKER_WEBHOOK_BASE_BACKOFF_MS: "10",
+        WORKER_WEBHOOK_BASE_BACKOFF_MS: "100",
         LOG_LEVEL: "silent",
         METAL_ENVIRONMENT: "test",
       });

@@ -137,6 +137,13 @@ describe("contract parsing", () => {
       provider: "freestyle",
       api_key: "token",
     });
+    expect(
+      ProviderCredentialInputSchema.parse({
+        provider: "prime",
+        api_key: "token",
+        team_id: "team-1",
+      }),
+    ).toEqual({ provider: "prime", api_key: "token", team_id: "team-1" });
   });
 
   it("documents organization and project lifecycle operations", () => {

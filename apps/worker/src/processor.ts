@@ -432,6 +432,8 @@ async function provisionSandbox(
           onIdleTimeout: lifecycle.on_idle_timeout ?? "destroy",
         },
         providerOptions: options,
+        features: sandbox.features,
+        network: sandbox.network,
         environment: sandbox.environment,
         secretRefs: sandbox.secretRefs,
         metadata: sandbox.metadata,
@@ -944,6 +946,7 @@ async function destroySandbox(
           provider.name === "codesandbox" ||
           provider.name === "e2b" ||
           provider.name === "freestyle" ||
+          provider.name === "prime" ||
           provider.name === "runloop" ||
           provider.name === "vercel"
             ? new Date(Date.now() + 2_000)

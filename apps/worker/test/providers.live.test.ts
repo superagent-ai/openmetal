@@ -20,6 +20,7 @@ const providerNames = [
   "freestyle",
   "modal",
   "northflank",
+  "prime",
   "runloop",
   "vercel",
 ] as const satisfies readonly SandboxProviderName[];
@@ -700,6 +701,7 @@ function missingCredentialNames(
     freestyle: [["FREESTYLE_API_KEY"]],
     modal: [["MODAL_TOKEN_ID"], ["MODAL_TOKEN_SECRET"]],
     northflank: [["NORTHFLANK_API_TOKEN"], ["NORTHFLANK_PROJECT_ID"]],
+    prime: [["PRIME_API_KEY"]],
     runloop: [["RUNLOOP_API_KEY"]],
     vercel: [["VERCEL_OIDC_TOKEN", "VERCEL_TOKEN"], ["VERCEL_PROJECT_ID"]],
   };

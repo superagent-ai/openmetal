@@ -36,6 +36,7 @@ const providerLabels: Record<string, string> = {
   freestyle: "Freestyle",
   modal: "Modal",
   northflank: "Northflank",
+  prime: "Prime Intellect",
   runloop: "Runloop",
   vercel: "Vercel",
 };

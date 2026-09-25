@@ -41,7 +41,7 @@ This example is also available at `assets/sandbox.example.json`.
 
 ```text
 blaxel, cloudflare, codesandbox, daytona, e2b, freestyle, modal,
-northflank, runloop, vercel
+northflank, prime, runloop, vercel
 ```
 
 Omitting `provider` behaves as automatic selection. Prefer automatic selection unless the task has a concrete provider requirement.
@@ -74,7 +74,7 @@ Recognized environments are `metal/base`, `metal/node`, and `metal/python`. The 
 }
 ```
 
-The image string has a 500-character maximum. The optional command has at most 4096 elements, each at most 131072 characters. Current adapters do not apply the OCI command, so do not rely on it to start a workload.
+The image string has a 500-character maximum. The optional command has at most 4096 elements, each at most 131072 characters. Prime applies the OCI command as a one-shot VM start command (the VM stops when it exits); other adapters may not apply it.
 
 Daytona starts an OCI image by building `FROM <image>` and does not return the sandbox until Daytona reports it started. The first pull can take minutes. Set `disk_mb` to at least the uncompressed image size; when it is omitted, Daytona receives 16 GiB instead of its 3 GiB default.
 
@@ -101,7 +101,7 @@ Only providers declaring OCI support are eligible.
 }
 ```
 
-Provider templates cannot use fallback. Prefer a matching explicit top-level provider; if it is omitted or `auto`, the service derives the primary provider from `source.provider`. Provider templates are supported by CodeSandbox, E2B, Freestyle, and Runloop. Freestyle templates are snapshot IDs or slugs; pin an immutable snapshot ID for reproducibility.
+Provider templates cannot use fallback. Prefer a matching explicit top-level provider; if it is omitted or `auto`, the service derives the primary provider from `source.provider`. Provider templates are supported by CodeSandbox, E2B, Freestyle, Prime, and Runloop. Freestyle templates are snapshot IDs or slugs; pin an immutable snapshot ID for reproducibility. Prime templates are `prime/` image references.
 
 ## Resources
 
@@ -148,7 +148,7 @@ Current enforcement limitation: runtime expiry schedules destruction even if `on
 - Public ports are integers from 1 through 65535, with at most 64 entries.
 - `pty` and `pause_resume` are booleans.
 
-Current enforcement limitation: feature requirements are accepted and stored but are not passed to provider adapters. Do not claim that isolation, PTY, pause/resume, or public-port requirements were enforced during routing.
+Current enforcement limitation: feature requirements reach provider adapters, and Prime rejects unsupported PTY, pause/resume, computer-use, recording, and public-port requests before provisioning. It rejects container-only isolation requests; Prime's VM isolation is provider-reported, not independently verified. Other adapters may not enforce all features during routing.
 
 ## Network
 
@@ -161,7 +161,7 @@ Current enforcement limitation: feature requirements are accepted and stored but
 
 `allow_domains` and `deny_domains` are mutually exclusive. Each list can contain at most 256 names, each at most 253 characters.
 
-Current enforcement limitation: network requirements are accepted and stored but are not passed to provider adapters. Do not claim that outbound access was restricted. If the task requires fail-closed egress controls, explain that current OpenMetal cannot provide that guarantee.
+Current enforcement limitation: network requirements reach provider adapters, but Prime rejects requests for outbound restrictions before provisioning because enforcement has not been verified. Other adapters do not currently apply them. Do not claim that outbound access was restricted. If the task requires fail-closed egress controls, explain that current OpenMetal cannot provide that guarantee.
 
 ## Environment, Secrets, And Metadata
 
@@ -184,7 +184,7 @@ Current enforcement limitation: network requirements are accepted and stored but
 - Secret reference values are strings. Never put plaintext secrets in this object.
 - Metadata values can contain at most 500 characters.
 
-Current enforcement limitation: these fields reach the provider adapter boundary, but current real adapters do not consume the user-supplied values. They should be treated as stored intent, not proof of environment injection, secret injection, or provider tagging.
+Current enforcement limitation: the Prime adapter injects plain `environment` values at creation, rejects nonempty `secret_refs`, and tags the VM with deterministic Metal labels. Other real adapters may not consume user-supplied fields. Do not treat stored intent as proof of secret injection or tagging across providers.
 
 ## Provider Options
 
@@ -207,6 +207,9 @@ Provider options are grouped by provider name:
       "deployment_plan": "nf-compute-20",
       "ephemeral_storage_mb": 4096
     },
+    "prime": {
+      "team_id": "optional-prime-team-id"
+    },
     "runloop": {
       "resource_size": "SMALL",
       "blueprint_id": "blueprint-id"
@@ -215,7 +218,7 @@ Provider options are grouped by provider name:
 }
 ```
 
-When an explicit provider is selected, options may only be supplied for that provider or its fallback candidates. CodeSandbox, E2B, Freestyle, Northflank, and Runloop have typed options. Other provider option objects accept provider-specific keys but offer fewer contract-level guarantees.
+When an explicit provider is selected, options may only be supplied for that provider or its fallback candidates. CodeSandbox, E2B, Freestyle, Northflank, Prime, and Runloop have typed options. Other provider option objects accept provider-specific keys but offer fewer contract-level guarantees.
 
 ## Enforcement Summary
 

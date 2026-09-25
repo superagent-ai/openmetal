@@ -30,6 +30,7 @@
     "@openmetal/provider-freestyle": "workspace:*",
     "@openmetal/provider-modal": "workspace:*",
     "@openmetal/provider-northflank": "workspace:*",
+    "@openmetal/provider-prime": "workspace:*",
     "@openmetal/provider-runloop": "workspace:*",
     "@openmetal/provider-vercel": "workspace:*",
     "drizzle-orm": "0.45.2",

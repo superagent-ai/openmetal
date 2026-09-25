@@ -764,6 +764,30 @@
             "properties": {
               "provider": {
                 "type": "string",
+                "const": "prime"
+              },
+              "api_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "team_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "provider",
+              "api_key"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
                 "const": "runloop"
               },
               "api_key": {
@@ -856,6 +880,7 @@
               "freestyle",
               "modal",
               "northflank",
+              "prime",
               "runloop",
               "vercel"
             ]
@@ -907,6 +932,7 @@
               "freestyle",
               "modal",
               "northflank",
+              "prime",
               "runloop",
               "vercel"
             ]
@@ -1224,6 +1250,7 @@
                   "freestyle",
                   "modal",
                   "northflank",
+                  "prime",
                   "runloop",
                   "vercel"
                 ]
@@ -1307,6 +1334,7 @@
                       "freestyle",
                       "modal",
                       "northflank",
+                      "prime",
                       "runloop",
                       "vercel"
                     ]
@@ -1500,6 +1528,7 @@
                     "freestyle",
                     "modal",
                     "northflank",
+                    "prime",
                     "runloop",
                     "vercel"
                   ]
@@ -1596,6 +1625,16 @@
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "maximum": 9007199254740991
+                  }
+                },
+                "additionalProperties": false
+              },
+              "prime": {
+                "type": "object",
+                "properties": {
+                  "team_id": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -1728,6 +1767,7 @@
                       "freestyle",
                       "modal",
                       "northflank",
+                      "prime",
                       "runloop",
                       "vercel"
                     ]
@@ -1811,6 +1851,7 @@
                           "freestyle",
                           "modal",
                           "northflank",
+                          "prime",
                           "runloop",
                           "vercel"
                         ]
@@ -2004,6 +2045,7 @@
                         "freestyle",
                         "modal",
                         "northflank",
+                        "prime",
                         "runloop",
                         "vercel"
                       ]
@@ -2104,6 +2146,16 @@
                     },
                     "additionalProperties": false
                   },
+                  "prime": {
+                    "type": "object",
+                    "properties": {
+                      "team_id": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
                   "runloop": {
                     "type": "object",
                     "properties": {
@@ -2184,6 +2236,7 @@
                   "freestyle",
                   "modal",
                   "northflank",
+                  "prime",
                   "runloop",
                   "vercel"
                 ]
@@ -2798,6 +2851,7 @@
                   "freestyle",
                   "modal",
                   "northflank",
+                  "prime",
                   "runloop",
                   "vercel"
                 ]
@@ -3908,6 +3962,7 @@
                   "freestyle",
                   "modal",
                   "northflank",
+                  "prime",
                   "runloop",
                   "vercel"
                 ]
@@ -4149,6 +4204,7 @@
               "freestyle",
               "modal",
               "northflank",
+              "prime",
               "runloop",
               "vercel"
             ]
@@ -4807,6 +4863,7 @@
                   "freestyle",
                   "modal",
                   "northflank",
+                  "prime",
                   "runloop",
                   "vercel"
                 ]
@@ -5262,6 +5319,7 @@
                   "freestyle",
                   "modal",
                   "northflank",
+                  "prime",
                   "runloop",
                   "vercel"
                 ]
@@ -6462,6 +6520,7 @@
                     "freestyle",
                     "modal",
                     "northflank",
+                    "prime",
                     "runloop",
                     "vercel"
                   ]
@@ -6719,6 +6778,7 @@
                     "freestyle",
                     "modal",
                     "northflank",
+                    "prime",
                     "runloop",
                     "vercel"
                   ]
@@ -6880,6 +6940,7 @@
                     "freestyle",
                     "modal",
                     "northflank",
+                    "prime",
                     "runloop",
                     "vercel"
                   ]
@@ -7953,6 +8014,7 @@
             "freestyle",
             "modal",
             "northflank",
+            "prime",
             "runloop",
             "vercel"
           ]
@@ -9092,6 +9154,7 @@
                 "freestyle",
                 "modal",
                 "northflank",
+                "prime",
                 "runloop",
                 "vercel"
               ]

@@ -6,6 +6,7 @@ import { E2BSandboxProvider } from "@openmetal/provider-e2b";
 import { FreestyleSandboxProvider } from "@openmetal/provider-freestyle";
 import { ModalSandboxProvider } from "@openmetal/provider-modal";
 import { NorthflankSandboxProvider } from "@openmetal/provider-northflank";
+import { PrimeSandboxProvider } from "@openmetal/provider-prime";
 import { RunloopSandboxProvider } from "@openmetal/provider-runloop";
 import { VercelSandboxProvider } from "@openmetal/provider-vercel";
 import type { ProviderCredentialInput } from "@openmetal/contracts";
@@ -98,6 +99,13 @@ export function buildSandboxProviders(
       ephemeralStorageMb: env.NORTHFLANK_EPHEMERAL_STORAGE_MB,
     });
   }
+  if (env.PRIME_API_KEY) {
+    providers.prime = new PrimeSandboxProvider({
+      apiKey: env.PRIME_API_KEY,
+      apiUrl: env.PRIME_API_URL,
+      teamId: env.PRIME_TEAM_ID,
+    });
+  }
   if (env.RUNLOOP_API_KEY) {
     const usageRatesMicrousd =
       env.RUNLOOP_VCPU_HOUR_RATE_USD !== undefined &&
@@ -173,6 +181,8 @@ export function buildByokSandboxProvider(credential: ProviderCredentialInput): S
         projectId: credential.project_id,
         teamId: credential.team_id,
       });
+    case "prime":
+      return new PrimeSandboxProvider({ apiKey: credential.api_key, teamId: credential.team_id });
     case "runloop":
       return new RunloopSandboxProvider({
         apiKey: credential.api_key,

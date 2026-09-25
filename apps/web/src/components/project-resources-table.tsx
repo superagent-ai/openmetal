@@ -73,6 +73,7 @@ type Sandbox = {
     | "freestyle"
     | "modal"
     | "northflank"
+    | "prime"
     | "runloop"
     | "vercel"
     | null;
@@ -162,6 +163,9 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
   }
   if (provider === "northflank") {
     return <Image src="/providers/northflank.svg" alt="" width={13} height={9} />;
+  }
+  if (provider === "prime") {
+    return <Image src="/providers/prime.ico" alt="" width={13} height={13} />;
   }
   if (provider === "runloop") {
     return <Image src="/providers/runloop.png" alt="" width={13} height={13} />;

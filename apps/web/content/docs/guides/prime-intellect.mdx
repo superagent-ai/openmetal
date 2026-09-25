@@ -1,0 +1,65 @@
+---
+title: Prime Intellect sandboxes
+description: Run CPU VM sandboxes on Prime through OpenMetal.
+---
+
+Prime Intellect is available as `provider: "prime"` for managed capacity or with your own Prime API key. The adapter uses Prime's VM sandbox API and gateway. Prime's [sandbox overview](https://docs.primeintellect.ai/sandboxes/overview) describes the upstream limits and images.
+
+## Configure access
+
+For managed capacity, set `PRIME_API_KEY` on the worker and optionally `PRIME_TEAM_ID`. For BYOK, add a provider credential through the dashboard or the CLI:
+
+```json
+{ "provider": "prime", "api_key": "your-prime-api-key", "team_id": "optional-team-id" }
+```
+
+Save the JSON to `prime-credential.json`, then run `openmetal provider-credential set --file prime-credential.json`. The API key stays in OpenMetal's credential vault. Prime bills the owner of a BYOK key directly; managed sandboxes use OpenMetal credits. `provider_options.prime.team_id` can select a team for an individual sandbox.
+
+## Create and clean up
+
+Install `@openmetal/sdk` and set `OPENMETAL_API_URL`, `OPENMETAL_PROJECT_ID`, and `OPENMETAL_API_KEY` as in the [TypeScript quickstart](/get-started/typescript). This example selects Prime explicitly and waits for its VM to be ready:
+
+```ts
+import { MetalClient } from "@openmetal/sdk";
+
+const metal = new MetalClient({
+  baseUrl: process.env.OPENMETAL_API_URL!,
+  projectId: process.env.OPENMETAL_PROJECT_ID!,
+  accessToken: () => process.env.OPENMETAL_API_KEY,
+});
+
+const sandbox = await metal.sandboxes.create(
+  {
+    provider: "prime",
+    source: { kind: "oci_image", image: "node:22" },
+    resources: { vcpu: 2, memory_mb: 4096, disk_mb: 5120, architecture: "x86_64" },
+    lifecycle: { runtime_timeout_seconds: 1800, on_runtime_timeout: "destroy" },
+  },
+  { timeoutMs: 300_000 },
+);
+
+try {
+  console.log(sandbox.id, sandbox.state);
+} finally {
+  await metal.sandboxes.delete(sandbox.id, { timeoutMs: 180_000 });
+}
+```
+
+`metal/base`, `metal/node`, and `metal/python` resolve to `ubuntu:22.04`, `node:22`, and `python:3.11-slim`. OCI sources must refer to Docker Hub images. Prime images accessible to the account can be selected with `source: { kind: "provider_template", provider: "prime", template: "prime/<owner>/<image>:<tag>" }`. Other public registries must be imported into Prime first. The first VM launch of a new image may take several minutes while Prime converts it.
+
+## Capabilities and limitations
+
+| Capability | Prime adapter                                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Lifecycle  | Create, inspect, reconcile uncertain creation, delete; no pause/resume                                                                     |
+| Size       | 1–16 whole vCPUs, 128 MiB–64 GiB RAM, 2–128 GiB disk; fractional CPU requests round up                                                     |
+| Commands   | Ordered stdout/stderr and exit status over Prime's command-session gateway; no portable stdin, restart-safe output replay, or cancellation |
+| Files      | Binary reads (up to 16 MiB) and overwrite uploads (up to 16 MiB); no create-only, append, guaranteed parent creation, listing, or deletion |
+| Networking | No expiring and revocable HTTP endpoint lease; requests for outbound restrictions fail before provisioning                                 |
+| Secrets    | Metal secret references are rejected; never put secrets in plain `environment` values                                                      |
+
+Request `on_runtime_timeout: "destroy"`; Prime terminates VM sandboxes at their lifetime deadline. Prime also supports idle destruction, rounded up to full minutes. Requests for pause-on-timeout are rejected before provisioning. Arm64 requests are rejected because support is unverified.
+
+Prime's published CPU, memory, and disk rates are valid through **December 22, 2026**. OpenMetal estimates cumulative cost from reported resources and runtime using that rate card (`estimated_rate_card`, low confidence). It is not an upstream billing record and excludes credits, discounts, and taxes; estimates are unavailable outside the rate card's validity period. See [billing](/guides/billing) for managed charges and observational BYOK cost.
+
+Auth failures map to `auth`, exhausted balance or rate limits to `quota`, resource conflicts to `capacity`, and invalid image or size requests to `invalid_request` or `unsupported`. A lost creation response is treated as `unknown_outcome`: OpenMetal reconciles by deterministic idempotency key and sandbox label before attempting any fallback. Inspect the [operation](/concepts/operations) for terminal state and the [error guide](/errors/common-errors) for public error handling.

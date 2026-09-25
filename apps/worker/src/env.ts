@@ -18,6 +18,9 @@ export const WorkerEnvSchema = z.object({
   NORTHFLANK_DEPLOYMENT_PLAN: z.string().min(1).optional(),
   NORTHFLANK_DEFAULT_IMAGE: z.string().min(1).optional(),
   NORTHFLANK_EPHEMERAL_STORAGE_MB: z.coerce.number().int().min(1_024).optional(),
+  PRIME_API_KEY: z.string().min(1).optional(),
+  PRIME_API_URL: z.string().url().optional(),
+  PRIME_TEAM_ID: z.string().min(1).optional(),
   RUNLOOP_API_KEY: z.string().min(1).optional(),
   RUNLOOP_API_URL: z.string().url().optional(),
   RUNLOOP_RESOURCE_SIZE: z

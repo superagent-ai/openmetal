@@ -57,6 +57,11 @@ export const ProviderCredentialInputSchema = z.discriminatedUnion("provider", [
     team_id: AccountValueSchema.optional(),
   }),
   z.object({
+    provider: z.literal("prime"),
+    api_key: SecretSchema,
+    team_id: AccountValueSchema.optional(),
+  }),
+  z.object({
     provider: z.literal("runloop"),
     api_key: SecretSchema,
     resource_size: z

@@ -946,6 +946,7 @@ async function destroySandbox(
           provider.name === "codesandbox" ||
           provider.name === "e2b" ||
           provider.name === "freestyle" ||
+          provider.name === "prime" ||
           provider.name === "runloop" ||
           provider.name === "vercel"
             ? new Date(Date.now() + 2_000)

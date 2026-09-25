@@ -37,12 +37,22 @@ function normalizeSandboxFields(value: unknown): unknown {
     userId: "user_id",
     errorType: "error_type",
   };
-  return Object.fromEntries([
+  const normalized = Object.fromEntries([
     ...Object.entries(record),
     ...Object.entries(aliases)
       .filter(([camel, snake]) => record[camel] === undefined && record[snake] !== undefined)
       .map(([camel, snake]) => [camel, record[snake]]),
-  ]);
+  ]) as Record<string, unknown>;
+  for (const key of ["createdAt", "startedAt", "terminatedAt"]) {
+    const timestamp = normalized[key];
+    if (
+      typeof timestamp === "string" &&
+      /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?$/.test(timestamp)
+    ) {
+      normalized[key] = `${timestamp}Z`;
+    }
+  }
+  return normalized;
 }
 
 const SandboxSchema = z.preprocess(
@@ -205,7 +215,7 @@ export class PrimeSandboxProvider implements SandboxProvider {
     if (cpu > 16 || memoryMb > 65_536 || diskGb > 128) {
       throw new ProviderError("Prime resource limits exceeded", "unsupported", false);
     }
-    const resolved = resolveProviderResources("prime", {
+    resolveProviderResources("prime", {
       vcpu: cpu,
       memoryMb,
       diskMb: diskGb * 1024,
@@ -252,7 +262,7 @@ export class PrimeSandboxProvider implements SandboxProvider {
         }),
       );
     const ready = await this.waitForRunning(sandbox, input.signal);
-    return this.asProviderSandbox(ready, resolved);
+    return this.asProviderSandbox(ready);
   }
 
   async reconcileCreate(
@@ -458,17 +468,14 @@ export class PrimeSandboxProvider implements SandboxProvider {
     return { path: input.path, bytesWritten: bytes.length, created: false };
   }
 
-  private asProviderSandbox(
-    sandbox: PrimeSandbox,
-    resolved?: ProviderSandbox["resolvedResources"],
-  ): ProviderSandbox {
+  private asProviderSandbox(sandbox: PrimeSandbox): ProviderSandbox {
     if (!sandbox.vm)
       throw new ProviderError("Prime returned a non-VM sandbox", "unsupported", false);
     return {
       providerResourceId: sandbox.id,
       providerOrganizationId: sandbox.teamId ?? sandbox.userId ?? this.teamId ?? "prime",
       providerMetadata: { prime: sandbox },
-      resolvedResources: resolved ?? {
+      resolvedResources: {
         vcpu: sandbox.cpuCores,
         memoryMb: Math.round(sandbox.memoryGB * 1024),
         diskMb: Math.round(sandbox.diskSizeGB * 1024),

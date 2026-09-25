@@ -131,6 +131,35 @@ it("reuses a stable create key, resolves Prime sizing, waits and destroys twice"
   expect(calls.filter((call) => call.init.method === "DELETE")).toHaveLength(2);
 });
 
+it("treats timezone-less Prime timestamps as UTC and reports the provisioned disk", async () => {
+  const actual = {
+    ...snakeSandbox("RUNNING"),
+    created_at: "2026-09-25T09:43:12.345000",
+    started_at: "2026-09-25T09:43:14.118000",
+    disk_size_gb: 32,
+  };
+  const provider = new PrimeSandboxProvider({
+    apiKey: "test",
+    fetchImpl: (async (url: string | URL | Request, init?: RequestInit) =>
+      String(url).includes("/sandbox?")
+        ? json({ sandboxes: [], has_next: false })
+        : init?.method === "POST" || init?.method === "GET"
+          ? json(actual)
+          : json({}, 404)) as typeof fetch,
+  });
+  const created = await provider.create(input());
+  expect(created.resolvedResources?.diskMb).toBe(32 * 1024);
+  expect((created.providerMetadata?.prime as { startedAt: string }).startedAt).toBe(
+    "2026-09-25T09:43:14.118000Z",
+  );
+  const cost = await provider.getCost({
+    providerResourceId: created.providerResourceId,
+    from: new Date("2026-09-25T09:43:14Z"),
+    to: new Date("2026-09-25T09:43:20Z"),
+  });
+  expect(cost?.amountMicrousd).toBe(134n);
+});
+
 it("recovers ambiguous creates by label and refuses unsupported requirements before POST", async () => {
   let label = "";
   let posts = 0;

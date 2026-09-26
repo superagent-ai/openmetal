@@ -3,6 +3,7 @@ import {
   autoTopupAttempts,
   creditPurchases,
   insertDomainEventAndBroadcast,
+  sendRealtimeBroadcast,
   organizationInvitations,
   organizationMembers,
   organizationProviderCredentials,
@@ -480,13 +481,18 @@ export async function createProject(
   if (!project) {
     throw new ApiError(500, "internal_error", "failed to create project");
   }
-  await insertEventAndOutbox(tx, {
+  const event = await insertEventAndOutbox(tx, {
     type: "project.created",
     organizationId: input.organizationId,
     projectId: project.id,
     actorId: input.userId,
     data: { name: project.name, slug: project.slug },
     topic: projectTopic(project.publicId),
+  });
+  await sendRealtimeBroadcast(tx, {
+    topic: organizationTopic(input.organizationId),
+    event: event.type,
+    payload: event,
   });
   return project;
 }
@@ -541,13 +547,18 @@ export async function deleteProject(db: MetalDb, input: { userId: string; projec
       throw new ApiError(404, "not_found", "project not found");
     }
 
-    await insertEventAndOutbox(tx, {
+    const event = await insertEventAndOutbox(tx, {
       type: "project.deleted",
       organizationId: project.organizationId,
       projectId: project.id,
       actorId: input.userId,
       data: { name: project.name, slug: project.slug },
       topic: projectTopic(project.publicId),
+    });
+    await sendRealtimeBroadcast(tx, {
+      topic: organizationTopic(project.organizationId),
+      event: event.type,
+      payload: event,
     });
     return project;
   });

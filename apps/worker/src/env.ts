@@ -72,6 +72,8 @@ export const WorkerEnvSchema = z.object({
   WORKER_LEASE_MS: z.coerce.number().int().min(1000).default(30_000),
   WORKER_POLL_MS: z.coerce.number().int().min(50).default(250),
   WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(10),
+  WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).optional(),
+  WORKER_MAINTENANCE_MS: z.coerce.number().int().min(250).default(1_000),
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(8),
   WORKER_BASE_BACKOFF_MS: z.coerce.number().int().min(1).default(200),
   WORKER_COST_SWEEP_MS: z.coerce
@@ -90,6 +92,12 @@ export const WorkerEnvSchema = z.object({
   STRIPE_SECRET_KEY: z.string().min(1).optional(),
 });
 export type WorkerEnv = z.infer<typeof WorkerEnvSchema>;
+
+// Jobs spend most of their time waiting on providers, so two jobs per pooled
+// connection keeps the pool busy without queueing every query behind it.
+export function resolveWorkerConcurrency(env: WorkerEnv, poolMax: number): number {
+  return env.WORKER_CONCURRENCY ?? Math.max(1, Math.min(16, poolMax * 2));
+}
 
 export function loadWorkerEnv(rawSource: NodeJS.ProcessEnv = process.env): WorkerEnv {
   return WorkerEnvSchema.parse(

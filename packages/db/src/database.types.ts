@@ -476,6 +476,8 @@ export type Database = {
           lease_expires_at: string | null
           lease_owner: string | null
           lease_token: string | null
+          lock_key: string | null
+          lock_mode: string | null
           payload: Json
           status: Database["metal"]["Enums"]["outbox_job_status"]
           updated_at: string
@@ -492,6 +494,8 @@ export type Database = {
           lease_expires_at?: string | null
           lease_owner?: string | null
           lease_token?: string | null
+          lock_key?: string | null
+          lock_mode?: string | null
           payload: Json
           status?: Database["metal"]["Enums"]["outbox_job_status"]
           updated_at?: string
@@ -508,6 +512,8 @@ export type Database = {
           lease_expires_at?: string | null
           lease_owner?: string | null
           lease_token?: string | null
+          lock_key?: string | null
+          lock_mode?: string | null
           payload?: Json
           status?: Database["metal"]["Enums"]["outbox_job_status"]
           updated_at?: string

@@ -747,6 +747,8 @@ export const outboxJobs = metalSchema.table(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+    lockKey: text("lock_key"),
+    lockMode: text("lock_mode").$type<"shared" | "exclusive">(),
   },
   (table) => [uniqueIndex("outbox_jobs_dedupe_key_key").on(table.dedupeKey)],
 );

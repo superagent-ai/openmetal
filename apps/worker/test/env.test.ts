@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { loadWorkerEnv } from "../src/env.js";
+import { loadWorkerEnv, resolveWorkerConcurrency } from "../src/env.js";
 
 it("treats empty optional provider environment values as unset", () => {
   const env = loadWorkerEnv({
@@ -31,4 +31,11 @@ it("applies webhook delivery settings from the environment", () => {
     WORKER_WEBHOOK_BASE_BACKOFF_MS: 250,
     WORKER_WEBHOOK_CONCURRENCY: 2,
   });
+});
+
+it("sizes job concurrency from the database pool unless configured", () => {
+  const base = { DATABASE_URL: "postgresql://localhost/test", WORKER_ID: "worker" };
+  expect(resolveWorkerConcurrency(loadWorkerEnv(base), 3)).toBe(6);
+  expect(resolveWorkerConcurrency(loadWorkerEnv(base), 10)).toBe(16);
+  expect(resolveWorkerConcurrency(loadWorkerEnv({ ...base, WORKER_CONCURRENCY: "1" }), 10)).toBe(1);
 });

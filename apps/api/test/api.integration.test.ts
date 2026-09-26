@@ -320,6 +320,13 @@ describe("metal api integration", () => {
             and payload->>'type' = 'project.created'
         ) as broadcasts,
         (
+          select count(*)::int from realtime.messages
+          where topic = ${`organization:${first.id}`}
+            and private
+            and payload->>'type' = 'project.created'
+            and payload->>'project_id' = ${project.id}
+        ) as organization_broadcasts,
+        (
           select count(*)::int from metal.idempotency_keys
           where principal_id = ${owner.user.id}
             and operation = ${`projects.create:${first.id}`}
@@ -329,6 +336,7 @@ describe("metal api integration", () => {
       resources: 1,
       events: 1,
       broadcasts: 1,
+      organization_broadcasts: 1,
       idempotency: 1,
     });
 
@@ -349,6 +357,16 @@ describe("metal api integration", () => {
       id: deletable.id,
       deleted: true,
     });
+    const deletedBroadcasts = await database.sql`
+      select topic from realtime.messages
+      where topic in (${`organization:${first.id}`}, ${`project:${deletable.id}`})
+        and private
+        and payload->>'type' = 'project.deleted'
+        and payload->>'project_id' = ${deletable.id}
+    `;
+    expect(deletedBroadcasts.map((row) => row.topic).sort()).toEqual(
+      [`organization:${first.id}`, `project:${deletable.id}`].sort(),
+    );
     await expect(ownerClient.projects.get(deletable.id)).rejects.toMatchObject({ status: 404 });
     await expect(ownerClient.events.list({ projectId: deletable.id })).rejects.toMatchObject({
       status: 404,

@@ -1,4 +1,9 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo } from "react";
+import { organizationTopic, parsePublicEvent, projectTopic } from "@openmetal/events";
 import type { OrganizationBilling, OrganizationUsage } from "@openmetal/sdk";
 import {
   Analytics01Icon,
@@ -15,6 +20,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@/components/ui/button";
+import { createClient } from "@/lib/supabase/client";
 import {
   sandboxStatusesByDate,
   summarizeSandboxStatuses,
@@ -140,15 +146,103 @@ function MetricCard({
 
 export function DashboardOverview({
   organization,
+  projectIds,
   sandboxes,
   usage,
   billing,
 }: {
   organization: Organization;
+  projectIds: string[];
   sandboxes: DashboardSandbox[];
   usage: OrganizationUsage;
   billing: OrganizationBilling;
 }) {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient({ isSingleton: false }), []);
+  const projectIdsKey = projectIds.join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      if (cancelled) return;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        if (!cancelled) router.refresh();
+      }, 150);
+    };
+
+    const organizationChannel = supabase.channel(organizationTopic(organization.id), {
+      config: { private: true },
+    });
+    organizationChannel.on("broadcast", { event: "*" }, (message) => {
+      try {
+        const event = parsePublicEvent(message.payload);
+        if (event.organization_id === organization.id && event.type.startsWith("billing.")) {
+          refresh();
+        } else if (
+          event.organization_id === organization.id &&
+          (event.type === "project.created" || event.type === "project.deleted")
+        ) {
+          refresh();
+        }
+      } catch {
+        // Ignore unrelated or malformed broadcasts.
+      }
+    });
+
+    const projectChannels = projectIdsKey
+      .split(",")
+      .filter(Boolean)
+      .map((projectId) => {
+        const channel = supabase.channel(projectTopic(projectId), {
+          config: { private: true },
+        });
+        channel.on("broadcast", { event: "*" }, (message) => {
+          try {
+            const event = parsePublicEvent(message.payload);
+            if (
+              event.organization_id === organization.id &&
+              event.project_id === projectId &&
+              event.type.startsWith("sandbox.")
+            ) {
+              refresh();
+            }
+          } catch {
+            // Ignore unrelated or malformed broadcasts.
+          }
+        });
+        return channel;
+      });
+
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token) {
+        await supabase.realtime.setAuth(data.session.access_token);
+      }
+      if (!cancelled) {
+        for (const channel of [organizationChannel, ...projectChannels]) {
+          channel.subscribe((status) => {
+            if (status === "SUBSCRIBED") refresh();
+          });
+        }
+      }
+    })();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) void supabase.realtime.setAuth(session.access_token);
+    });
+
+    return () => {
+      cancelled = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      authListener.subscription.unsubscribe();
+      for (const channel of [organizationChannel, ...projectChannels]) {
+        void supabase.removeChannel(channel);
+      }
+    };
+  }, [organization.id, projectIdsKey, router, supabase]);
+
   const basePath = `/dashboard/${organization.slug}`;
   const dailySpend = usage.daily.map((day) => Number(day.total_cost.microusd) / 1_000_000);
   const sandboxCounts = summarizeSandboxStatuses(sandboxes);

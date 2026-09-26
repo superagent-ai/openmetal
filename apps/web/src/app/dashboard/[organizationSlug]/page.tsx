@@ -43,6 +43,7 @@ export default async function OrganizationDashboardPage({
   return (
     <DashboardOverview
       organization={organization}
+      projectIds={projectResponse.projects.map((project) => project.id)}
       sandboxes={sandboxes}
       usage={usage}
       billing={billing}

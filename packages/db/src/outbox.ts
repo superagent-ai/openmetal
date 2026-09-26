@@ -11,21 +11,53 @@ export type OutboxLease = {
   leaseMs: number;
 };
 
+// Claims are serialized across workers so the lock checks below see every
+// lease committed by an earlier claim.
+const OUTBOX_CLAIM_LOCK = sql`hashtextextended('metal.outbox_jobs.claim', 0)`;
+
 export async function claimOutboxJobs(
   db: MetalDb,
   input: { workerId: string; limit: number; leaseMs: number },
 ): Promise<ClaimedJob[]> {
-  const result = await db.execute(sql`
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${OUTBOX_CLAIM_LOCK})`);
+    const result = await tx.execute(sql`
     with picked as (
-      select id
-      from metal.outbox_jobs
-      where available_at <= now()
+      select jobs.id
+      from metal.outbox_jobs as jobs
+      where jobs.available_at <= now()
         and (
-          status = 'pending'
-          or (status = 'leased' and lease_expires_at < now())
+          jobs.status = 'pending'
+          or (jobs.status = 'leased' and jobs.lease_expires_at < now())
         )
-      order by created_at asc
-      for update skip locked
+        and (
+          jobs.lock_key is null
+          or (
+            not exists (
+              select 1
+              from metal.outbox_jobs as held
+              where held.lock_key = jobs.lock_key
+                and held.id <> jobs.id
+                and held.status = 'leased'
+                and held.lease_expires_at >= now()
+                and (held.lock_mode = 'exclusive' or jobs.lock_mode = 'exclusive')
+            )
+            and (
+              jobs.lock_mode = 'exclusive'
+              or not exists (
+                select 1
+                from metal.outbox_jobs as ahead
+                where ahead.lock_key = jobs.lock_key
+                  and ahead.status = 'pending'
+                  and ahead.lock_mode = 'exclusive'
+                  and ahead.available_at <= now()
+                  and ahead.created_at < jobs.created_at
+              )
+            )
+          )
+        )
+      order by jobs.created_at asc
+      for update of jobs skip locked
       limit ${input.limit}
     )
     update metal.outbox_jobs as jobs
@@ -52,10 +84,12 @@ export async function claimOutboxJobs(
       jobs.last_error as "lastError",
       jobs.created_at as "createdAt",
       jobs.updated_at as "updatedAt",
-      jobs.completed_at as "completedAt"
+      jobs.completed_at as "completedAt",
+      jobs.lock_key as "lockKey",
+      jobs.lock_mode as "lockMode"
   `);
-
-  return result as unknown as ClaimedJob[];
+    return result as unknown as ClaimedJob[];
+  });
 }
 
 export async function renewOutboxJobLease(db: MetalDb, lease: OutboxLease): Promise<boolean> {

@@ -9,6 +9,7 @@ import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-o
 import {
   claimOutboxJobs,
   insertDomainEventAndBroadcast,
+  postgresClientOptions,
   ownsOutboxJobLease,
   operationEvents,
   operations,
@@ -41,7 +42,8 @@ import {
   type SandboxProvider,
   type SandboxProviderName,
 } from "@openmetal/provider-core";
-import type { WorkerEnv } from "./env.js";
+import { resolveWorkerConcurrency, type WorkerEnv } from "./env.js";
+import { JobLocks, type JobLockMode } from "./job-locks.js";
 import {
   deliverWebhookOnce,
   runWithConcurrency,
@@ -55,6 +57,7 @@ import {
 import type { BroadcastPublisher } from "./publisher.js";
 
 type SandboxProviders = Partial<Record<SandboxProviderName, SandboxProvider>>;
+type Logger = ReturnType<typeof createLogger>;
 
 class OutboxLeaseLostError extends Error {
   constructor() {
@@ -2969,6 +2972,132 @@ async function runtimeSandboxId(
     .then((rows) => rows[0]?.sandboxId);
 }
 
+type WorkerContext = {
+  db: MetalDb;
+  publisher: BroadcastPublisher;
+  env: WorkerEnv;
+  providers: SandboxProviders;
+  stripe: StripeGateway | null;
+  logger: Logger;
+  locks: JobLocks;
+  concurrency: number;
+};
+
+type ClaimedWork = { job: ClaimedJob; guard: JobLeaseGuard };
+
+type JobLock = { key: string; mode: JobLockMode; limit?: number };
+
+function createWorkerContext(
+  db: MetalDb,
+  publisher: BroadcastPublisher,
+  env: WorkerEnv,
+  providers: SandboxProviders,
+  stripe: StripeGateway | null,
+): WorkerContext {
+  return {
+    db,
+    publisher,
+    env,
+    providers,
+    stripe,
+    logger: createLogger({
+      service: "worker",
+      environment: env.METAL_ENVIRONMENT,
+      level: env.LOG_LEVEL,
+    }),
+    locks: new JobLocks(),
+    concurrency: resolveWorkerConcurrency(env, postgresClientOptions(env.DATABASE_URL).max ?? 1),
+  };
+}
+
+async function runMaintenance(db: MetalDb, env: WorkerEnv) {
+  await scheduleExpiredEndpoints(db);
+  await cleanupExpiredProcessEvents(db, env.WORKER_PROCESS_EVENT_RETENTION_MS);
+}
+
+async function claimWork(ctx: WorkerContext, limit: number): Promise<ClaimedWork[]> {
+  const jobs = await claimOutboxJobs(ctx.db, {
+    workerId: ctx.env.WORKER_ID,
+    limit,
+    leaseMs: ctx.env.WORKER_LEASE_MS,
+  });
+  return jobs
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    .map((job) => ({
+      job,
+      guard: createJobLeaseGuard(ctx.db, job, ctx.env.WORKER_ID, ctx.env.WORKER_LEASE_MS),
+    }));
+}
+
+// Mirrors metal.set_outbox_job_lock for jobs whose lock the database could not
+// resolve at insert time. Lifecycle jobs must not overlap anything else on
+// their sandbox, while runtime jobs on one sandbox may run side by side.
+// Cancellation never waits, so it can interrupt a running process even when a
+// lifecycle job is queued.
+async function jobLock(
+  ctx: WorkerContext,
+  payload: OutboxJobPayload,
+): Promise<JobLock | undefined> {
+  switch (payload.job_type) {
+    case "sandbox.provision":
+    case "sandbox.reconcile":
+    case "sandbox.pause":
+    case "sandbox.resume":
+    case "sandbox.destroy":
+      return { key: `sandbox:${payload.sandbox_id}`, mode: "exclusive" };
+    case "sandbox.cost.sync":
+      return { key: `sandbox:${payload.sandbox_id}`, mode: "shared" };
+    case "billing.auto_topup.evaluate":
+    case "billing.spend_limit.enforce":
+      return { key: `organization:${payload.organization_id}`, mode: "exclusive" };
+    case "webhook.deliver":
+      return { key: "webhook.deliver", mode: "shared", limit: ctx.env.WORKER_WEBHOOK_CONCURRENCY };
+    case "realtime.broadcast":
+    case "process.cancel":
+      return undefined;
+    default: {
+      const sandboxId = await runtimeSandboxId(ctx.db, payload);
+      return sandboxId ? { key: `sandbox:${sandboxId}`, mode: "shared" } : undefined;
+    }
+  }
+}
+
+async function dispatchJob(ctx: WorkerContext, { job, guard }: ClaimedWork): Promise<void> {
+  let release: (() => void) | undefined;
+  try {
+    const parsed = OutboxJobPayloadSchema.safeParse(job.payload);
+    const lock: JobLock | undefined =
+      job.lockKey && job.lockMode
+        ? { key: job.lockKey, mode: job.lockMode }
+        : parsed.success
+          ? await jobLock(ctx, parsed.data).catch(() => undefined)
+          : undefined;
+    const lockRequestedAt = Date.now();
+    if (lock) release = await ctx.locks.acquire(lock.key, lock.mode, lock.limit);
+    const startedAt = Date.now();
+    ctx.logger.info(
+      {
+        job_id: job.id,
+        job_type: job.jobType,
+        attempt: job.attemptCount,
+        queue_ms: startedAt - new Date(job.createdAt).getTime(),
+        lock_wait_ms: startedAt - lockRequestedAt,
+      },
+      "outbox job started",
+    );
+    if (job.jobType === "webhook.deliver") {
+      await runWebhookJob(ctx, job, guard);
+    } else {
+      await runJob(ctx, job, guard);
+    }
+  } catch (error) {
+    ctx.logger.error({ job_id: job.id, err: safeError(error) }, "outbox job dispatch failed");
+  } finally {
+    release?.();
+    guard.stop();
+  }
+}
+
 export async function processOnce(
   db: MetalDb,
   publisher: BroadcastPublisher,
@@ -2976,255 +3105,232 @@ export async function processOnce(
   providers: SandboxProviders = {},
   stripe: StripeGateway | null = null,
 ): Promise<number> {
-  const logger = createLogger({
+  const ctx = createWorkerContext(db, publisher, env, providers, stripe);
+  await runMaintenance(db, env);
+  const work = await claimWork(ctx, env.WORKER_BATCH_SIZE);
+  await runWithConcurrency(work, ctx.concurrency, (item) => dispatchJob(ctx, item));
+  return work.length;
+}
+
+async function runJob(ctx: WorkerContext, job: ClaimedJob, guard: JobLeaseGuard) {
+  const { db, publisher, env, providers, stripe } = ctx;
+  const child = ctx.logger.child({
+    job_id: job.id,
     service: "worker",
     environment: env.METAL_ENVIRONMENT,
-    level: env.LOG_LEVEL,
   });
-  await scheduleExpiredEndpoints(db);
-  await cleanupExpiredProcessEvents(db, env.WORKER_PROCESS_EVENT_RETENTION_MS);
-  const jobs = await claimOutboxJobs(db, {
-    workerId: env.WORKER_ID,
-    limit: env.WORKER_BATCH_SIZE,
-    leaseMs: env.WORKER_LEASE_MS,
-  });
-  const guards = new Map(
-    jobs.map((job) => [job.id, createJobLeaseGuard(db, job, env.WORKER_ID, env.WORKER_LEASE_MS)]),
-  );
-  const webhookJobs = jobs.filter((job) => job.jobType === "webhook.deliver");
-  const sequentialJobs = jobs.filter((job) => job.jobType !== "webhook.deliver");
-
-  for (const job of sequentialJobs) {
-    const guard = guards.get(job.id)!;
-    const child = logger.child({
-      job_id: job.id,
-      service: "worker",
-      environment: env.METAL_ENVIRONMENT,
-    });
-    let payload: OutboxJobPayload | undefined;
-    try {
-      payload = OutboxJobPayloadSchema.parse(job.payload);
-      if (payload.job_type === "realtime.broadcast") {
-        await publisher.publish(payload.topic, payload.event.type, payload.event);
-      } else if (payload.job_type === "billing.auto_topup.evaluate") {
-        if (!stripe) {
-          throw new Error("stripe is not configured for automatic top ups");
-        }
-        await evaluateAutoTopup(db, stripe, payload.organization_id);
-      } else if (payload.job_type === "billing.spend_limit.enforce") {
-        const organizationId = payload.organization_id;
-        await withTransaction(db, (tx) => enforceSpendLimit(tx, organizationId));
-      } else if (payload.job_type === "sandbox.provision") {
-        await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
-      } else if (payload.job_type === "sandbox.reconcile") {
-        await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
-      } else if (payload.job_type === "sandbox.pause") {
-        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
-        await pauseSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
-      } else if (payload.job_type === "sandbox.resume") {
-        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
-        await resumeSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
-      } else if (payload.job_type === "sandbox.cost.sync") {
-        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
-        await syncSandboxCost(db, sandboxProvider, payload.sandbox_id, payload.final);
-      } else if (payload.job_type === "sandbox.destroy") {
-        const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
-        await destroySandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
-      } else if (payload.job_type === "webhook.deliver") {
-        throw new Error("webhook.deliver jobs are processed outside the sequential path");
-      } else {
-        const sandboxId = await runtimeSandboxId(db, payload);
-        if (sandboxId) {
-          const sandboxProvider = await resolveSandboxProvider(db, providers, sandboxId);
-          if (payload.job_type === "process.execute") {
-            await executeProcess(db, sandboxProvider, payload.process_id, guard);
-          } else if (payload.job_type === "process.cancel") {
-            await cancelProcessExecution(db, sandboxProvider, payload.process_id, guard);
-          } else if (
-            payload.job_type === "filesystem.read" ||
-            payload.job_type === "filesystem.write" ||
-            payload.job_type === "filesystem.list" ||
-            payload.job_type === "filesystem.delete"
-          ) {
-            await executeFilesystemOperation(
-              db,
-              sandboxProvider,
-              payload.runtime_operation_id,
-              guard,
-            );
-          } else if (
-            payload.job_type === "computer.action" ||
-            payload.job_type === "computer.screenshot"
-          ) {
-            await executeComputerOperation(
-              db,
-              sandboxProvider,
-              payload.runtime_operation_id,
-              guard,
-            );
-          } else if (
-            payload.job_type === "recording.start" ||
-            payload.job_type === "recording.stop"
-          ) {
-            await executeRecordingOperation(
-              db,
-              sandboxProvider,
-              payload.recording_id,
-              payload.job_type === "recording.start" ? "start" : "stop",
-              guard,
-            );
-          } else if (payload.job_type === "endpoint.create") {
-            await createHttpEndpoint(db, sandboxProvider, payload.endpoint_id, guard);
-          } else {
-            await revokeHttpEndpoint(db, sandboxProvider, payload.endpoint_id, guard);
-          }
+  let payload: OutboxJobPayload | undefined;
+  try {
+    payload = OutboxJobPayloadSchema.parse(job.payload);
+    if (payload.job_type === "realtime.broadcast") {
+      await publisher.publish(payload.topic, payload.event.type, payload.event);
+    } else if (payload.job_type === "billing.auto_topup.evaluate") {
+      if (!stripe) {
+        throw new Error("stripe is not configured for automatic top ups");
+      }
+      await evaluateAutoTopup(db, stripe, payload.organization_id);
+    } else if (payload.job_type === "billing.spend_limit.enforce") {
+      const organizationId = payload.organization_id;
+      await withTransaction(db, (tx) => enforceSpendLimit(tx, organizationId));
+    } else if (payload.job_type === "sandbox.provision") {
+      await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
+    } else if (payload.job_type === "sandbox.reconcile") {
+      await provisionSandbox(db, providers, payload.sandbox_id, payload.operation_id);
+    } else if (payload.job_type === "sandbox.pause") {
+      const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+      await pauseSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
+    } else if (payload.job_type === "sandbox.resume") {
+      const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+      await resumeSandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
+    } else if (payload.job_type === "sandbox.cost.sync") {
+      const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+      await syncSandboxCost(db, sandboxProvider, payload.sandbox_id, payload.final);
+    } else if (payload.job_type === "sandbox.destroy") {
+      const sandboxProvider = await resolveSandboxProvider(db, providers, payload.sandbox_id);
+      await destroySandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
+    } else if (payload.job_type === "webhook.deliver") {
+      throw new Error("webhook.deliver jobs are processed on the webhook path");
+    } else {
+      const sandboxId = await runtimeSandboxId(db, payload);
+      if (sandboxId) {
+        const sandboxProvider = await resolveSandboxProvider(db, providers, sandboxId);
+        if (payload.job_type === "process.execute") {
+          await executeProcess(db, sandboxProvider, payload.process_id, guard);
+        } else if (payload.job_type === "process.cancel") {
+          await cancelProcessExecution(db, sandboxProvider, payload.process_id, guard);
+        } else if (
+          payload.job_type === "filesystem.read" ||
+          payload.job_type === "filesystem.write" ||
+          payload.job_type === "filesystem.list" ||
+          payload.job_type === "filesystem.delete"
+        ) {
+          await executeFilesystemOperation(
+            db,
+            sandboxProvider,
+            payload.runtime_operation_id,
+            guard,
+          );
+        } else if (
+          payload.job_type === "computer.action" ||
+          payload.job_type === "computer.screenshot"
+        ) {
+          await executeComputerOperation(db, sandboxProvider, payload.runtime_operation_id, guard);
+        } else if (
+          payload.job_type === "recording.start" ||
+          payload.job_type === "recording.stop"
+        ) {
+          await executeRecordingOperation(
+            db,
+            sandboxProvider,
+            payload.recording_id,
+            payload.job_type === "recording.start" ? "start" : "stop",
+            guard,
+          );
+        } else if (payload.job_type === "endpoint.create") {
+          await createHttpEndpoint(db, sandboxProvider, payload.endpoint_id, guard);
+        } else {
+          await revokeHttpEndpoint(db, sandboxProvider, payload.endpoint_id, guard);
         }
       }
-      await db
-        .update(outboxJobs)
-        .set({
-          status: "succeeded",
-          completedAt: new Date(),
-          updatedAt: new Date(),
-          lastError: null,
-          leaseOwner: null,
-          leaseExpiresAt: null,
-          leaseToken: null,
-        })
-        .where(
-          and(
-            eq(outboxJobs.id, job.id),
-            eq(outboxJobs.status, "leased"),
-            eq(outboxJobs.leaseOwner, env.WORKER_ID),
-            eq(outboxJobs.leaseToken, guard.token),
-          ),
-        );
-      child.info({ job_id: job.id, job_type: payload.job_type }, "processed outbox job");
-    } catch (error) {
-      if (error instanceof OutboxLeaseLostError) {
-        child.warn({ job_id: job.id }, "outbox lease lost; stale worker stopped");
-        continue;
-      }
-      const attempts = job.attemptCount;
-      const maxAttemptsReached = attempts >= env.WORKER_MAX_ATTEMPTS;
-      const durableProvisionReconciliation =
-        maxAttemptsReached &&
-        payload &&
-        (payload.job_type === "sandbox.provision" || payload.job_type === "sandbox.reconcile") &&
-        (await db
-          .select({ status: sandboxes.status })
-          .from(sandboxes)
-          .where(eq(sandboxes.id, payload.sandbox_id))
-          .then((rows) => rows[0]?.status)) === "provision_unknown";
-      const terminal = maxAttemptsReached && !durableProvisionReconciliation;
-      const retryDelayMs = durableProvisionReconciliation
-        ? 5 * 60_000
-        : payload?.job_type === "sandbox.cost.sync" && payload.final
-          ? 2 * 60_000
-          : backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS);
-      if (
-        terminal &&
-        payload &&
-        payload.job_type !== "realtime.broadcast" &&
-        payload.job_type !== "webhook.deliver"
-      ) {
-        await recordTerminalSandboxFailure(db, payload);
-        await recordTerminalRuntimeFailure(db, payload, error, guard);
-        if ("operation_id" in payload && payload.operation_id) {
-          await setOperationState(db, payload.operation_id, "failed", {
-            code: "operation_failed",
-            message: safeError(error),
-            retryable: false,
-          });
-        }
-      }
-      await db
-        .update(outboxJobs)
-        .set({
-          status: terminal ? "failed" : "pending",
-          lastError: safeError(error),
-          availableAt: terminal ? new Date() : new Date(Date.now() + retryDelayMs),
-          leaseOwner: null,
-          leaseExpiresAt: null,
-          leaseToken: null,
-          updatedAt: new Date(),
-          completedAt: terminal ? new Date() : null,
-        })
-        .where(
-          and(
-            eq(outboxJobs.id, job.id),
-            eq(outboxJobs.status, "leased"),
-            eq(outboxJobs.leaseOwner, env.WORKER_ID),
-            eq(outboxJobs.leaseToken, guard.token),
-          ),
-        );
-      child.warn(
-        { job_id: job.id, attempt: attempts, terminal, err: safeError(error) },
-        "outbox job failed",
-      );
-    } finally {
-      guard.stop();
     }
+    await db
+      .update(outboxJobs)
+      .set({
+        status: "succeeded",
+        completedAt: new Date(),
+        updatedAt: new Date(),
+        lastError: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        leaseToken: null,
+      })
+      .where(
+        and(
+          eq(outboxJobs.id, job.id),
+          eq(outboxJobs.status, "leased"),
+          eq(outboxJobs.leaseOwner, env.WORKER_ID),
+          eq(outboxJobs.leaseToken, guard.token),
+        ),
+      );
+    child.info({ job_id: job.id, job_type: payload.job_type }, "processed outbox job");
+  } catch (error) {
+    if (error instanceof OutboxLeaseLostError) {
+      child.warn({ job_id: job.id }, "outbox lease lost; stale worker stopped");
+      return;
+    }
+    const attempts = job.attemptCount;
+    const maxAttemptsReached = attempts >= env.WORKER_MAX_ATTEMPTS;
+    const durableProvisionReconciliation =
+      maxAttemptsReached &&
+      payload &&
+      (payload.job_type === "sandbox.provision" || payload.job_type === "sandbox.reconcile") &&
+      (await db
+        .select({ status: sandboxes.status })
+        .from(sandboxes)
+        .where(eq(sandboxes.id, payload.sandbox_id))
+        .then((rows) => rows[0]?.status)) === "provision_unknown";
+    const terminal = maxAttemptsReached && !durableProvisionReconciliation;
+    const retryDelayMs = durableProvisionReconciliation
+      ? 5 * 60_000
+      : payload?.job_type === "sandbox.cost.sync" && payload.final
+        ? 2 * 60_000
+        : backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS);
+    if (
+      terminal &&
+      payload &&
+      payload.job_type !== "realtime.broadcast" &&
+      payload.job_type !== "webhook.deliver"
+    ) {
+      await recordTerminalSandboxFailure(db, payload);
+      await recordTerminalRuntimeFailure(db, payload, error, guard);
+      if ("operation_id" in payload && payload.operation_id) {
+        await setOperationState(db, payload.operation_id, "failed", {
+          code: "operation_failed",
+          message: safeError(error),
+          retryable: false,
+        });
+      }
+    }
+    await db
+      .update(outboxJobs)
+      .set({
+        status: terminal ? "failed" : "pending",
+        lastError: safeError(error),
+        availableAt: terminal ? new Date() : new Date(Date.now() + retryDelayMs),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        leaseToken: null,
+        updatedAt: new Date(),
+        completedAt: terminal ? new Date() : null,
+      })
+      .where(
+        and(
+          eq(outboxJobs.id, job.id),
+          eq(outboxJobs.status, "leased"),
+          eq(outboxJobs.leaseOwner, env.WORKER_ID),
+          eq(outboxJobs.leaseToken, guard.token),
+        ),
+      );
+    child.warn(
+      { job_id: job.id, attempt: attempts, terminal, err: safeError(error) },
+      "outbox job failed",
+    );
   }
+}
 
-  await runWithConcurrency(webhookJobs, env.WORKER_WEBHOOK_CONCURRENCY, async (job) => {
-    const guard = guards.get(job.id)!;
-    const child = logger.child({
-      job_id: job.id,
-      service: "worker",
-      environment: env.METAL_ENVIRONMENT,
-    });
-    try {
-      const payload = OutboxJobPayloadSchema.parse(job.payload);
-      if (payload.job_type !== "webhook.deliver") {
-        throw new Error(`unexpected job type ${payload.job_type} on the webhook path`);
-      }
-      const disposition = await deliverWebhookOnce(db, payload.delivery_id, {
-        policy: webhookUrlPolicyForEnvironment(env.METAL_ENVIRONMENT),
-        maxAttempts: env.WORKER_WEBHOOK_MAX_ATTEMPTS,
-        baseBackoffMs: env.WORKER_WEBHOOK_BASE_BACKOFF_MS,
-      });
-      await settleWebhookJob(db, job, env.WORKER_ID, guard.token, disposition);
-      child.info({ job_id: job.id, job_type: payload.job_type }, "processed outbox job");
-    } catch (error) {
-      if (error instanceof OutboxLeaseLostError) {
-        child.warn({ job_id: job.id }, "outbox lease lost; stale worker stopped");
-        return;
-      }
-      const attempts = job.attemptCount;
-      const terminal = attempts >= env.WORKER_MAX_ATTEMPTS;
-      await db
-        .update(outboxJobs)
-        .set({
-          status: terminal ? "failed" : "pending",
-          lastError: safeError(error),
-          availableAt: terminal
-            ? new Date()
-            : new Date(Date.now() + backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS)),
-          leaseOwner: null,
-          leaseExpiresAt: null,
-          leaseToken: null,
-          updatedAt: new Date(),
-          completedAt: terminal ? new Date() : null,
-        })
-        .where(
-          and(
-            eq(outboxJobs.id, job.id),
-            eq(outboxJobs.status, "leased"),
-            eq(outboxJobs.leaseOwner, env.WORKER_ID),
-            eq(outboxJobs.leaseToken, guard.token),
-          ),
-        );
-      child.warn(
-        { job_id: job.id, attempt: attempts, terminal, err: safeError(error) },
-        "webhook outbox job failed",
-      );
-    } finally {
-      guard.stop();
-    }
+async function runWebhookJob(ctx: WorkerContext, job: ClaimedJob, guard: JobLeaseGuard) {
+  const { db, env } = ctx;
+  const child = ctx.logger.child({
+    job_id: job.id,
+    service: "worker",
+    environment: env.METAL_ENVIRONMENT,
   });
-
-  return jobs.length;
+  try {
+    const payload = OutboxJobPayloadSchema.parse(job.payload);
+    if (payload.job_type !== "webhook.deliver") {
+      throw new Error(`unexpected job type ${payload.job_type} on the webhook path`);
+    }
+    const disposition = await deliverWebhookOnce(db, payload.delivery_id, {
+      policy: webhookUrlPolicyForEnvironment(env.METAL_ENVIRONMENT),
+      maxAttempts: env.WORKER_WEBHOOK_MAX_ATTEMPTS,
+      baseBackoffMs: env.WORKER_WEBHOOK_BASE_BACKOFF_MS,
+    });
+    await settleWebhookJob(db, job, env.WORKER_ID, guard.token, disposition);
+    child.info({ job_id: job.id, job_type: payload.job_type }, "processed outbox job");
+  } catch (error) {
+    if (error instanceof OutboxLeaseLostError) {
+      child.warn({ job_id: job.id }, "outbox lease lost; stale worker stopped");
+      return;
+    }
+    const attempts = job.attemptCount;
+    const terminal = attempts >= env.WORKER_MAX_ATTEMPTS;
+    await db
+      .update(outboxJobs)
+      .set({
+        status: terminal ? "failed" : "pending",
+        lastError: safeError(error),
+        availableAt: terminal
+          ? new Date()
+          : new Date(Date.now() + backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS)),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        leaseToken: null,
+        updatedAt: new Date(),
+        completedAt: terminal ? new Date() : null,
+      })
+      .where(
+        and(
+          eq(outboxJobs.id, job.id),
+          eq(outboxJobs.status, "leased"),
+          eq(outboxJobs.leaseOwner, env.WORKER_ID),
+          eq(outboxJobs.leaseToken, guard.token),
+        ),
+      );
+    child.warn(
+      { job_id: job.id, attempt: attempts, terminal, err: safeError(error) },
+      "webhook outbox job failed",
+    );
+  }
 }
 
 async function scheduleMissingSandboxCosts(db: MetalDb, providers: SandboxProviders, now: Date) {
@@ -3325,21 +3431,51 @@ export async function runWorkerLoop(
   providers: SandboxProviders = {},
 ): Promise<void> {
   const stripe = env.STRIPE_SECRET_KEY ? createStripeGateway(env.STRIPE_SECRET_KEY) : null;
+  const ctx = createWorkerContext(db, publisher, env, providers, stripe);
+  ctx.logger.info({ concurrency: ctx.concurrency }, "worker scheduler started");
+  const inFlight = new Set<Promise<void>>();
+  let wake: (() => void) | undefined;
   let nextCostSweepAt = 0;
-  while (!signal.aborted) {
-    const now = Date.now();
-    if (now >= nextCostSweepAt) {
-      const sweepBucket = Math.floor(now / env.WORKER_COST_SWEEP_MS) * env.WORKER_COST_SWEEP_MS;
-      await scheduleMissingSandboxCosts(db, providers, new Date(sweepBucket));
-      nextCostSweepAt = sweepBucket + env.WORKER_COST_SWEEP_MS;
-    }
-    await processOnce(db, publisher, env, providers, stripe);
-    await new Promise((resolve) => {
-      const timer = setTimeout(resolve, env.WORKER_POLL_MS);
-      signal.addEventListener("abort", () => {
-        clearTimeout(timer);
-        resolve(undefined);
+  let nextMaintenanceAt = 0;
+  try {
+    while (!signal.aborted) {
+      const now = Date.now();
+      if (now >= nextCostSweepAt) {
+        const sweepBucket = Math.floor(now / env.WORKER_COST_SWEEP_MS) * env.WORKER_COST_SWEEP_MS;
+        await scheduleMissingSandboxCosts(db, providers, new Date(sweepBucket));
+        nextCostSweepAt = sweepBucket + env.WORKER_COST_SWEEP_MS;
+      }
+      if (now >= nextMaintenanceAt) {
+        await runMaintenance(db, env);
+        nextMaintenanceAt = now + env.WORKER_MAINTENANCE_MS;
+      }
+      // Claim only what can start now, so queued jobs are never held behind
+      // long-running ones while their leases keep renewing.
+      const limit = Math.min(env.WORKER_BATCH_SIZE, ctx.concurrency - inFlight.size);
+      const work = limit > 0 ? await claimWork(ctx, limit) : [];
+      for (const item of work) {
+        const task: Promise<void> = dispatchJob(ctx, item).finally(() => {
+          inFlight.delete(task);
+          wake?.();
+        });
+        inFlight.add(task);
+      }
+      if (work.length > 0 && work.length === limit && inFlight.size < ctx.concurrency) {
+        continue;
+      }
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          signal.removeEventListener("abort", done);
+          wake = undefined;
+          resolve();
+        };
+        const timer = setTimeout(done, env.WORKER_POLL_MS);
+        wake = done;
+        signal.addEventListener("abort", done, { once: true });
       });
-    });
+    }
+  } finally {
+    await Promise.allSettled(inFlight);
   }
 }

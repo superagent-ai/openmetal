@@ -15,10 +15,20 @@ export type OutboxLease = {
 // lease committed by an earlier claim.
 const OUTBOX_CLAIM_LOCK = sql`hashtextextended('metal.outbox_jobs.claim', 0)`;
 
+export type OutboxJobTypeFilter = { only: string } | { except: string };
+
+// A job with a lock key is claimable only when no held lease conflicts with it
+// and no older claimable job conflicts with it, so one claim never returns two
+// conflicting jobs and conflicting jobs start in creation order.
 export async function claimOutboxJobs(
   db: MetalDb,
-  input: { workerId: string; limit: number; leaseMs: number },
+  input: { workerId: string; limit: number; leaseMs: number; jobTypes?: OutboxJobTypeFilter },
 ): Promise<ClaimedJob[]> {
+  const jobTypeFilter = !input.jobTypes
+    ? sql`true`
+    : "only" in input.jobTypes
+      ? sql`jobs.job_type = ${input.jobTypes.only}`
+      : sql`jobs.job_type <> ${input.jobTypes.except}`;
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(${OUTBOX_CLAIM_LOCK})`);
     const result = await tx.execute(sql`
@@ -30,6 +40,7 @@ export async function claimOutboxJobs(
           jobs.status = 'pending'
           or (jobs.status = 'leased' and jobs.lease_expires_at < now())
         )
+        and ${jobTypeFilter}
         and (
           jobs.lock_key is null
           or (
@@ -42,21 +53,21 @@ export async function claimOutboxJobs(
                 and held.lease_expires_at >= now()
                 and (held.lock_mode = 'exclusive' or jobs.lock_mode = 'exclusive')
             )
-            and (
-              jobs.lock_mode = 'exclusive'
-              or not exists (
-                select 1
-                from metal.outbox_jobs as ahead
-                where ahead.lock_key = jobs.lock_key
-                  and ahead.status = 'pending'
-                  and ahead.lock_mode = 'exclusive'
-                  and ahead.available_at <= now()
-                  and ahead.created_at < jobs.created_at
-              )
+            and not exists (
+              select 1
+              from metal.outbox_jobs as ahead
+              where ahead.lock_key = jobs.lock_key
+                and ahead.available_at <= now()
+                and (
+                  ahead.status = 'pending'
+                  or (ahead.status = 'leased' and ahead.lease_expires_at < now())
+                )
+                and (ahead.created_at, ahead.id) < (jobs.created_at, jobs.id)
+                and (ahead.lock_mode = 'exclusive' or jobs.lock_mode = 'exclusive')
             )
           )
         )
-      order by jobs.created_at asc
+      order by jobs.created_at asc, jobs.id asc
       for update of jobs skip locked
       limit ${input.limit}
     )

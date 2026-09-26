@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { claimOutboxJobs, createDatabase } from "@openmetal/db";
 import { FakeSandboxProvider, loadTestEnv } from "@openmetal/testkit";
 import { loadWorkerEnv } from "../src/env.js";
-import { processOnce } from "../src/processor.js";
+import { processOnce, runWorkerLoop } from "../src/processor.js";
 
 const testEnv = loadTestEnv();
 
@@ -1130,7 +1130,12 @@ describe("runtime worker", () => {
     const processing = processOnce(
       database.db,
       publisher,
-      { ...workerEnv, WORKER_ID: `concurrent-${crypto.randomUUID()}`, WORKER_BATCH_SIZE: 2 },
+      {
+        ...workerEnv,
+        WORKER_ID: `concurrent-${crypto.randomUUID()}`,
+        WORKER_BATCH_SIZE: 2,
+        WORKER_CONCURRENCY: 2,
+      },
       { e2b: gatedProvider },
     );
     try {
@@ -1152,6 +1157,87 @@ describe("runtime worker", () => {
     } finally {
       releaseSlow();
       await processing;
+    }
+    const [slow] = await database.sql`
+      select state from metal.sandbox_processes where id = ${slowProcessId}
+    `;
+    expect(slow?.state).toBe("succeeded");
+  });
+
+  it("keeps claiming in the worker loop while a long job runs and drains it on shutdown", async () => {
+    const slowProcessId = crypto.randomUUID();
+    const fastProcessId = crypto.randomUUID();
+    await database.sql`
+      insert into metal.sandbox_processes (
+        id, organization_id, project_id, sandbox_id, command, max_output_bytes
+      )
+      values
+        (${slowProcessId}, ${organizationId}, ${projectId}, ${sandboxId}, '["slow"]'::jsonb, 1024),
+        (${fastProcessId}, ${organizationId}, ${projectId}, ${sandboxId}, '["fast"]'::jsonb, 1024)
+    `;
+    await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload, created_at)
+      values (
+        'process.execute', ${`runtime-loop-slow-${slowProcessId}`},
+        ${JSON.stringify({ job_type: "process.execute", process_id: slowProcessId })}::jsonb,
+        '1900-01-01T00:00:00Z'::timestamptz
+      )
+    `;
+    const gatedProvider = new FakeSandboxProvider("e2b");
+    gatedProvider.resources.set(sandboxPublicId, provider.resources.get(sandboxPublicId)!);
+    const originalExec = gatedProvider.exec.bind(gatedProvider);
+    let releaseSlow!: () => void;
+    const slowGate = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    gatedProvider.exec = async (input) => {
+      if (input.command[0] === "slow") await slowGate;
+      return originalExec(input);
+    };
+    async function waitForState(processId: string, state: string) {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const [row] = await database.sql`
+          select state from metal.sandbox_processes where id = ${processId}
+        `;
+        if (row?.state === state) return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error(`process ${processId} did not reach ${state}`);
+    }
+    const abort = new AbortController();
+    const loop = runWorkerLoop(
+      database.db,
+      publisher,
+      {
+        ...workerEnv,
+        WORKER_ID: `loop-${crypto.randomUUID()}`,
+        WORKER_BATCH_SIZE: 1,
+        WORKER_CONCURRENCY: 2,
+      },
+      abort.signal,
+      { e2b: gatedProvider },
+    );
+    try {
+      await waitForState(slowProcessId, "running");
+      await database.sql`
+        insert into metal.outbox_jobs (job_type, dedupe_key, payload, created_at)
+        values (
+          'process.execute', ${`runtime-loop-fast-${fastProcessId}`},
+          ${JSON.stringify({ job_type: "process.execute", process_id: fastProcessId })}::jsonb,
+          '1900-01-01T00:00:01Z'::timestamptz
+        )
+      `;
+      await waitForState(fastProcessId, "succeeded");
+      abort.abort();
+      const [slow] = await database.sql`
+        select state from metal.sandbox_processes where id = ${slowProcessId}
+      `;
+      expect(slow?.state).toBe("running");
+    } finally {
+      abort.abort();
+      releaseSlow();
+      await loop;
     }
     const [slow] = await database.sql`
       select state from metal.sandbox_processes where id = ${slowProcessId}
@@ -1181,8 +1267,8 @@ describe("runtime worker", () => {
       ours.add(String(job!.id));
       return job!;
     }
-    async function claimAs(workerId: string) {
-      const claimed = await claimOutboxJobs(database.db, { workerId, limit: 1, leaseMs: 30_000 });
+    async function claimAs(workerId: string, limit = 1) {
+      const claimed = await claimOutboxJobs(database.db, { workerId, limit, leaseMs: 30_000 });
       const foreign = claimed.filter((job) => !ours.has(job.id)).map((job) => job.id);
       if (foreign.length > 0) {
         await database.sql`
@@ -1218,7 +1304,8 @@ describe("runtime worker", () => {
       expect(firstExec).toMatchObject({ lock_key: `sandbox:${sandboxId}`, lock_mode: "shared" });
       expect(destroy).toMatchObject({ lock_key: `sandbox:${sandboxId}`, lock_mode: "exclusive" });
 
-      expect(await claimAs("worker-a")).toEqual([String(firstExec.id)]);
+      // One claim never returns conflicting jobs, even with room for all three.
+      expect(await claimAs("worker-a", 10)).toEqual([String(firstExec.id)]);
       // The destroy waits for the running process, and the later process
       // waits behind the destroy.
       expect(await claimAs("worker-b")).toEqual([]);

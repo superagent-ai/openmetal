@@ -25,6 +25,7 @@ import {
   withTransaction,
   type ClaimedJob,
   type MetalDb,
+  type OutboxJobTypeFilter,
   type OutboxLease,
 } from "@openmetal/db";
 import { OutboxJobPayloadSchema, projectTopic, type OutboxJobPayload } from "@openmetal/events";
@@ -3015,11 +3016,16 @@ async function runMaintenance(db: MetalDb, env: WorkerEnv) {
   await cleanupExpiredProcessEvents(db, env.WORKER_PROCESS_EVENT_RETENTION_MS);
 }
 
-async function claimWork(ctx: WorkerContext, limit: number): Promise<ClaimedWork[]> {
+async function claimWork(
+  ctx: WorkerContext,
+  limit: number,
+  jobTypes?: OutboxJobTypeFilter,
+): Promise<ClaimedWork[]> {
   const jobs = await claimOutboxJobs(ctx.db, {
     workerId: ctx.env.WORKER_ID,
     limit,
     leaseMs: ctx.env.WORKER_LEASE_MS,
+    jobTypes,
   });
   return jobs
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
@@ -3432,8 +3438,24 @@ export async function runWorkerLoop(
 ): Promise<void> {
   const stripe = env.STRIPE_SECRET_KEY ? createStripeGateway(env.STRIPE_SECRET_KEY) : null;
   const ctx = createWorkerContext(db, publisher, env, providers, stripe);
-  ctx.logger.info({ concurrency: ctx.concurrency }, "worker scheduler started");
-  const inFlight = new Set<Promise<void>>();
+  ctx.logger.info(
+    { concurrency: ctx.concurrency, webhook_concurrency: env.WORKER_WEBHOOK_CONCURRENCY },
+    "worker scheduler started",
+  );
+  // Webhook deliveries get their own slots so a burst of them never occupies
+  // the slots that sandbox jobs need.
+  const lanes = [
+    {
+      jobTypes: { except: "webhook.deliver" } as const,
+      capacity: ctx.concurrency,
+      inFlight: new Set<Promise<void>>(),
+    },
+    {
+      jobTypes: { only: "webhook.deliver" } as const,
+      capacity: env.WORKER_WEBHOOK_CONCURRENCY,
+      inFlight: new Set<Promise<void>>(),
+    },
+  ];
   let wake: (() => void) | undefined;
   let nextCostSweepAt = 0;
   let nextMaintenanceAt = 0;
@@ -3451,18 +3473,21 @@ export async function runWorkerLoop(
       }
       // Claim only what can start now, so queued jobs are never held behind
       // long-running ones while their leases keep renewing.
-      const limit = Math.min(env.WORKER_BATCH_SIZE, ctx.concurrency - inFlight.size);
-      const work = limit > 0 ? await claimWork(ctx, limit) : [];
-      for (const item of work) {
-        const task: Promise<void> = dispatchJob(ctx, item).finally(() => {
-          inFlight.delete(task);
-          wake?.();
-        });
-        inFlight.add(task);
+      let moreReady = false;
+      for (const lane of lanes) {
+        const limit = Math.min(env.WORKER_BATCH_SIZE, lane.capacity - lane.inFlight.size);
+        if (limit <= 0) continue;
+        const work = await claimWork(ctx, limit, lane.jobTypes);
+        for (const item of work) {
+          const task: Promise<void> = dispatchJob(ctx, item).finally(() => {
+            lane.inFlight.delete(task);
+            wake?.();
+          });
+          lane.inFlight.add(task);
+        }
+        if (work.length === limit && lane.inFlight.size < lane.capacity) moreReady = true;
       }
-      if (work.length > 0 && work.length === limit && inFlight.size < ctx.concurrency) {
-        continue;
-      }
+      if (moreReady) continue;
       await new Promise<void>((resolve) => {
         const done = () => {
           clearTimeout(timer);
@@ -3476,6 +3501,6 @@ export async function runWorkerLoop(
       });
     }
   } finally {
-    await Promise.allSettled(inFlight);
+    await Promise.allSettled(lanes.flatMap((lane) => [...lane.inFlight]));
   }
 }

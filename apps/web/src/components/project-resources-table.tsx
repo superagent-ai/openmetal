@@ -469,7 +469,7 @@ export function ProjectResourcesTable({
     setError(undefined);
     setBusySandboxId(sandbox.id);
     try {
-      updateSandbox(await metal.sandboxes.pause(projectId, sandbox.id));
+      updateSandbox(await metal.sandboxes.pauseFromProject(projectId, sandbox.id));
       await refreshUntil(sandbox.id, ["paused", "failed"]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not pause the sandbox");

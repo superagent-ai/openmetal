@@ -1,0 +1,63 @@
+name: modal-gpu-live
+
+# Runs a real T4 job, a cancel, and a cost check on Modal every day. The GPU
+# worker relies on Modal client RPCs that are not a documented public contract,
+# so this catches breaking changes before customers do. Costs a few cents a run.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: modal-gpu-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FORCE_COLOR: "1"
+      # Local Supabase Auth reads these; the live test does not use OAuth.
+      SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID: unused
+      SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: unused
+      SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID: unused
+      SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET: unused
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.105.0
+      - run: pnpm install --frozen-lockfile
+      - run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+      - name: Export local Supabase settings
+        run: |
+          supabase status -o json | node -e '
+            let raw = "";
+            process.stdin.on("data", (chunk) => (raw += chunk)).on("end", () => {
+              const status = JSON.parse(raw.slice(raw.indexOf("{")));
+              const lines = [
+                `DATABASE_URL=${status.DB_URL}`,
+                `SUPABASE_URL=${status.API_URL}`,
+                `SUPABASE_PUBLISHABLE_KEY=${status.PUBLISHABLE_KEY ?? status.ANON_KEY}`,
+                `SUPABASE_SECRET_KEY=${status.SECRET_KEY ?? status.SERVICE_ROLE_KEY}`,
+              ];
+              require("node:fs").appendFileSync(process.env.GITHUB_ENV, lines.join("\n") + "\n");
+            });
+          '
+      - run: pnpm turbo run build --filter=@openmetal/worker...
+      - name: Run live Modal GPU tests
+        run: pnpm --filter @openmetal/worker exec vitest run test/gpu-jobs.live.test.ts
+        env:
+          METAL_LIVE_TESTS: "1"
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_GPU_LIVE_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_GPU_LIVE_TOKEN_SECRET }}
+      - if: always()
+        run: supabase stop --no-backup

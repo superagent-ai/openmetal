@@ -263,6 +263,161 @@ export const sandboxes = metalSchema.table(
   ],
 );
 
+export const gpuJobs = metalSchema.table(
+  "gpu_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    publicId: text("public_id")
+      .notNull()
+      .default(sql`'gpj_' || replace(gen_random_uuid()::text, '-', '')`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    createdBy: uuid("created_by").notNull(),
+    primaryProvider: text("primary_provider").notNull(),
+    provider: text("provider"),
+    providerCredentialId: uuid("provider_credential_id").references(
+      () => organizationProviderCredentials.id,
+    ),
+    billingMode: text("billing_mode").notNull().default("managed"),
+    providerResourceId: text("provider_resource_id"),
+    providerOrganizationId: text("provider_organization_id"),
+    providerMetadata: jsonb("provider_metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    state: text("state").notNull().default("requested"),
+    stateReason: text("state_reason"),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    source: jsonb("source").$type<Record<string, unknown>>().notNull(),
+    gpu: jsonb("gpu").$type<{ type: string; count: number }>().notNull(),
+    resources: jsonb("resources").$type<Record<string, unknown>>().notNull().default({}),
+    lifecycle: jsonb("lifecycle")
+      .$type<{ max_runtime_seconds: number; max_start_seconds?: number }>()
+      .notNull(),
+    limits: jsonb("limits").$type<Record<string, unknown>>().notNull().default({}),
+    placement: jsonb("placement").$type<{ regions?: string[] }>().notNull().default({}),
+    mounts: jsonb("mounts").$type<Array<Record<string, unknown>>>().notNull().default([]),
+    priceMultiplierBps: integer("price_multiplier_bps").notNull().default(10_000),
+    estimatedHourlyMicrousd: bigint("estimated_hourly_microusd", { mode: "bigint" })
+      .notNull()
+      .default(0n),
+    rateCardVersion: text("rate_card_version"),
+    maxCostMicrousd: bigint("max_cost_microusd", { mode: "bigint" }),
+    environment: jsonb("environment").$type<Record<string, string>>().notNull().default({}),
+    secretNames: jsonb("secret_names").$type<string[]>().notNull().default([]),
+    secretsVaultId: uuid("secrets_vault_id"),
+    providerOptions: jsonb("provider_options")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    metadata: jsonb("metadata").$type<Record<string, string>>().notNull().default({}),
+    resolved: jsonb("resolved").$type<Record<string, unknown>>(),
+    exitCode: integer("exit_code"),
+    logCursors: jsonb("log_cursors")
+      .$type<{ stdout?: string; stderr?: string; stdout_eof?: boolean; stderr_eof?: boolean }>()
+      .notNull()
+      .default({}),
+    logStreamOffsets: jsonb("log_stream_offsets")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    logBytes: bigint("log_bytes", { mode: "number" }).notNull().default(0),
+    logsTruncated: boolean("logs_truncated").notNull().default(false),
+    logsComplete: boolean("logs_complete").notNull().default(false),
+    providerCostMicrousd: bigint("provider_cost_microusd", { mode: "bigint" }),
+    providerCostMeasuredThrough: timestamp("provider_cost_measured_through", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    providerCostUpdatedAt: timestamp("provider_cost_updated_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    customerChargedMicrousd: bigint("customer_charged_microusd", { mode: "bigint" })
+      .notNull()
+      .default(0n),
+    deadlineAt: timestamp("deadline_at", { withTimezone: true, mode: "date" }),
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true, mode: "date" }),
+    cancelReason: text("cancel_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true, mode: "date" }),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("gpu_jobs_public_id_key").on(table.publicId),
+    index("gpu_jobs_project_created_idx").on(table.projectId, table.createdAt, table.id),
+    index("gpu_jobs_organization_created_idx").on(table.organizationId, table.createdAt),
+    uniqueIndex("gpu_jobs_provider_resource_key")
+      .on(table.provider, table.providerResourceId)
+      .where(sql`${table.providerResourceId} is not null`),
+    index("gpu_jobs_active_organization_idx")
+      .on(table.organizationId, table.billingMode)
+      .where(sql`${table.state} not in ('succeeded', 'failed', 'timed_out', 'cancelled')`),
+    index("gpu_jobs_active_managed_idx")
+      .on(table.organizationId)
+      .where(
+        sql`${table.billingMode} = 'managed' and ${table.state} in ('provisioning', 'provision_unknown', 'running', 'cancelling')`,
+      ),
+    index("gpu_jobs_provider_credential_id_idx")
+      .on(table.providerCredentialId)
+      .where(sql`${table.providerCredentialId} is not null`),
+    index("gpu_jobs_finished_idx")
+      .on(table.finishedAt)
+      .where(sql`${table.finishedAt} is not null`),
+    check("gpu_jobs_billing_mode_check", sql`${table.billingMode} in ('managed', 'byok')`),
+  ],
+);
+
+export const gpuCostReconciliations = metalSchema.table(
+  "gpu_cost_reconciliations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").notNull(),
+    providerScope: text("provider_scope").notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true, mode: "date" }).notNull(),
+    windowEnd: timestamp("window_end", { withTimezone: true, mode: "date" }).notNull(),
+    providerReportedMicrousd: bigint("provider_reported_microusd", { mode: "bigint" }).notNull(),
+    metalMeteredMicrousd: bigint("metal_metered_microusd", { mode: "bigint" }).notNull(),
+    driftMicrousd: bigint("drift_microusd", { mode: "bigint" }).notNull(),
+    rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("gpu_cost_reconciliations_provider_provider_scope_window_sta_key").on(
+      table.provider,
+      table.providerScope,
+      table.windowStart,
+      table.windowEnd,
+    ),
+  ],
+);
+
+export const gpuJobLogEvents = metalSchema.table(
+  "gpu_job_log_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    gpuJobId: uuid("gpu_job_id")
+      .notNull()
+      .references(() => gpuJobs.id, { onDelete: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    type: text("type").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("gpu_job_log_events_gpu_job_id_sequence_key").on(table.gpuJobId, table.sequence),
+  ],
+);
+
 export const operations = metalSchema.table(
   "operations",
   {
@@ -276,9 +431,8 @@ export const operations = metalSchema.table(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id),
-    sandboxId: uuid("sandbox_id")
-      .notNull()
-      .references(() => sandboxes.id),
+    sandboxId: uuid("sandbox_id").references(() => sandboxes.id),
+    gpuJobId: uuid("gpu_job_id").references(() => gpuJobs.id),
     type: text("type").notNull(),
     state: text("state").notNull().default("queued"),
     retryable: boolean("retryable").notNull().default(false),
@@ -291,6 +445,13 @@ export const operations = metalSchema.table(
     uniqueIndex("operations_public_id_key").on(table.publicId),
     index("operations_project_created_idx").on(table.projectId, table.createdAt),
     index("operations_sandbox_created_idx").on(table.sandboxId, table.createdAt),
+    index("operations_gpu_job_created_idx")
+      .on(table.gpuJobId, table.createdAt)
+      .where(sql`${table.gpuJobId} is not null`),
+    check(
+      "operations_single_resource",
+      sql`num_nonnulls(${table.sandboxId}, ${table.gpuJobId}) = 1`,
+    ),
   ],
 );
 
@@ -545,9 +706,8 @@ export const providerAttempts = metalSchema.table(
     operationId: uuid("operation_id")
       .notNull()
       .references(() => operations.id, { onDelete: "cascade" }),
-    sandboxId: uuid("sandbox_id")
-      .notNull()
-      .references(() => sandboxes.id),
+    sandboxId: uuid("sandbox_id").references(() => sandboxes.id),
+    gpuJobId: uuid("gpu_job_id").references(() => gpuJobs.id),
     attemptIndex: integer("attempt_index").notNull(),
     provider: text("provider").notNull(),
     providerCredentialId: uuid("provider_credential_id").references(
@@ -570,6 +730,10 @@ export const providerAttempts = metalSchema.table(
   },
   (table) => [
     uniqueIndex("provider_attempts_operation_index_key").on(table.operationId, table.attemptIndex),
+    check(
+      "provider_attempts_single_resource",
+      sql`num_nonnulls(${table.sandboxId}, ${table.gpuJobId}) = 1`,
+    ),
   ],
 );
 
@@ -577,9 +741,8 @@ export const providerCostSnapshots = metalSchema.table(
   "provider_cost_snapshots",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    sandboxId: uuid("sandbox_id")
-      .notNull()
-      .references(() => sandboxes.id),
+    sandboxId: uuid("sandbox_id").references(() => sandboxes.id),
+    gpuJobId: uuid("gpu_job_id").references(() => gpuJobs.id),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id),
@@ -618,6 +781,16 @@ export const providerCostSnapshots = metalSchema.table(
       table.sandboxId,
       table.amountMicrousd,
       table.measuredThrough,
+    ),
+    index("provider_cost_snapshots_gpu_job_captured_idx")
+      .on(table.gpuJobId, table.capturedAt)
+      .where(sql`${table.gpuJobId} is not null`),
+    uniqueIndex("provider_cost_snapshots_gpu_job_unique_measurement")
+      .on(table.gpuJobId, table.amountMicrousd, table.measuredThrough)
+      .where(sql`${table.gpuJobId} is not null`),
+    check(
+      "provider_cost_snapshots_single_resource",
+      sql`num_nonnulls(${table.sandboxId}, ${table.gpuJobId}) = 1`,
     ),
   ],
 );
@@ -1001,9 +1174,8 @@ export const usageCharges = metalSchema.table(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    sandboxId: uuid("sandbox_id")
-      .notNull()
-      .references(() => sandboxes.id, { onDelete: "cascade" }),
+    sandboxId: uuid("sandbox_id").references(() => sandboxes.id, { onDelete: "cascade" }),
+    gpuJobId: uuid("gpu_job_id").references(() => gpuJobs.id, { onDelete: "cascade" }),
     snapshotId: uuid("snapshot_id")
       .notNull()
       .references(() => providerCostSnapshots.id),
@@ -1023,6 +1195,13 @@ export const usageCharges = metalSchema.table(
     uniqueIndex("usage_charges_snapshot_id_key").on(table.snapshotId),
     index("usage_charges_sandbox_created_idx").on(table.sandboxId, table.createdAt),
     index("usage_charges_organization_created_idx").on(table.organizationId, table.createdAt),
+    index("usage_charges_gpu_job_created_idx")
+      .on(table.gpuJobId, table.createdAt)
+      .where(sql`${table.gpuJobId} is not null`),
+    check(
+      "usage_charges_single_resource",
+      sql`num_nonnulls(${table.sandboxId}, ${table.gpuJobId}) = 1`,
+    ),
   ],
 );
 
@@ -1034,6 +1213,8 @@ export const schema = {
   projectApiKeys,
   organizationProviderCredentials,
   sandboxes,
+  gpuJobs,
+  gpuJobLogEvents,
   operations,
   operationEvents,
   sandboxProcesses,

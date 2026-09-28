@@ -1,5 +1,5 @@
 import { and, count, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
-import { projects, providerCostSnapshots, sandboxes, type MetalDb } from "@openmetal/db";
+import { gpuJobs, projects, providerCostSnapshots, sandboxes, type MetalDb } from "@openmetal/db";
 import { toMicrousd } from "./money.js";
 
 export type UsageCostProvenance =
@@ -71,6 +71,37 @@ export type OrganizationUsageAnalytics = {
     provenance: UsageCostProvenance;
     confidence: UsageCostConfidence;
     costSource: string | null;
+  }>;
+  topGpuJobs: Array<{
+    gpuJobId: string;
+    projectId: string;
+    projectName: string;
+    projectSlug: string;
+    provider: string;
+    billingMode: UsageBillingMode;
+    status: string;
+    costMicrousd: bigint;
+    previousCostMicrousd: bigint;
+    provenance: UsageCostProvenance;
+    confidence: UsageCostConfidence;
+    costSource: string | null;
+  }>;
+  gpuJobActivity: Array<{
+    id: string;
+    measuredThrough: Date;
+    gpuJobId: string;
+    projectId: string;
+    projectName: string;
+    projectSlug: string;
+    provider: string;
+    billingMode: UsageBillingMode;
+    status: string;
+    costDeltaMicrousd: bigint;
+    cumulativeCostMicrousd: bigint;
+    provenance: UsageCostProvenance;
+    confidence: UsageCostConfidence;
+    costSource: string | null;
+    rateCardVersion: string | null;
   }>;
   activity: Array<{
     id: string;
@@ -228,36 +259,40 @@ export async function getOrganizationUsageAnalytics(
       then 'previous'
     else 'other'
   end`;
+  // Totals include GPU job cost; resource-level lists below stay sandbox-only.
   const rows = (await db
     .select({
       date: sql<string>`(${providerCostSnapshots.measuredThrough} at time zone 'UTC')::date::text`,
       period: periodBucket,
-      sandboxId: sandboxes.publicId,
+      sandboxId: sql<string>`coalesce(${sandboxes.publicId}, ${gpuJobs.publicId})`,
       projectId: projects.publicId,
       projectName: projects.name,
       projectSlug: projects.slug,
       provider: providerCostSnapshots.provider,
       billingMode: providerCostSnapshots.billingMode,
-      status: sandboxes.status,
+      status: sql<string>`coalesce(${sandboxes.status}::text, ${gpuJobs.state})`,
       provenance: providerCostSnapshots.costProvenance,
       confidence: providerCostSnapshots.costConfidence,
       costSource: providerCostSnapshots.costSource,
       costMicrousd: sql<string>`coalesce(sum(${providerCostSnapshots.costDeltaMicrousd}), 0)::bigint`,
     })
     .from(providerCostSnapshots)
-    .innerJoin(sandboxes, eq(sandboxes.id, providerCostSnapshots.sandboxId))
+    .leftJoin(sandboxes, eq(sandboxes.id, providerCostSnapshots.sandboxId))
+    .leftJoin(gpuJobs, eq(gpuJobs.id, providerCostSnapshots.gpuJobId))
     .innerJoin(projects, eq(projects.id, providerCostSnapshots.projectId))
     .where(and(...filters))
     .groupBy(
       sql`1`,
       sql`2`,
       sandboxes.publicId,
+      gpuJobs.publicId,
       projects.publicId,
       projects.name,
       projects.slug,
       providerCostSnapshots.provider,
       providerCostSnapshots.billingMode,
       sandboxes.status,
+      gpuJobs.state,
       providerCostSnapshots.costProvenance,
       providerCostSnapshots.costConfidence,
       providerCostSnapshots.costSource,
@@ -323,6 +358,38 @@ export async function getOrganizationUsageAnalytics(
     .where(and(...activityFilters))
     .orderBy(desc(providerCostSnapshots.measuredThrough), desc(providerCostSnapshots.capturedAt))
     .limit(query.limit ?? 100);
+
+  // Sandbox status and ID filters cannot match GPU jobs.
+  const gpuJobActivityRows =
+    query.status || query.sandboxId
+      ? []
+      : await db
+          .select({
+            id: providerCostSnapshots.id,
+            measuredThrough: providerCostSnapshots.measuredThrough,
+            gpuJobId: gpuJobs.publicId,
+            projectId: projects.publicId,
+            projectName: projects.name,
+            projectSlug: projects.slug,
+            provider: providerCostSnapshots.provider,
+            billingMode: providerCostSnapshots.billingMode,
+            status: gpuJobs.state,
+            costDeltaMicrousd: providerCostSnapshots.costDeltaMicrousd,
+            cumulativeCostMicrousd: providerCostSnapshots.amountMicrousd,
+            provenance: providerCostSnapshots.costProvenance,
+            confidence: providerCostSnapshots.costConfidence,
+            costSource: providerCostSnapshots.costSource,
+            rateCardVersion: providerCostSnapshots.rateCardVersion,
+          })
+          .from(providerCostSnapshots)
+          .innerJoin(gpuJobs, eq(gpuJobs.id, providerCostSnapshots.gpuJobId))
+          .innerJoin(projects, eq(projects.id, providerCostSnapshots.projectId))
+          .where(and(...activityFilters))
+          .orderBy(
+            desc(providerCostSnapshots.measuredThrough),
+            desc(providerCostSnapshots.capturedAt),
+          )
+          .limit(query.limit ?? 100);
 
   const currentRows = rows.filter((row) => row.period === "current");
   const previousRows = rows.filter((row) => row.period === "previous");
@@ -442,6 +509,28 @@ export async function getOrganizationUsageAnalytics(
   for (const row of previousRows) {
     addCost(sandboxPrevious, row.sandboxId, toMicrousd(row.costMicrousd));
   }
+  const topResources = (prefix: "sbx_" | "gpj_") =>
+    [...sandboxCurrent.entries()]
+      .filter(([resourceId]) => resourceId.startsWith(prefix))
+      .map(([resourceId, costMicrousd]) => {
+        const detail = sandboxDetails.get(resourceId)!;
+        return {
+          resourceId,
+          projectId: detail.projectId,
+          projectName: detail.projectName,
+          projectSlug: detail.projectSlug,
+          provider: detail.provider,
+          billingMode: detail.billingMode,
+          status: publicStatus(detail.status),
+          costMicrousd,
+          previousCostMicrousd: sandboxPrevious.get(resourceId) ?? 0n,
+          provenance: detail.provenance,
+          confidence: detail.confidence,
+          costSource: detail.costSource,
+        };
+      })
+      .sort((left, right) => Number(right.costMicrousd - left.costMicrousd))
+      .slice(0, 10);
 
   const daily = eachUtcDay(from, through).map((date) => {
     const dayRows = currentRows.filter((row) => row.date === date);
@@ -522,26 +611,31 @@ export async function getOrganizationUsageAnalytics(
         };
       })
       .sort((left, right) => Number(right.costMicrousd - left.costMicrousd)),
-    topSandboxes: [...sandboxCurrent.entries()]
-      .map(([sandboxId, costMicrousd]) => {
-        const detail = sandboxDetails.get(sandboxId)!;
-        return {
-          sandboxId,
-          projectId: detail.projectId,
-          projectName: detail.projectName,
-          projectSlug: detail.projectSlug,
-          provider: detail.provider,
-          billingMode: detail.billingMode,
-          status: publicStatus(detail.status),
-          costMicrousd,
-          previousCostMicrousd: sandboxPrevious.get(sandboxId) ?? 0n,
-          provenance: detail.provenance,
-          confidence: detail.confidence,
-          costSource: detail.costSource,
-        };
-      })
-      .sort((left, right) => Number(right.costMicrousd - left.costMicrousd))
-      .slice(0, 10),
+    topSandboxes: topResources("sbx_").map(({ resourceId, ...item }) => ({
+      sandboxId: resourceId,
+      ...item,
+    })),
+    topGpuJobs: topResources("gpj_").map(({ resourceId, ...item }) => ({
+      gpuJobId: resourceId,
+      ...item,
+    })),
+    gpuJobActivity: gpuJobActivityRows.map((row) => ({
+      id: row.id,
+      measuredThrough: row.measuredThrough,
+      gpuJobId: row.gpuJobId,
+      projectId: row.projectId,
+      projectName: row.projectName,
+      projectSlug: row.projectSlug,
+      provider: row.provider,
+      billingMode: billingMode(row.billingMode),
+      status: row.status,
+      costDeltaMicrousd: row.costDeltaMicrousd,
+      cumulativeCostMicrousd: row.cumulativeCostMicrousd,
+      provenance: provenance(row.provenance),
+      confidence: confidence(row.confidence),
+      costSource: row.costSource,
+      rateCardVersion: row.rateCardVersion,
+    })),
     activity: activityRows.map((row) => ({
       id: row.id,
       measuredThrough: row.measuredThrough,

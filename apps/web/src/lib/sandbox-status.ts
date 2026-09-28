@@ -11,8 +11,10 @@ export type SandboxStatusCounts = {
 };
 
 function sandboxStatusGroup(state: string): keyof SandboxStatusCounts {
-  if (state === "failed" || state === "cleanup_failed") return "failed";
-  if (state === "paused" || state === "stopped") return "stopped";
+  if (state === "failed" || state === "cleanup_failed" || state === "timed_out") return "failed";
+  if (state === "paused" || state === "stopped" || state === "succeeded" || state === "cancelled") {
+    return "stopped";
+  }
   return "active";
 }
 

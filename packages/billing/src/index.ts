@@ -36,8 +36,11 @@ export {
 export {
   chargeUsageDelta,
   enforceSpendLimit,
+  MANAGED_GPU_FUNDING_WINDOW_SECONDS,
+  managedGpuFundingShortfall,
   organizationBalance,
   requirePositiveManagedBalance,
+  type ManagedGpuFundingShortfall,
   scheduleAutoTopupEvaluation,
 } from "./usage.js";
 export {

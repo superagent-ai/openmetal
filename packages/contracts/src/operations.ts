@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  GpuJobIdSchema,
   IsoDateTimeSchema,
   JsonObjectSchema,
   OperationIdSchema,
@@ -12,7 +13,10 @@ export const OperationTypeSchema = z.enum([
   "sandbox_pause",
   "sandbox_resume",
   "sandbox_destroy",
+  "gpu_job_create",
+  "gpu_job_cancel",
 ]);
+export const OperationResourceTypeSchema = z.enum(["sandbox", "gpu_job"]);
 export const OperationStateSchema = z.enum([
   "queued",
   "running",
@@ -34,8 +38,8 @@ export const OperationSchema = z.object({
   project_id: ProjectIdSchema,
   type: OperationTypeSchema,
   state: OperationStateSchema,
-  resource_type: z.literal("sandbox"),
-  resource_id: SandboxIdSchema,
+  resource_type: OperationResourceTypeSchema,
+  resource_id: z.union([SandboxIdSchema, GpuJobIdSchema]),
   retryable: z.boolean(),
   error: OperationErrorSchema.nullable(),
   created_at: IsoDateTimeSchema,
@@ -62,4 +66,5 @@ export const OperationEventSchema = z.object({
 export type Operation = z.infer<typeof OperationSchema>;
 export type OperationState = z.infer<typeof OperationStateSchema>;
 export type OperationType = z.infer<typeof OperationTypeSchema>;
+export type OperationResourceType = z.infer<typeof OperationResourceTypeSchema>;
 export type OperationEvent = z.infer<typeof OperationEventSchema>;

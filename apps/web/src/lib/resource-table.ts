@@ -30,6 +30,18 @@ export const SANDBOX_STATES = [
   "cleanup_pending",
   "cleanup_failed",
 ] as const;
+export const GPU_JOB_STATES = [
+  "requested",
+  "provisioning",
+  "provision_unknown",
+  "running",
+  "cancelling",
+  "succeeded",
+  "failed",
+  "timed_out",
+  "cancelled",
+] as const;
+export const RESOURCE_TYPES = ["sandbox", "gpu_job"] as const;
 
 export type ResourceSearchQualifierKey = (typeof RESOURCE_SEARCH_QUALIFIER_KEYS)[number];
 
@@ -44,6 +56,7 @@ export type ResourceTableSort = {
 export type ResourceTableRow = {
   id: string;
   type?: string;
+  gpu_label?: string;
   provider: string | null;
   state: string;
   created_at: string;
@@ -115,6 +128,10 @@ export function providerLabel(provider: string | null) {
 
 export function statusLabel(state: string) {
   return state.replaceAll("_", " ");
+}
+
+export function resourceTypeLabel(type: string | undefined) {
+  return type === "gpu_job" ? "GPU job" : "Sandbox";
 }
 
 export function normalizeProviderToken(value: string) {
@@ -383,7 +400,7 @@ export function resourceSearchQualifiers(options?: {
   }
 
   const statuses = new Map<string, string>();
-  for (const state of SANDBOX_STATES) {
+  for (const state of [...SANDBOX_STATES, ...GPU_JOB_STATES]) {
     statuses.set(state, statusLabel(state));
   }
   for (const option of options?.extraStatuses ?? []) {
@@ -393,7 +410,7 @@ export function resourceSearchQualifiers(options?: {
   return [
     {
       key: "provider",
-      description: "Sandbox provider",
+      description: "Resource provider",
       values: [...providers.entries()]
         .map(([value, label]) => ({ value, label }))
         .sort((left, right) => left.label.localeCompare(right.label, "en")),
@@ -408,7 +425,7 @@ export function resourceSearchQualifiers(options?: {
     {
       key: "type",
       description: "Resource type",
-      values: [{ value: "sandbox", label: "Sandbox" }],
+      values: RESOURCE_TYPES.map((value) => ({ value, label: resourceTypeLabel(value) })),
     },
   ];
 }
@@ -481,22 +498,25 @@ export function applyResourceTableState<T extends ResourceTableRow>(
   };
 }
 
-export function applySandboxCostUpdate<
+/** Applies a `sandbox.cost_updated` or `gpu_job.cost_updated` event to the matching row. */
+export function applyResourceCostUpdate<
   T extends { id: string; cost_microusd: string | null; cost_updated_at: string | null },
 >(rows: T[], data: Record<string, unknown>): T[] {
   const {
     sandbox_id: sandboxId,
+    gpu_job_id: gpuJobId,
     cost_microusd: costMicrousd,
     cost_updated_at: costUpdatedAt,
   } = data;
+  const resourceId = typeof sandboxId === "string" ? sandboxId : gpuJobId;
   if (
-    typeof sandboxId !== "string" ||
+    typeof resourceId !== "string" ||
     typeof costMicrousd !== "string" ||
     typeof costUpdatedAt !== "string"
   ) {
     return rows;
   }
-  const index = rows.findIndex((row) => row.id === sandboxId);
+  const index = rows.findIndex((row) => row.id === resourceId);
   const current = rows[index];
   if (!current) {
     return rows;
@@ -555,6 +575,8 @@ function rowMatchesSearch(row: ResourceTableRow, parsed: ResourceSearchQuery) {
   const haystack = [
     row.id,
     row.type ?? "sandbox",
+    resourceTypeLabel(row.type),
+    row.gpu_label ?? "",
     row.provider ?? "",
     providerLabel(row.provider),
     row.state,

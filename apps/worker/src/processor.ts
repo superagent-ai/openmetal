@@ -11,8 +11,6 @@ import {
   insertDomainEventAndBroadcast,
   postgresClientOptions,
   ownsOutboxJobLease,
-  operationEvents,
-  operations,
   outboxJobs,
   providerAttempts,
   providerCostSnapshots,
@@ -43,7 +41,29 @@ import {
   type SandboxProvider,
   type SandboxProviderName,
 } from "@openmetal/provider-core";
+import {
+  appendOperationEvent,
+  classifyProviderFailure,
+  safeError,
+  setOperationState,
+} from "./common.js";
 import { resolveWorkerConcurrency, type WorkerEnv } from "./env.js";
+import {
+  cancelGpuJob,
+  cleanupExpiredGpuJobLogs,
+  gpuJobSubmitIsReconciling,
+  isSignificantCostDrift,
+  monitorGpuJob,
+  reconcileGpuJobCosts,
+  recordTerminalGpuJobSubmitFailure,
+  scheduleGpuJobMaintenance,
+  scheduleMissingGpuJobWork,
+  submitGpuJob,
+  sweepOrphanedGpuJobs,
+  syncGpuJobCostJob,
+  type GpuJobHandlerResult,
+  type GpuJobProviders,
+} from "./gpu-jobs.js";
 import { JobLocks, type JobLockMode } from "./job-locks.js";
 import {
   deliverWebhookOnce,
@@ -128,95 +148,6 @@ function northflankBillingAvailableAt(measuredThrough: Date): Date {
   const hourMs = 60 * 60_000;
   const nextHour = (Math.floor(measuredThrough.getTime() / hourMs) + 1) * hourMs;
   return new Date(nextHour + 10 * 60_000);
-}
-
-function safeError(error: unknown): string {
-  if (error instanceof Error) {
-    return redactString(error.message.slice(0, 500));
-  }
-  return "unknown error";
-}
-
-async function appendOperationEvent(
-  db: MetalDb,
-  operationId: string,
-  type: string,
-  data: Record<string, unknown> = {},
-) {
-  const rows = await db
-    .select({ sequence: operationEvents.sequence })
-    .from(operationEvents)
-    .where(eq(operationEvents.operationId, operationId));
-  await db.insert(operationEvents).values({
-    operationId,
-    sequence: rows.reduce((max, row) => Math.max(max, row.sequence), 0) + 1,
-    type,
-    data,
-  });
-}
-
-async function setOperationState(
-  db: MetalDb,
-  operationId: string | undefined,
-  state: string,
-  error?: Record<string, unknown> | null,
-) {
-  if (!operationId) return;
-  const now = new Date();
-  const terminal = ["succeeded", "failed", "cancelled"].includes(state);
-  await db
-    .update(operations)
-    .set({
-      state,
-      error,
-      retryable: Boolean(error?.retryable),
-      updatedAt: now,
-      completedAt: terminal ? now : null,
-    })
-    .where(eq(operations.id, operationId));
-  await appendOperationEvent(db, operationId, terminal ? "completed" : "state_changed", { state });
-}
-
-function classifyProviderFailure(error: unknown): {
-  kind: string;
-  retryable: boolean;
-  fallbackSafe: boolean;
-  unknown: boolean;
-} {
-  if (error instanceof ProviderError) {
-    return {
-      kind: error.kind,
-      retryable: error.retryable,
-      fallbackSafe: ["capacity", "unavailable", "timeout_absent"].includes(error.kind),
-      unknown: error.kind === "unknown_outcome",
-    };
-  }
-  const message = safeError(error).toLowerCase();
-  if (/401|403|auth/.test(message)) {
-    return { kind: "provider_auth_error", retryable: false, fallbackSafe: false, unknown: false };
-  }
-  if (/429|capacity|quota/.test(message)) {
-    return {
-      kind: "provider_capacity_unavailable",
-      retryable: true,
-      fallbackSafe: true,
-      unknown: false,
-    };
-  }
-  if (
-    /timeout|abort|fetch failed|network|econn|enotfound|eai_again|socket|terminated/.test(message)
-  ) {
-    return {
-      kind: "provider_unknown_outcome",
-      retryable: true,
-      fallbackSafe: false,
-      unknown: true,
-    };
-  }
-  if (/500|502|503|unavailable/.test(message)) {
-    return { kind: "provider_unavailable", retryable: true, fallbackSafe: true, unknown: false };
-  }
-  return { kind: "provider_error", retryable: false, fallbackSafe: false, unknown: false };
 }
 
 async function scheduleCostSync(tx: MetalDb, sandboxId: string, availableAt: Date, final: boolean) {
@@ -2978,6 +2909,7 @@ type WorkerContext = {
   publisher: BroadcastPublisher;
   env: WorkerEnv;
   providers: SandboxProviders;
+  gpuProviders: GpuJobProviders;
   stripe: StripeGateway | null;
   logger: Logger;
   locks: JobLocks;
@@ -2994,12 +2926,14 @@ function createWorkerContext(
   env: WorkerEnv,
   providers: SandboxProviders,
   stripe: StripeGateway | null,
+  gpuProviders: GpuJobProviders,
 ): WorkerContext {
   return {
     db,
     publisher,
     env,
     providers,
+    gpuProviders,
     stripe,
     logger: createLogger({
       service: "worker",
@@ -3014,7 +2948,19 @@ function createWorkerContext(
 async function runMaintenance(db: MetalDb, env: WorkerEnv) {
   await scheduleExpiredEndpoints(db);
   await cleanupExpiredProcessEvents(db, env.WORKER_PROCESS_EVENT_RETENTION_MS);
+  await scheduleMissingGpuJobWork(db);
+  await cleanupExpiredGpuJobLogs(db, env.WORKER_GPU_JOB_LOG_RETENTION_MS);
+  if (
+    (env.WORKER_GPU_JOB_SWEEPS ?? env.METAL_ENVIRONMENT === "production") &&
+    Date.now() - lastGpuMaintenanceScheduledAt >= GPU_MAINTENANCE_SCHEDULE_MS
+  ) {
+    await scheduleGpuJobMaintenance(db);
+    lastGpuMaintenanceScheduledAt = Date.now();
+  }
 }
+
+const GPU_MAINTENANCE_SCHEDULE_MS = 60_000;
+let lastGpuMaintenanceScheduledAt = 0;
 
 async function claimWork(
   ctx: WorkerContext,
@@ -3056,6 +3002,14 @@ async function jobLock(
     case "billing.auto_topup.evaluate":
     case "billing.spend_limit.enforce":
       return { key: `organization:${payload.organization_id}`, mode: "exclusive" };
+    case "gpu_job.submit":
+    case "gpu_job.monitor":
+    case "gpu_job.cancel":
+    case "gpu_job.cost.sync":
+      return { key: `gpu_job:${payload.gpu_job_id}`, mode: "exclusive" };
+    case "gpu_job.orphan_sweep":
+    case "gpu_job.cost_reconcile":
+      return { key: payload.job_type, mode: "exclusive" };
     case "webhook.deliver":
       return { key: "webhook.deliver", mode: "shared", limit: ctx.env.WORKER_WEBHOOK_CONCURRENCY };
     case "realtime.broadcast":
@@ -3110,8 +3064,9 @@ export async function processOnce(
   env: WorkerEnv,
   providers: SandboxProviders = {},
   stripe: StripeGateway | null = null,
+  gpuProviders: GpuJobProviders = {},
 ): Promise<number> {
-  const ctx = createWorkerContext(db, publisher, env, providers, stripe);
+  const ctx = createWorkerContext(db, publisher, env, providers, stripe, gpuProviders);
   await runMaintenance(db, env);
   const work = await claimWork(ctx, env.WORKER_BATCH_SIZE);
   await runWithConcurrency(work, ctx.concurrency, (item) => dispatchJob(ctx, item));
@@ -3119,13 +3074,14 @@ export async function processOnce(
 }
 
 async function runJob(ctx: WorkerContext, job: ClaimedJob, guard: JobLeaseGuard) {
-  const { db, publisher, env, providers, stripe } = ctx;
+  const { db, publisher, env, providers, gpuProviders, stripe } = ctx;
   const child = ctx.logger.child({
     job_id: job.id,
     service: "worker",
     environment: env.METAL_ENVIRONMENT,
   });
   let payload: OutboxJobPayload | undefined;
+  let gpuResult: GpuJobHandlerResult = undefined;
   try {
     payload = OutboxJobPayloadSchema.parse(job.payload);
     if (payload.job_type === "realtime.broadcast") {
@@ -3156,6 +3112,59 @@ async function runJob(ctx: WorkerContext, job: ClaimedJob, guard: JobLeaseGuard)
       await destroySandbox(db, sandboxProvider, payload.sandbox_id, payload.operation_id);
     } else if (payload.job_type === "webhook.deliver") {
       throw new Error("webhook.deliver jobs are processed on the webhook path");
+    } else if (payload.job_type === "gpu_job.submit") {
+      gpuResult = await submitGpuJob(db, gpuProviders, payload.gpu_job_id, payload.operation_id, {
+        maxManagedGpusPerOrganization: env.WORKER_GPU_JOB_MAX_MANAGED_GPUS_PER_ORGANIZATION,
+        maxManagedGpus: env.WORKER_GPU_JOB_MAX_MANAGED_GPUS,
+      });
+    } else if (payload.job_type === "gpu_job.monitor") {
+      const gpuJobId = payload.gpu_job_id;
+      gpuResult = await monitorGpuJob(db, gpuProviders, gpuJobId, {
+        monitorIntervalMs: env.WORKER_GPU_JOB_MONITOR_MS,
+        onCostError: (error) =>
+          child.warn(
+            { job_id: job.id, gpu_job_id: gpuJobId, err: safeError(error) },
+            "GPU job interim cost sync failed",
+          ),
+      });
+    } else if (payload.job_type === "gpu_job.cancel") {
+      gpuResult = await cancelGpuJob(db, gpuProviders, {
+        gpuJobId: payload.gpu_job_id,
+        operationId: payload.operation_id,
+        reason: payload.reason,
+      });
+    } else if (payload.job_type === "gpu_job.cost.sync") {
+      await syncGpuJobCostJob(db, gpuProviders, payload.gpu_job_id, payload.final);
+    } else if (payload.job_type === "gpu_job.orphan_sweep") {
+      const { terminated } = await sweepOrphanedGpuJobs(db, gpuProviders, {
+        environment: env.METAL_ENVIRONMENT,
+      });
+      if (terminated.length > 0) {
+        child.warn(
+          { provider_resource_ids: terminated },
+          "terminated GPU job provider resources without a live job",
+        );
+      }
+    } else if (payload.job_type === "gpu_job.cost_reconcile") {
+      const results = await reconcileGpuJobCosts(db, gpuProviders, {
+        start: new Date(payload.window_start),
+        end: new Date(payload.window_end),
+      });
+      for (const result of results) {
+        const fields = {
+          provider: result.provider,
+          scope: result.scope,
+          window_start: payload.window_start,
+          provider_reported_microusd: result.reportedMicrousd.toString(),
+          metal_metered_microusd: result.meteredMicrousd.toString(),
+          drift_microusd: result.driftMicrousd.toString(),
+        };
+        if (isSignificantCostDrift(result)) {
+          child.error(fields, "GPU job cost reconciliation drift");
+        } else {
+          child.info(fields, "GPU job cost reconciliation");
+        }
+      }
     } else {
       const sandboxId = await runtimeSandboxId(db, payload);
       if (sandboxId) {
@@ -3199,17 +3208,34 @@ async function runJob(ctx: WorkerContext, job: ClaimedJob, guard: JobLeaseGuard)
         }
       }
     }
+    const rescheduleAt = gpuResult?.rescheduleAt;
     await db
       .update(outboxJobs)
-      .set({
-        status: "succeeded",
-        completedAt: new Date(),
-        updatedAt: new Date(),
-        lastError: null,
-        leaseOwner: null,
-        leaseExpiresAt: null,
-        leaseToken: null,
-      })
+      .set(
+        rescheduleAt
+          ? {
+              status: "pending",
+              attemptCount: 0,
+              availableAt: rescheduleAt,
+              // A recurring job joins the back of the queue so work queued
+              // behind it on the same lock, such as a cancel, is not starved.
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              lastError: null,
+              leaseOwner: null,
+              leaseExpiresAt: null,
+              leaseToken: null,
+            }
+          : {
+              status: "succeeded",
+              completedAt: new Date(),
+              updatedAt: new Date(),
+              lastError: null,
+              leaseOwner: null,
+              leaseExpiresAt: null,
+              leaseToken: null,
+            },
+      )
       .where(
         and(
           eq(outboxJobs.id, job.id),
@@ -3229,16 +3255,19 @@ async function runJob(ctx: WorkerContext, job: ClaimedJob, guard: JobLeaseGuard)
     const durableProvisionReconciliation =
       maxAttemptsReached &&
       payload &&
-      (payload.job_type === "sandbox.provision" || payload.job_type === "sandbox.reconcile") &&
-      (await db
-        .select({ status: sandboxes.status })
-        .from(sandboxes)
-        .where(eq(sandboxes.id, payload.sandbox_id))
-        .then((rows) => rows[0]?.status)) === "provision_unknown";
+      (((payload.job_type === "sandbox.provision" || payload.job_type === "sandbox.reconcile") &&
+        (await db
+          .select({ status: sandboxes.status })
+          .from(sandboxes)
+          .where(eq(sandboxes.id, payload.sandbox_id))
+          .then((rows) => rows[0]?.status)) === "provision_unknown") ||
+        (payload.job_type === "gpu_job.submit" &&
+          (await gpuJobSubmitIsReconciling(db, payload.gpu_job_id))));
     const terminal = maxAttemptsReached && !durableProvisionReconciliation;
     const retryDelayMs = durableProvisionReconciliation
       ? 5 * 60_000
-      : payload?.job_type === "sandbox.cost.sync" && payload.final
+      : (payload?.job_type === "sandbox.cost.sync" || payload?.job_type === "gpu_job.cost.sync") &&
+          payload.final
         ? 2 * 60_000
         : backoffMs(attempts, env.WORKER_BASE_BACKOFF_MS);
     if (
@@ -3247,6 +3276,14 @@ async function runJob(ctx: WorkerContext, job: ClaimedJob, guard: JobLeaseGuard)
       payload.job_type !== "realtime.broadcast" &&
       payload.job_type !== "webhook.deliver"
     ) {
+      if (payload.job_type === "gpu_job.submit") {
+        await recordTerminalGpuJobSubmitFailure(
+          db,
+          payload.gpu_job_id,
+          payload.operation_id,
+          error,
+        );
+      }
       await recordTerminalSandboxFailure(db, payload);
       await recordTerminalRuntimeFailure(db, payload, error, guard);
       if ("operation_id" in payload && payload.operation_id) {
@@ -3435,9 +3472,10 @@ export async function runWorkerLoop(
   env: WorkerEnv,
   signal: AbortSignal,
   providers: SandboxProviders = {},
+  gpuProviders: GpuJobProviders = {},
 ): Promise<void> {
   const stripe = env.STRIPE_SECRET_KEY ? createStripeGateway(env.STRIPE_SECRET_KEY) : null;
-  const ctx = createWorkerContext(db, publisher, env, providers, stripe);
+  const ctx = createWorkerContext(db, publisher, env, providers, stripe, gpuProviders);
   ctx.logger.info(
     { concurrency: ctx.concurrency, webhook_concurrency: env.WORKER_WEBHOOK_CONCURRENCY },
     "worker scheduler started",

@@ -42,6 +42,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { gpuJobHref } from "@/lib/gpu-jobs";
 import { paginateItems } from "@/lib/pagination";
 import type { UsageFilters, UsageRange } from "@/lib/usage-filters";
 
@@ -52,6 +53,15 @@ type ProjectOption = {
 };
 
 type UsageTab = "activity" | "providers" | "projects";
+
+type ActivityItem =
+  OrganizationUsage["activity"][number] | OrganizationUsage["gpu_job_activity"][number];
+
+function resourceActivity(usage: OrganizationUsage): ActivityItem[] {
+  return [...usage.activity, ...usage.gpu_job_activity].sort(
+    (left, right) => Date.parse(right.measured_through) - Date.parse(left.measured_through),
+  );
+}
 
 const providerLabels: Record<string, string> = {
   blaxel: "Blaxel",
@@ -183,7 +193,7 @@ function activityDate(value: string): string {
 }
 
 function histogram(
-  activity: OrganizationUsage["activity"],
+  activity: ActivityItem[],
   from: string,
   through: string,
 ): Array<{ timestamp: number; label: string; cost: number }> {
@@ -255,7 +265,13 @@ function FilterSubmenu({
   );
 }
 
-function ActivityTable({ activity }: { activity: OrganizationUsage["activity"] }) {
+function ActivityTable({
+  activity,
+  organizationSlug,
+}: {
+  activity: ActivityItem[];
+  organizationSlug: string;
+}) {
   const [page, setPage] = useState(1);
   const paged = paginateItems(activity, page, ACTIVITY_PAGE_SIZE);
 
@@ -266,6 +282,7 @@ function ActivityTable({ activity }: { activity: OrganizationUsage["activity"] }
           <TableHeader className="bg-muted/50">
             <TableRow>
               <TableHead>Date</TableHead>
+              <TableHead>Resource</TableHead>
               <TableHead>Provider</TableHead>
               <TableHead>Project</TableHead>
               <TableHead>Billing</TableHead>
@@ -276,7 +293,7 @@ function ActivityTable({ activity }: { activity: OrganizationUsage["activity"] }
           <TableBody>
             {paged.total === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-40 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-40 text-center text-muted-foreground">
                   No cost activity matches the selected range and filters.
                 </TableCell>
               </TableRow>
@@ -285,6 +302,18 @@ function ActivityTable({ activity }: { activity: OrganizationUsage["activity"] }
                 <TableRow key={item.id}>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     {activityDate(item.measured_through)}
+                  </TableCell>
+                  <TableCell>
+                    {"gpu_job_id" in item ? (
+                      <Link
+                        href={gpuJobHref(organizationSlug, item.project_slug, item.gpu_job_id)}
+                        className="hover:underline"
+                      >
+                        GPU job
+                      </Link>
+                    ) : (
+                      "Sandbox"
+                    )}
                   </TableCell>
                   <TableCell>
                     <ProviderName provider={item.provider} />
@@ -356,9 +385,10 @@ export function UsageView({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [tab, setTab] = useState<UsageTab>("activity");
+  const activity = useMemo(() => resourceActivity(usage), [usage]);
   const chartData = useMemo(
-    () => histogram(usage.activity, usage.period.from, usage.period.through),
-    [usage.activity, usage.period.from, usage.period.through],
+    () => histogram(activity, usage.period.from, usage.period.through),
+    [activity, usage.period.from, usage.period.through],
   );
   const activeFilterCount = [
     "project_id",
@@ -627,7 +657,8 @@ export function UsageView({
               usage.period.from,
               usage.period.through,
             ].join("\0")}
-            activity={usage.activity}
+            activity={activity}
+            organizationSlug={organizationSlug}
           />
         </div>
       ) : null}

@@ -23,6 +23,7 @@
     "@openmetal/db": "workspace:*",
     "@openmetal/events": "workspace:*",
     "@openmetal/logger": "workspace:*",
+    "@openmetal/provider-core": "workspace:*",
     "@supabase/supabase-js": "2.112.3",
     "drizzle-orm": "0.45.2",
     "fastify": "5.12.1",

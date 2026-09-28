@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ProjectResourcesTable } from "@/components/project-resources-table";
 import { requireOrganizationBySlug } from "@/lib/dashboard-organizations";
+import { listAllProjectGpuJobs } from "@/lib/gpu-jobs";
 import { requireMetalSession } from "@/lib/metal-server";
 import { dashboardPageMetadata } from "@/lib/page-metadata";
 
@@ -20,7 +21,7 @@ export async function generateMetadata({
   }
   return dashboardPageMetadata({
     title: project.name,
-    description: `Sandboxes and resources in ${project.name}.`,
+    description: `Sandboxes, GPU jobs, and other resources in ${project.name}.`,
     path: `/dashboard/${organization.slug}/projects/${project.slug}`,
   });
 }
@@ -38,12 +39,21 @@ export default async function ProjectPage({
   if (!project) {
     notFound();
   }
-  const { sandboxes } = await metal.sandboxes.list(project.id);
+  const [{ sandboxes }, gpuJobs] = await Promise.all([
+    metal.sandboxes.list(project.id),
+    listAllProjectGpuJobs(metal, project.id),
+  ]);
 
   return (
     <>
       <h1 className="sr-only">Resources</h1>
-      <ProjectResourcesTable projectId={project.id} sandboxes={sandboxes} />
+      <ProjectResourcesTable
+        organizationSlug={organization.slug}
+        projectId={project.id}
+        projectSlug={project.slug}
+        sandboxes={sandboxes}
+        gpuJobs={gpuJobs}
+      />
     </>
   );
 }

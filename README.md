@@ -4,7 +4,7 @@
 
 <h1 align="center">OpenMetal</h1>
 
-OpenMetal is the universal compute gateway for AI agents. This repository implements a hosted control plane that provisions CPU sandboxes, routes creation across supported compute providers, manages lifecycle operations, and bills managed usage.
+OpenMetal is the universal compute gateway for AI agents. This repository implements a hosted control plane that provisions CPU sandboxes and GPU jobs, routes creation across supported compute providers, manages lifecycle operations, and bills managed usage.
 
 ## Product model
 
@@ -17,14 +17,14 @@ OpenMetal is OpenRouter for cloud sandboxes and GPUs:
 - Customers pay OpenMetal; OpenMetal reconciles and pays providers.
 - The public API and TypeScript SDK hide provider-specific lifecycle, usage, and billing differences.
 
-The current provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Freestyle, Modal, Northflank, Prime Intellect, Runloop, and Vercel. Provider integrations remain behind one capability-oriented OpenMetal API; they are not separate customer-facing products.
+The current sandbox provider set is Blaxel, Cloudflare, CodeSandbox, Daytona, E2B, Freestyle, Modal, Northflank, Prime Intellect, Runloop, and Vercel. GPU jobs run on Modal. Provider integrations remain behind one capability-oriented OpenMetal API; they are not separate customer-facing products.
 
 ## Roadmap
 
 OpenMetal is expanding one portable compute interface in stages:
 
-- **Available now**: CPU sandboxes, lifecycle operations, processes, files, leased HTTP endpoints, provider routing, managed credits, BYOK, TypeScript SDK, CLI, and Agent Skill.
-- **Coming next**: GPU and accelerator workloads for training, inference, and computer use.
+- **Available now**: CPU sandboxes, lifecycle operations, processes, files, leased HTTP endpoints, provider routing, managed credits, BYOK, TypeScript SDK, CLI, and Agent Skill. GPU jobs run a container to completion on Modal GPUs with logs, secrets, and per-second metering.
+- **Coming next**: more GPU providers, long-lived GPU instances, and autoscaled GPU deployments for inference.
 - **Planned**: browser computers and persistent machines through the same API and capability model.
 
 ## Architecture

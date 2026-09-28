@@ -8,6 +8,7 @@ import {
   CreateOrganizationRequestSchema,
   ComputerActionRequestSchema,
   ComputerScreenshotRequestSchema,
+  CreateGpuJobRequestSchema,
   CreateProcessRequestSchema,
   CreateProjectApiKeyRequestSchema,
   CreateProjectRequestSchema,
@@ -17,8 +18,10 @@ import {
   CreateWebhookEndpointRequestSchema,
   DeleteOrganizationRequestSchema,
   DeleteFileRequestSchema,
+  GpuJobIdSchema,
   ListEventsQuerySchema,
   ListFilesRequestSchema,
+  ListGpuJobsQuerySchema,
   ListSandboxEndpointsQuerySchema,
   ListSandboxRecordingsQuerySchema,
   ListSandboxesQuerySchema,
@@ -111,6 +114,15 @@ import {
   startPaymentMethodSetup,
 } from "./billing.js";
 import { readOrganizationUsage } from "./usage.js";
+import {
+  createGpuJob,
+  getGpuJob,
+  gpuTypeCatalog,
+  listGpuJobLogEvents,
+  listGpuJobs,
+  requestGpuJobCancel,
+  serializeGpuJob,
+} from "./gpu-jobs.js";
 import {
   cancelProcess,
   createRecording,
@@ -312,7 +324,8 @@ function serializeSandbox(row: {
 function serializeOperation(row: {
   publicId: string;
   projectId: string;
-  sandboxId: string;
+  sandboxId: string | null;
+  gpuJobId?: string | null;
   type: string;
   state: string;
   retryable: boolean;
@@ -321,13 +334,16 @@ function serializeOperation(row: {
   updatedAt: Date;
   completedAt: Date | null;
 }) {
+  const resource = row.sandboxId
+    ? { type: "sandbox" as const, id: `sbx_${row.sandboxId.replaceAll("-", "")}` }
+    : { type: "gpu_job" as const, id: `gpj_${row.gpuJobId!.replaceAll("-", "")}` };
   return {
     id: row.publicId,
     project_id: `prj_${row.projectId.replaceAll("-", "")}`,
     type: row.type,
     state: row.state,
-    resource_type: "sandbox" as const,
-    resource_id: `sbx_${row.sandboxId.replaceAll("-", "")}`,
+    resource_type: resource.type,
+    resource_id: resource.id,
     retryable: row.retryable,
     error: row.error,
     created_at: row.createdAt.toISOString(),
@@ -1763,6 +1779,161 @@ export async function buildApp(
     },
   );
 
+  app.get(`/${API_VERSION}/gpu/types`, async () => gpuTypeCatalog());
+
+  async function requireProjectMember(request: {
+    headers: { authorization?: string };
+    params: unknown;
+  }) {
+    const principal = await requirePrincipal(request);
+    const projectId = ProjectIdSchema.parse((request.params as { project_id: string }).project_id);
+    const project = await getProject(db.db, principal.userId, projectId);
+    return { organizationId: project.organizationId, projectId: project.id };
+  }
+
+  app.get(`/${API_VERSION}/projects/:project_id/gpu-jobs`, async (request) => {
+    const scope = await requireProjectMember(request);
+    const parsed = ListGpuJobsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid GPU job list query", {
+        issues: parsed.error.issues,
+      });
+    }
+    const page = await listGpuJobs(db.db, { ...scope, ...parsed.data });
+    return { gpu_jobs: page.rows.map(serializeGpuJob), next_cursor: page.nextCursor };
+  });
+
+  app.get(`/${API_VERSION}/projects/:project_id/gpu-jobs/:gpu_job_id`, async (request) => {
+    const scope = await requireProjectMember(request);
+    const gpuJobId = GpuJobIdSchema.parse((request.params as { gpu_job_id: string }).gpu_job_id);
+    return serializeGpuJob(await getGpuJob(db.db, { ...scope, gpuJobId }));
+  });
+
+  app.post(
+    `/${API_VERSION}/projects/:project_id/gpu-jobs/:gpu_job_id/actions/cancel`,
+    async (request, reply) => {
+      const scope = await requireProjectMember(request);
+      const gpuJobId = GpuJobIdSchema.parse((request.params as { gpu_job_id: string }).gpu_job_id);
+      const mutation = await requestGpuJobCancel(db.db, { ...scope, gpuJobId });
+      const operation = serializeOperation(mutation.operation);
+      reply.header("location", `/${API_VERSION}/operations/${operation.id}`);
+      return reply.status(202).send({ gpu_job: serializeGpuJob(mutation.gpuJob), operation });
+    },
+  );
+
+  app.get(
+    `/${API_VERSION}/projects/:project_id/gpu-jobs/:gpu_job_id/logs`,
+    async (request, reply) => {
+      const scope = await requireProjectMember(request);
+      const gpuJobId = GpuJobIdSchema.parse((request.params as { gpu_job_id: string }).gpu_job_id);
+      const after = parseLastEventId(request.headers["last-event-id"]);
+      const batch = await listGpuJobLogEvents(db.db, { ...scope, gpuJobId, after });
+      reply.header("content-type", "text/event-stream");
+      reply.header("cache-control", "no-cache");
+      return serializeLogBatch(batch.events);
+    },
+  );
+
+  app.get(`/${API_VERSION}/gpu/jobs`, async (request) => {
+    const principal = await requireProjectScope(request);
+    const parsed = ListGpuJobsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid GPU job list query", {
+        issues: parsed.error.issues,
+      });
+    }
+    const page = await listGpuJobs(db.db, {
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+      cursor: parsed.data.cursor,
+      limit: parsed.data.limit,
+      state: parsed.data.state,
+    });
+    return { gpu_jobs: page.rows.map(serializeGpuJob), next_cursor: page.nextCursor };
+  });
+
+  app.post(`/${API_VERSION}/gpu/jobs`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
+    const parsed = CreateGpuJobRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError(422, "validation_error", "invalid GPU job payload", {
+        issues: parsed.error.issues.map(({ code, path, message }) => ({ code, path, message })),
+      });
+    }
+    const key = headerValue(request.headers["idempotency-key"]);
+    if (!key) {
+      throw new ApiError(400, "idempotency_key_required", "Idempotency-Key is required");
+    }
+    const result = await executeIdempotent(
+      db.db,
+      {
+        principalId: principal.keyId,
+        operation: `gpu_jobs.create:${principal.projectId}`,
+        key,
+        body: parsed.data,
+      },
+      async (tx) => {
+        const mutation = await createGpuJob(tx, {
+          organizationId: principal.organizationId,
+          projectId: principal.projectId,
+          actorId: principal.keyId,
+          request: parsed.data,
+        });
+        return {
+          status: 202,
+          body: {
+            gpu_job: serializeGpuJob(mutation.gpuJob),
+            operation: serializeOperation(mutation.operation),
+          },
+        };
+      },
+    );
+    const body = result.body as { operation?: { id?: unknown } };
+    if (typeof body.operation?.id === "string") {
+      reply.header("location", `/${API_VERSION}/operations/${body.operation.id}`);
+    }
+    return reply.status(result.status).send(result.body);
+  });
+
+  app.get(`/${API_VERSION}/gpu/jobs/:gpu_job_id`, async (request) => {
+    const principal = await requireProjectScope(request);
+    const gpuJobId = GpuJobIdSchema.parse((request.params as { gpu_job_id: string }).gpu_job_id);
+    return serializeGpuJob(
+      await getGpuJob(db.db, {
+        gpuJobId,
+        organizationId: principal.organizationId,
+        projectId: principal.projectId,
+      }),
+    );
+  });
+
+  app.post(`/${API_VERSION}/gpu/jobs/:gpu_job_id/actions/cancel`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
+    const gpuJobId = GpuJobIdSchema.parse((request.params as { gpu_job_id: string }).gpu_job_id);
+    const mutation = await requestGpuJobCancel(db.db, {
+      gpuJobId,
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+    });
+    const operation = serializeOperation(mutation.operation);
+    reply.header("location", `/${API_VERSION}/operations/${operation.id}`);
+    return reply.status(202).send({ gpu_job: serializeGpuJob(mutation.gpuJob), operation });
+  });
+
+  app.get(`/${API_VERSION}/gpu/jobs/:gpu_job_id/logs`, async (request, reply) => {
+    const principal = await requireProjectScope(request);
+    const gpuJobId = GpuJobIdSchema.parse((request.params as { gpu_job_id: string }).gpu_job_id);
+    const batch = await listGpuJobLogEvents(db.db, {
+      gpuJobId,
+      organizationId: principal.organizationId,
+      projectId: principal.projectId,
+      after: parseLastEventId(request.headers["last-event-id"]),
+    });
+    reply.header("content-type", "text/event-stream");
+    reply.header("cache-control", "no-cache");
+    return serializeLogBatch(batch.events);
+  });
+
   app.get(`/${API_VERSION}/operations/:operation_id`, async (request) => {
     const principal = await requireApiKeyPrincipal(request);
     const operationId = OperationIdSchema.parse(
@@ -1820,6 +1991,22 @@ export async function buildApp(
   });
 
   return { app, database: db };
+}
+
+function parseLastEventId(header: string | string[] | undefined): number {
+  if (header === undefined) return 0;
+  if (typeof header !== "string" || !/^\d+$/.test(header)) {
+    throw new ApiError(422, "validation_error", "Last-Event-ID must be an event sequence");
+  }
+  return Number(header);
+}
+
+function serializeLogBatch(events: Array<{ sequence: number; type: string }>): string {
+  return events
+    .map(
+      (event) => `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+    )
+    .join("");
 }
 
 function headerValue(value: string | string[] | undefined): string | undefined {

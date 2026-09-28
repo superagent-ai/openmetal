@@ -48,6 +48,7 @@ class FakeGpuJobProvider implements GpuJobProvider {
   listed: ProviderGpuJobListing[] = [];
   reported?: bigint;
   discoveredStart?: Date;
+  window?: { startedAt: Date | null; finishedAt: Date | null };
   logsError?: Error;
   initialStatus: ProviderGpuJobStatus = { state: "running" };
   submitError?: Error;
@@ -116,8 +117,9 @@ class FakeGpuJobProvider implements GpuJobProvider {
     }
   }
 
-  async startedAt(): Promise<Date | null> {
-    return this.discoveredStart ?? null;
+  async taskWindow() {
+    if (this.window) return this.window;
+    return this.discoveredStart ? { startedAt: this.discoveredStart, finishedAt: null } : null;
   }
 
   async listActiveJobs(): Promise<ProviderGpuJobListing[]> {
@@ -841,10 +843,21 @@ describe("worker GPU jobs", () => {
     const end = new Date(Date.now() + 60_000);
     const [metered] = await database.sql`
       select coalesce(sum(cost_delta_microusd), 0)::text as amount
-      from metal.provider_cost_snapshots
-      where gpu_job_id is not null and provider = 'modal' and billing_mode = 'managed'
-        and measured_through >= ${start.toISOString()}::timestamptz
-        and measured_through < ${end.toISOString()}::timestamptz
+      from metal.provider_cost_snapshots snapshots
+      join metal.gpu_jobs jobs on jobs.id = snapshots.gpu_job_id
+      where jobs.provider_organization_id = 'fake-app'
+        and snapshots.provider = 'modal' and snapshots.billing_mode = 'managed'
+        and snapshots.measured_through >= ${start.toISOString()}::timestamptz
+        and snapshots.measured_through < ${end.toISOString()}::timestamptz
+    `;
+    // Usage from another Modal app in the same window is not part of this report.
+    const other = await createJob(scope);
+    await runUntil(provider, other.id, (row) => row.state === "running");
+    await expireCostSync(other.id);
+    provider.jobs.get(other.providerResourceId)!.costMicrousd = 90_000n;
+    await runUntil(provider, other.id, (row) => row.provider_cost_microusd === "90000");
+    await database.sql`
+      update metal.gpu_jobs set provider_organization_id = 'other-app' where id = ${other.id}
     `;
     provider.reported = BigInt(String(metered?.amount)) + 700_000n;
     const [result] = await reconcileGpuJobCosts(database.db, { modal: provider }, { start, end });
@@ -966,6 +979,9 @@ describe("worker GPU jobs", () => {
     await database.sql`
       update metal.gpu_jobs set finished_at = now() - interval '11 minutes' where id = ${created.id}
     `;
+    // Modal's own task window was 5 seconds, below the metered 8,000.
+    const taskStart = new Date(Date.now() - 20_000);
+    provider.window = { startedAt: taskStart, finishedAt: new Date(taskStart.getTime() + 5_000) };
     await syncGpuJobCostJob(database.db, { modal: provider }, created.id, true);
     const settled = await job(created.id);
     expect(settled).toMatchObject({
@@ -1049,5 +1065,32 @@ describe("worker GPU jobs", () => {
     provider.logsError = undefined;
     const drained = await runUntil(provider, created.id, (row) => row.logs_complete === true);
     expect(Number(drained.log_bytes)).toBeGreaterThan(0);
+  });
+
+  it("never settles below the provider's task window when its meter undercounts", async () => {
+    const scope = await seedOrganization();
+    const created = await createJob(scope, { estimatedHourlyMicrousd: ELAPSED_RATE });
+    const provider = new FakeGpuJobProvider();
+    await runUntil(provider, created.id, (row) => row.state === "running");
+    await startedSecondsAgo(created.id, 30);
+    const fake = provider.jobs.get(created.providerResourceId)!;
+    fake.costMicrousd = 2_000n;
+    fake.status = { state: "succeeded", exitCode: 0 };
+    await runUntil(provider, created.id, (row) => row.state === "succeeded");
+    await database.sql`
+      update metal.gpu_jobs set finished_at = now() - interval '11 minutes' where id = ${created.id}
+    `;
+    const taskStart = new Date(Date.now() - 60_000);
+    provider.window = { startedAt: taskStart, finishedAt: new Date(taskStart.getTime() + 15_000) };
+    await syncGpuJobCostJob(database.db, { modal: provider }, created.id, true);
+    expect(await job(created.id)).toMatchObject({
+      provider_cost_microusd: "15000",
+      customer_charged_microusd: "15000",
+    });
+    const [snapshot] = await database.sql`
+      select cost_source from metal.provider_cost_snapshots
+      where gpu_job_id = ${created.id} order by captured_at desc limit 1
+    `;
+    expect(snapshot?.cost_source).toBe("metal-gpu-job-provider-task-time");
   });
 });

@@ -46,9 +46,11 @@ through the sandbox lifecycle or API.
 - Modal's usage meter lags by a minute or more, so managed cost is charged from elapsed container
   time at the job's reserved size and region multiplier (its stored hourly estimate) whenever that
   exceeds the metered amount. `max_cost_usd` is checked against the elapsed-time cost on every
-  monitor pass. The settlement ten minutes after completion uses the metered amount alone and posts
-  a correction, so customers pay metered usage in the end and CPU or memory bursts above the
-  reservation are still billed.
+  monitor pass. The settlement ten minutes after completion charges the higher of the metered amount
+  and Modal's own task window (container start to finish from `sandboxList`) at the same rate, and
+  posts a correction. The floor exists because `sandboxGetResourceUsage` undercounted a 114-second
+  job as 8 GPU seconds in end-to-end testing, while matching container time for others; CPU or
+  memory bursts above the reservation are still billed through the metered amount.
 - Organization usage totals include GPU job cost, and the usage contract lists GPU jobs in
   `top_gpu_jobs` and `gpu_job_activity`.
 - A job is `provisioning` from submission until the provider places a container, and `running`

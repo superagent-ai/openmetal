@@ -205,7 +205,8 @@ describe.skipIf(!enabled)("live Modal GPU jobs", () => {
         from metal.usage_charges where gpu_job_id = ${created.id}
       `;
       expect(charge?.total).toBe(String(costed.provider_cost_microusd));
-      // Settlement replaces the elapsed-time charge with Modal's metered usage.
+      // Settlement replaces the elapsed-time charge with Modal's metered usage,
+      // or with Modal's task window when the meter reports less.
       await database.sql`
         update metal.gpu_jobs set finished_at = now() - interval '11 minutes'
         where id = ${created.id}
@@ -213,11 +214,13 @@ describe.skipIf(!enabled)("live Modal GPU jobs", () => {
       await syncGpuJobCostJob(database.db, providers, created.id, true);
       const settled = await row(created.id);
       const [snapshot] = await database.sql`
-        select cost_provenance, raw_payload from metal.provider_cost_snapshots
+        select cost_source from metal.provider_cost_snapshots
         where gpu_job_id = ${created.id} order by captured_at desc limit 1
       `;
-      expect(snapshot?.cost_provenance).toBe("provider_metered");
-      expect(snapshot?.raw_payload).toMatchObject({ priceMultiplierBps: 11_500 });
+      expect([
+        "modal-gpu-sandbox-resource-usage-published-rate-card",
+        "metal-gpu-job-provider-task-time",
+      ]).toContain(snapshot?.cost_source);
       const [settledCharge] = await database.sql`
         select coalesce(sum(customer_charge_microusd), 0)::text as total
         from metal.usage_charges where gpu_job_id = ${created.id}

@@ -25,6 +25,7 @@ import {
   type ProviderGpuJobRegistryAuth,
   type ProviderGpuJobStatus,
   type ProviderGpuJobSubmitInput,
+  type ProviderGpuJobTaskWindow,
   type ProviderReportedCost,
   type ProviderSandboxCost,
 } from "@openmetal/provider-core";
@@ -499,11 +500,11 @@ export class ModalGpuJobProvider implements GpuJobProvider {
     }
   }
 
-  async startedAt(input: {
+  async taskWindow(input: {
     providerResourceId: string;
     metalGpuJobId: string;
     signal?: AbortSignal;
-  }): Promise<Date | null> {
+  }): Promise<ProviderGpuJobTaskWindow | null> {
     const app = await withDeadline(
       this.client.apps.fromName(this.appName, { environment: this.environment }),
       input.signal,
@@ -520,9 +521,13 @@ export class ModalGpuJobProvider implements GpuJobProvider {
       input.signal,
       this.requestTimeoutMs,
     );
-    const startedAt = response.sandboxes.find((info) => info.id === input.providerResourceId)
-      ?.taskInfo?.startedAt;
-    return startedAt ? new Date(startedAt * 1_000) : null;
+    const task = response.sandboxes.find((info) => info.id === input.providerResourceId)?.taskInfo;
+    if (!task) return null;
+    // Modal reports seconds since the epoch, with 0 for times not reached yet.
+    return {
+      startedAt: task.startedAt ? new Date(task.startedAt * 1_000) : null,
+      finishedAt: task.finishedAt ? new Date(task.finishedAt * 1_000) : null,
+    };
   }
 
   async listActiveJobs(signal?: AbortSignal): Promise<ProviderGpuJobListing[]> {
@@ -578,11 +583,22 @@ export class ModalGpuJobProvider implements GpuJobProvider {
     to: Date;
     signal?: AbortSignal;
   }): Promise<ProviderReportedCost> {
-    const app = await withDeadline(
-      this.client.apps.fromName(this.appName, { environment: this.environment }),
-      input.signal,
-      this.requestTimeoutMs,
-    );
+    let app: { appId: string };
+    try {
+      app = await withDeadline(
+        this.client.apps.fromName(this.appName, { environment: this.environment }),
+        input.signal,
+        this.requestTimeoutMs,
+      );
+    } catch (error) {
+      // The app is created by the first job, so a new deployment has billed nothing yet.
+      if (!isNotFound(error)) throw error;
+      return {
+        amountMicrousd: 0n,
+        scope: `app:${this.appName}`,
+        raw: { appName: this.appName, appMissing: true, intervals: 0 },
+      };
+    }
     const items = this.client.cpClient.workspaceBillingReport(
       {
         startTimestamp: input.from,

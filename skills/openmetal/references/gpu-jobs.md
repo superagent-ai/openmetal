@@ -63,7 +63,7 @@ Log batches contain `stdout`, `stderr`, and `truncated` events with base64 data 
 
 ## Billing
 
-Managed jobs pay the provider's published per-second rates with no markup: per-GPU rate times GPU seconds, plus CPU and memory, times the region multiplier. `pricing.estimated_hourly_cost_usd` shows the expected rate. A managed create returns `402 insufficient_credits` with `details.required_usd` unless the balance covers 15 minutes of the organization's managed GPU jobs; each organization runs at most 8 managed GPUs at once. Cost is charged every 30 seconds from elapsed container time and settles to the provider's metered usage 10 minutes after the job finishes, which can move it slightly. `max_cost_usd` is checked every few seconds against elapsed time, so the job stops close to the limit.
+Managed jobs pay the provider's published per-second rates with no markup: per-GPU rate times GPU seconds, plus CPU and memory, times the region multiplier. `pricing.estimated_hourly_cost_usd` shows the expected rate. A managed create returns `402 insufficient_credits` with `details.required_usd` unless the balance covers 15 minutes of the organization's managed GPU jobs; each organization runs at most 8 managed GPUs at once. Cost is charged every 30 seconds from elapsed container time and settles 10 minutes after the job finishes to the provider's metered usage, never below the provider's recorded container time, which can move it slightly. `max_cost_usd` is checked every few seconds against elapsed time, so the job stops close to the limit.
 
 ## Rules
 

@@ -1193,16 +1193,9 @@ async function finalizeGpuJob(
   if (!job || isTerminal(job.state)) return { logsComplete: true };
   const outcome = terminalOutcome(job, status);
   // Short jobs can start and exit between two monitor passes.
-  const discoveredStart =
-    !job.startedAt && job.providerResourceId && provider.startedAt
-      ? await provider
-          .startedAt({
-            providerResourceId: job.providerResourceId,
-            metalGpuJobId: job.publicId,
-            signal: AbortSignal.timeout(PROVIDER_CALL_TIMEOUT_MS),
-          })
-          .catch(() => null)
-      : null;
+  const discoveredStart = job.startedAt
+    ? null
+    : ((await providerTaskWindow(provider, job))?.startedAt ?? null);
   let finished: GpuJobRow | undefined;
   await withTransaction(db, async (tx) => {
     const now = new Date();
@@ -1431,35 +1424,49 @@ export async function cancelGpuJob(
  * region multiplier. GPU time, most of the bill, is priced exactly; CPU and
  * memory beyond the reservation only show up in the provider's meter.
  */
+function costBetween(hourlyMicrousd: bigint, from: Date, to: Date): bigint {
+  const elapsedMs = BigInt(Math.max(0, to.getTime() - from.getTime()));
+  return (hourlyMicrousd * elapsedMs + 1_800_000n) / 3_600_000n;
+}
+
 export function elapsedCostMicrousd(
   job: Pick<GpuJobRow, "startedAt" | "estimatedHourlyMicrousd">,
   through: Date,
 ): bigint | null {
   if (!job.startedAt || job.estimatedHourlyMicrousd <= 0n) return null;
-  const elapsedMs = BigInt(Math.max(0, through.getTime() - job.startedAt.getTime()));
-  return (job.estimatedHourlyMicrousd * elapsedMs + 1_800_000n) / 3_600_000n;
+  return costBetween(job.estimatedHourlyMicrousd, job.startedAt, through);
+}
+
+async function providerTaskWindow(provider: GpuJobProvider, job: GpuJobRow) {
+  if (!provider.taskWindow || !job.providerResourceId) return null;
+  return provider
+    .taskWindow({
+      providerResourceId: job.providerResourceId,
+      metalGpuJobId: job.publicId,
+      signal: AbortSignal.timeout(PROVIDER_CALL_TIMEOUT_MS),
+    })
+    .catch(() => null);
 }
 
 function elapsedCost(
   job: GpuJobRow,
   provider: GpuJobProvider,
   metered: ProviderSandboxCost | null,
-  through: Date,
+  window: { from: Date | null; to: Date; source: string },
 ): ProviderSandboxCost | null {
-  const amountMicrousd = elapsedCostMicrousd(job, through);
-  if (amountMicrousd === null) return null;
+  if (!window.from || job.estimatedHourlyMicrousd <= 0n) return null;
   return {
-    amountMicrousd,
+    amountMicrousd: costBetween(job.estimatedHourlyMicrousd, window.from, window.to),
     providerOrganizationId:
       metered?.providerOrganizationId ?? job.providerOrganizationId ?? provider.name,
-    measuredThrough: through,
+    measuredThrough: job.finishedAt ?? window.to,
     provenance: "estimated_rate_card",
     confidence: "medium",
-    source: "metal-gpu-job-elapsed-time",
+    source: window.source,
     rateCardVersion: job.rateCardVersion ?? undefined,
     raw: {
-      startedAt: job.startedAt?.toISOString(),
-      through: through.toISOString(),
+      from: window.from.toISOString(),
+      to: window.to.toISOString(),
       estimatedHourlyMicrousd: job.estimatedHourlyMicrousd.toString(),
       meteredMicrousd: metered?.amountMicrousd.toString() ?? null,
     },
@@ -1483,8 +1490,8 @@ export async function syncGpuJobCost(
   if (!job.providerResourceId) return;
   const measuredAt = new Date();
   const measuredThrough = job.finishedAt ?? measuredAt;
-  // The last settlement trusts the provider's meter alone; before it, the
-  // elapsed-time estimate covers the lag in the provider's usage reporting.
+  // The last settlement waits for the provider's meter to catch up and may
+  // correct the charge down, but never below the provider's task window.
   const settling = isLastSettlement(job, final, measuredAt);
   let metered: ProviderSandboxCost | null;
   try {
@@ -1502,7 +1509,22 @@ export async function syncGpuJobCost(
     if (settling || elapsedCostMicrousd(job, measuredThrough) === null) throw error;
     metered = null;
   }
-  const estimated = settling ? null : elapsedCost(job, provider, metered, measuredThrough);
+  // Before settlement, bill elapsed time as Metal observed it. At settlement,
+  // Modal's own task window is a floor: its usage meter can undercount.
+  const window = settling ? await providerTaskWindow(provider, job) : null;
+  const estimated = settling
+    ? elapsedCost(job, provider, metered, {
+        from: window?.startedAt ?? job.startedAt,
+        to: window?.finishedAt ?? measuredThrough,
+        source: window?.finishedAt
+          ? "metal-gpu-job-provider-task-time"
+          : "metal-gpu-job-elapsed-time",
+      })
+    : elapsedCost(job, provider, metered, {
+        from: job.startedAt,
+        to: measuredThrough,
+        source: "metal-gpu-job-elapsed-time",
+      });
   const cost =
     estimated && (!metered || estimated.amountMicrousd > metered.amountMicrousd)
       ? estimated
@@ -1809,9 +1831,11 @@ export async function reconcileGpuJobCosts(
         amount: sql<string>`coalesce(sum(${providerCostSnapshots.costDeltaMicrousd}), 0)::text`,
       })
       .from(providerCostSnapshots)
+      .innerJoin(gpuJobs, eq(gpuJobs.id, providerCostSnapshots.gpuJobId))
       .where(
         and(
-          isNotNull(providerCostSnapshots.gpuJobId),
+          // Only jobs in the provider scope the report covers, such as one Modal app.
+          eq(gpuJobs.providerOrganizationId, reported.scope),
           eq(providerCostSnapshots.provider, provider.name),
           eq(providerCostSnapshots.billingMode, "managed"),
           gte(providerCostSnapshots.measuredThrough, window.start),

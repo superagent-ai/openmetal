@@ -602,7 +602,7 @@ describe("ModalGpuJobProvider", () => {
     expect(modalUsdToMicrousd("12")).toBe(12_000_000n);
   });
 
-  it("tags Sandboxes with the Metal environment and finds a finished task's start time", async () => {
+  it("tags Sandboxes with the Metal environment and reads a task's start and finish", async () => {
     const { client } = fakeClient();
     const provider = new ModalGpuJobProvider({
       tokenId: "id",
@@ -618,12 +618,15 @@ describe("ModalGpuJobProvider", () => {
     client.cpClient.sandboxList.mockResolvedValueOnce({
       sandboxes: [
         { id: "sb-other", taskInfo: { startedAt: 1 } },
-        { id: "sb-1", taskInfo: { startedAt: 1_790_530_000.5 } },
+        { id: "sb-1", taskInfo: { startedAt: 1_790_530_000.5, finishedAt: 1_790_530_114.25 } },
       ],
     });
     await expect(
-      provider.startedAt({ providerResourceId: "sb-1", metalGpuJobId: "gpj_1" }),
-    ).resolves.toEqual(new Date(1_790_530_000_500));
+      provider.taskWindow({ providerResourceId: "sb-1", metalGpuJobId: "gpj_1" }),
+    ).resolves.toEqual({
+      startedAt: new Date(1_790_530_000_500),
+      finishedAt: new Date(1_790_530_114_250),
+    });
     expect(client.cpClient.sandboxList).toHaveBeenLastCalledWith(
       expect.objectContaining({
         includeFinished: true,
@@ -634,7 +637,7 @@ describe("ModalGpuJobProvider", () => {
       sandboxes: [{ id: "sb-1", taskInfo: undefined }],
     });
     await expect(
-      provider.startedAt({ providerResourceId: "sb-1", metalGpuJobId: "gpj_1" }),
+      provider.taskWindow({ providerResourceId: "sb-1", metalGpuJobId: "gpj_1" }),
     ).resolves.toBeNull();
   });
 
@@ -652,5 +655,19 @@ describe("ModalGpuJobProvider", () => {
     expect(parseResourceUsage({ cpuCoreNanosecs: -1, memGibNanosecs: 0, gpuNanosecs: 0 })).toBe(
       undefined,
     );
+  });
+
+  it("reports no billed cost before the managed app has been created", async () => {
+    const { client } = fakeClient();
+    client.apps.fromName.mockRejectedValueOnce(new NotFoundError("App 'metal-gpu-jobs' not found"));
+    const provider = new ModalGpuJobProvider({
+      tokenId: "id",
+      tokenSecret: "secret",
+      client: client as never,
+    });
+    await expect(
+      provider.reportedCost({ from: new Date(0), to: new Date(3_600_000) }),
+    ).resolves.toMatchObject({ amountMicrousd: 0n, scope: "app:metal-gpu-jobs" });
+    expect(client.cpClient.workspaceBillingReport).not.toHaveBeenCalled();
   });
 });

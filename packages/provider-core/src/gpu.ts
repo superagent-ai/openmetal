@@ -299,6 +299,11 @@ export type ProviderGpuJobListing = {
   createdAt: Date;
 };
 
+export type ProviderGpuJobTaskWindow = {
+  startedAt: Date | null;
+  finishedAt: Date | null;
+};
+
 export type ProviderReportedCost = {
   amountMicrousd: bigint;
   /** Provider-side scope the amount covers, such as an app ID. */
@@ -328,14 +333,15 @@ export interface GpuJobProvider {
   cancel(providerResourceId: string, signal?: AbortSignal): Promise<void>;
   getCost(input: ProviderGpuJobCostInput): Promise<ProviderSandboxCost | null>;
   /**
-   * When the container started, for jobs that finished before the monitor saw
-   * them running. Null when the provider never started one.
+   * When the provider's container started and stopped. Settlement never bills
+   * less than this window, and it supplies the start of jobs that finished
+   * before the monitor saw them running.
    */
-  startedAt?(input: {
+  taskWindow?(input: {
     providerResourceId: string;
     metalGpuJobId: string;
     signal?: AbortSignal;
-  }): Promise<Date | null>;
+  }): Promise<ProviderGpuJobTaskWindow | null>;
   /** Lists provider resources that are still running, so leaked ones can be terminated. */
   listActiveJobs?(signal?: AbortSignal): Promise<ProviderGpuJobListing[]>;
   /** The provider's own billed amount for Metal's jobs in a closed time window. */

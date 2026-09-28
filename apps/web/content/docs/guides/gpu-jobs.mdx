@@ -313,7 +313,8 @@ While a job runs, OpenMetal charges it every 30 seconds for the time its contain
 requested size and region multiplier, without waiting for the provider's usage report. When the
 provider's metered usage is higher, for example because the job used more CPU or memory than it
 reserved, the metered amount is charged instead. Ten minutes after the job finishes, the charge is
-settled to the provider's metered usage, which can correct it up or down slightly. The job's
+settled to the provider's metered usage, but never below the time the provider recorded the
+container running. Settlement can move the cost slightly up or down. The job's
 `cost_microusd` shows the running total, and the charges appear on the Usage page.
 
 `max_cost_usd` is checked against the elapsed-time cost every few seconds, so a job is stopped close

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import {
   autoTopupAttempts,
   autoTopupPolicies,
@@ -509,8 +509,17 @@ export async function recordStripeEvent(
 }
 
 export async function getBillingSummary(tx: MetalDb, organizationId: string) {
-  const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
-  const [account, policyRows, purchases, entries, totalRows] = await Promise.all([
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const weekStart = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() - ((now.getUTCDay() + 6) % 7),
+    ),
+  );
+  const nextWeekStart = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1_000);
+  const [account, policyRows, purchases, entries, weeklyActivity, totalRows] = await Promise.all([
     getBillingAccount(tx, organizationId),
     tx.select().from(autoTopupPolicies).where(eq(autoTopupPolicies.organizationId, organizationId)),
     tx
@@ -540,6 +549,21 @@ export async function getBillingSummary(tx: MetalDb, organizationId: string) {
       .limit(25),
     tx
       .select({
+        date: sql<string>`to_char(${ledgerEntries.createdAt} at time zone 'UTC', 'YYYY-MM-DD')`,
+        amountMicrousd: sql<bigint>`sum(abs(${ledgerEntries.amountMicrousd}))`,
+      })
+      .from(ledgerEntries)
+      .where(
+        and(
+          eq(ledgerEntries.organizationId, organizationId),
+          eq(ledgerEntries.account, "customer_credits"),
+          gte(ledgerEntries.createdAt, weekStart),
+          lt(ledgerEntries.createdAt, nextWeekStart),
+        ),
+      )
+      .groupBy(sql`to_char(${ledgerEntries.createdAt} at time zone 'UTC', 'YYYY-MM-DD')`),
+    tx
+      .select({
         total: sql<bigint>`coalesce(sum(${creditPurchases.creditMicrousd}), 0)`,
       })
       .from(creditPurchases)
@@ -560,6 +584,7 @@ export async function getBillingSummary(tx: MetalDb, organizationId: string) {
     policy,
     purchases,
     entries,
+    weeklyActivity,
     autoTopupMonthCreditMicrousd: toMicrousd(total),
   };
 }

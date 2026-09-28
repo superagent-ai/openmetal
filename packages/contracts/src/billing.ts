@@ -96,6 +96,12 @@ export const OrganizationBillingSchema = z.object({
   auto_topup: AutoTopupPolicySchema,
   purchases: z.array(BillingPurchaseSchema),
   ledger: z.array(BillingLedgerEntrySchema),
+  weekly_activity: z.array(
+    z.object({
+      date: z.iso.date(),
+      amount_microusd: z.string(),
+    }),
+  ),
 });
 export type OrganizationBilling = z.infer<typeof OrganizationBillingSchema>;
 

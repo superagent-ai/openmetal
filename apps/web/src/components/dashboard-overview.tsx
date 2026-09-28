@@ -254,11 +254,9 @@ export function DashboardOverview({
   const sandboxCounts = summarizeSandboxStatuses(sandboxes);
   const sandboxActivity = sandboxStatusesByDate(sandboxes, weekDates);
   const creditBarColor = billing.auto_topup.enabled ? legendColors[0] : legendColors[1];
-  const creditsByDate = new Map<string, number>();
-  for (const entry of billing.ledger) {
-    const date = entry.created_at.slice(0, 10);
-    creditsByDate.set(date, (creditsByDate.get(date) ?? 0) + Math.abs(Number(entry.amount_usd)));
-  }
+  const creditsByDate = new Map(
+    billing.weekly_activity.map((day) => [day.date, Number(day.amount_microusd) / 1_000_000]),
+  );
   const creditActivity = weekDates.map((date) => creditsByDate.get(date) ?? 0);
   const navigation = [
     {

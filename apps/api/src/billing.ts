@@ -32,7 +32,8 @@ export function serializeBillingSummary(
   summary: Awaited<ReturnType<typeof getBillingSummary>>,
   canManage: boolean,
 ): OrganizationBilling {
-  const { account, policy, purchases, entries, autoTopupMonthCreditMicrousd } = summary;
+  const { account, policy, purchases, entries, weeklyActivity, autoTopupMonthCreditMicrousd } =
+    summary;
   return {
     organization_id: account.organizationId,
     balance_microusd: account.balanceMicrousd.toString(),
@@ -69,6 +70,10 @@ export function serializeBillingSummary(
       amount_usd: formatMicrousdUsd(entry.amountMicrousd),
       description: entry.description,
       created_at: entry.createdAt.toISOString(),
+    })),
+    weekly_activity: weeklyActivity.map((day) => ({
+      date: day.date,
+      amount_microusd: day.amountMicrousd.toString(),
     })),
   };
 }

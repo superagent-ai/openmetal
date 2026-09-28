@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ZodError } from "zod";
-import { FakeStripeGateway, grantCredits } from "@openmetal/billing";
+import { FakeStripeGateway, grantCredits, postLedgerTransaction } from "@openmetal/billing";
 import { createDatabase, withTransaction } from "@openmetal/db";
 import { parseCursor, serializeCursor } from "@openmetal/events";
 import { createConfirmedUser, deleteUser, loadTestEnv } from "@openmetal/testkit";
@@ -422,6 +422,7 @@ describe("metal api integration", () => {
       ownerClient.billing.get(second.id),
     ]);
     expect(balances.map((billing) => billing.balance_usd).sort()).toEqual(["0.00", "500.00"]);
+    expect(balances.find((billing) => billing.balance_usd === "0.00")?.weekly_activity).toEqual([]);
 
     const [grantCounts] = await database.sql`
       select
@@ -1451,6 +1452,32 @@ describe("metal api integration", () => {
     expect(replay.statusCode).toBe(200);
     const billed = await ownerClient.billing.get(organization.id);
     expect(billed.balance_usd).toBe("600.00");
+    expect(billed.weekly_activity).toContainEqual({
+      date: new Date().toISOString().slice(0, 10),
+      amount_microusd: "600000000",
+    });
+    for (let index = 0; index < 30; index += 1) {
+      await withTransaction(database.db, (tx) =>
+        postLedgerTransaction(tx, {
+          organizationId: organization.id,
+          kind: "adjustment",
+          referenceType: "test",
+          referenceId: crypto.randomUUID(),
+          description: "Test credit activity",
+          actorId: owner.user.id,
+          lines: [
+            { account: "customer_credits", amountMicrousd: 1_000_000n },
+            { account: "platform_clearing", amountMicrousd: -1_000_000n },
+          ],
+        }),
+      );
+    }
+    const busyBilling = await ownerClient.billing.get(organization.id);
+    expect(busyBilling.ledger).toHaveLength(25);
+    expect(busyBilling.weekly_activity).toContainEqual({
+      date: new Date().toISOString().slice(0, 10),
+      amount_microusd: "630000000",
+    });
     expect(billed.payment_method).toMatchObject({ last4: "4242" });
     expect(billed.purchases).toEqual(
       expect.arrayContaining([

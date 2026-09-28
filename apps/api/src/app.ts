@@ -1995,7 +1995,8 @@ export async function buildApp(
 
 function parseLastEventId(header: string | string[] | undefined): number {
   if (header === undefined) return 0;
-  if (typeof header !== "string" || !/^\d+$/.test(header)) {
+  // Log sequences are Postgres integers.
+  if (typeof header !== "string" || !/^\d{1,10}$/.test(header) || Number(header) > 2_147_483_647) {
     throw new ApiError(422, "validation_error", "Last-Event-ID must be an event sequence");
   }
   return Number(header);

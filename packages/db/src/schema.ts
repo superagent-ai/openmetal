@@ -1215,6 +1215,7 @@ export const schema = {
   sandboxes,
   gpuJobs,
   gpuJobLogEvents,
+  gpuCostReconciliations,
   operations,
   operationEvents,
   sandboxProcesses,

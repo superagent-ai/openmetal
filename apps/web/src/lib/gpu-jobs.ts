@@ -64,19 +64,22 @@ export function gpuJobReasonLabel(reason: string | null): string | null {
   return STATE_REASON_LABELS[reason] ?? reason.replaceAll("_", " ");
 }
 
-/** Loads every GPU job in a project, newest first, up to `maxPages` pages of 100. */
+/**
+ * Loads a project's GPU jobs, newest first, up to `maxPages` pages of 100.
+ * `truncated` reports that older jobs exist beyond the loaded pages.
+ */
 export async function listAllProjectGpuJobs(
   metal: Pick<MetalClient, "gpuJobs">,
   projectId: string,
   maxPages = 10,
-): Promise<GpuJob[]> {
-  const jobs: GpuJob[] = [];
+): Promise<{ gpuJobs: GpuJob[]; truncated: boolean }> {
+  const gpuJobs: GpuJob[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < maxPages; page += 1) {
     const result = await metal.gpuJobs.listForProject(projectId, { cursor, limit: 100 });
-    jobs.push(...result.gpu_jobs);
-    if (!result.next_cursor) break;
+    gpuJobs.push(...result.gpu_jobs);
+    if (!result.next_cursor) return { gpuJobs, truncated: false };
     cursor = result.next_cursor;
   }
-  return jobs;
+  return { gpuJobs, truncated: true };
 }

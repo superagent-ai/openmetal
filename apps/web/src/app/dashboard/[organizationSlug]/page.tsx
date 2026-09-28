@@ -44,14 +44,16 @@ export default async function OrganizationDashboardPage({
   ]);
   const resources = [
     ...sandboxResponses.flatMap((response) => response.sandboxes),
-    ...gpuJobLists.flat(),
+    ...gpuJobLists.flatMap((list) => list.gpuJobs),
   ].map(({ id, state, created_at }) => ({ id, state, created_at }));
+  const resourcesTruncated = gpuJobLists.some((list) => list.truncated);
 
   return (
     <DashboardOverview
       organization={organization}
       projectIds={projectResponse.projects.map((project) => project.id)}
       resources={resources}
+      resourcesTruncated={resourcesTruncated}
       usage={usage}
       billing={billing}
     />

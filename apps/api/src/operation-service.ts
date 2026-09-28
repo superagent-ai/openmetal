@@ -5,6 +5,7 @@ import {
   operations,
   projects,
   sandboxes,
+  withTransaction,
   type MetalDb,
 } from "@openmetal/db";
 import type { OperationState, OperationType } from "@openmetal/contracts";
@@ -16,16 +17,24 @@ export async function appendOperationEvent(
   type: string,
   data: Record<string, unknown> = {},
 ) {
-  const rows = await db
-    .select({ sequence: operationEvents.sequence })
-    .from(operationEvents)
-    .where(eq(operationEvents.operationId, operationId));
-  const sequence = rows.reduce((max, row) => Math.max(max, row.sequence), 0) + 1;
-  const [event] = await db
-    .insert(operationEvents)
-    .values({ operationId, sequence, type, data })
-    .returning();
-  return event;
+  // Locking the operation serializes sequence allocation across the API and workers.
+  return withTransaction(db, async (tx) => {
+    await tx
+      .select({ id: operations.id })
+      .from(operations)
+      .where(eq(operations.id, operationId))
+      .for("update");
+    const rows = await tx
+      .select({ sequence: operationEvents.sequence })
+      .from(operationEvents)
+      .where(eq(operationEvents.operationId, operationId));
+    const sequence = rows.reduce((max, row) => Math.max(max, row.sequence), 0) + 1;
+    const [event] = await tx
+      .insert(operationEvents)
+      .values({ operationId, sequence, type, data })
+      .returning();
+    return event;
+  });
 }
 
 export async function createOperation(

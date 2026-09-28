@@ -391,6 +391,20 @@ export async function getOrganizationUsageAnalytics(
           )
           .limit(query.limit ?? 100);
 
+  // Sandbox and GPU activity share one page: keep the newest `limit` entries across both.
+  const activityPage = [
+    ...activityRows.map((row) => ({ kind: "sandbox" as const, row })),
+    ...gpuJobActivityRows.map((row) => ({ kind: "gpu_job" as const, row })),
+  ]
+    .sort((left, right) => right.row.measuredThrough.getTime() - left.row.measuredThrough.getTime())
+    .slice(0, query.limit ?? 100);
+  const sandboxActivityPage = activityPage.flatMap((item) =>
+    item.kind === "sandbox" ? [item.row] : [],
+  );
+  const gpuJobActivityPage = activityPage.flatMap((item) =>
+    item.kind === "gpu_job" ? [item.row] : [],
+  );
+
   const currentRows = rows.filter((row) => row.period === "current");
   const previousRows = rows.filter((row) => row.period === "previous");
   const currentTotal = currentRows.reduce((total, row) => total + toMicrousd(row.costMicrousd), 0n);
@@ -619,7 +633,7 @@ export async function getOrganizationUsageAnalytics(
       gpuJobId: resourceId,
       ...item,
     })),
-    gpuJobActivity: gpuJobActivityRows.map((row) => ({
+    gpuJobActivity: gpuJobActivityPage.map((row) => ({
       id: row.id,
       measuredThrough: row.measuredThrough,
       gpuJobId: row.gpuJobId,
@@ -636,7 +650,7 @@ export async function getOrganizationUsageAnalytics(
       costSource: row.costSource,
       rateCardVersion: row.rateCardVersion,
     })),
-    activity: activityRows.map((row) => ({
+    activity: sandboxActivityPage.map((row) => ({
       id: row.id,
       measuredThrough: row.measuredThrough,
       sandboxId: row.sandboxId,

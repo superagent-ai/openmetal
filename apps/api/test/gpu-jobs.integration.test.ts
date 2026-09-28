@@ -2,7 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { grantCredits } from "@openmetal/billing";
 import { createDatabase, withTransaction } from "@openmetal/db";
 import { GpuTypeCatalogResponseSchema } from "@openmetal/contracts";
-import { createConfirmedUser, deleteUser, loadTestEnv } from "@openmetal/testkit";
+import {
+  createConfirmedUser,
+  deleteGpuJobsForOrganizations,
+  deleteUser,
+  loadTestEnv,
+} from "@openmetal/testkit";
 import { MetalClient } from "@openmetal/sdk";
 import { buildApp } from "../src/app.js";
 import { loadApiEnv } from "../src/env.js";
@@ -14,6 +19,7 @@ describe("GPU jobs API", () => {
   let appUrl = "";
   let close = async () => {};
   const users: string[] = [];
+  const organizations: string[] = [];
 
   beforeAll(async () => {
     const apiEnv = loadApiEnv({
@@ -35,6 +41,7 @@ describe("GPU jobs API", () => {
   });
 
   afterAll(async () => {
+    await deleteGpuJobsForOrganizations(database.sql, organizations);
     await Promise.all(users.map((id) => deleteUser(id, env)));
     await close();
   });
@@ -47,6 +54,7 @@ describe("GPU jobs API", () => {
       name: "GPU Org",
       slug: `gpu-${crypto.randomUUID().slice(0, 8)}`,
     });
+    organizations.push(organization.id);
     const project = await userClient.projects.create(organization.id, {
       name: "GPU Project",
       slug: `gpu-project-${crypto.randomUUID().slice(0, 8)}`,

@@ -5,7 +5,7 @@ import {
   GpuTypeSchema,
   type GpuJob,
 } from "@openmetal/contracts";
-import { projectClient } from "./clients.js";
+import { anonymousClient, projectClient } from "./clients.js";
 import type { ResolvedSettings, RuntimeEnvironment } from "./config.js";
 import { parseJsonInput } from "./input.js";
 import type { CliIo } from "./io.js";
@@ -107,7 +107,7 @@ export function registerGpuCommands(program: Command, context: GpuCommandContext
     .command("types")
     .description("List GPU types, providers, limits, and per-second rates")
     .action(async () => {
-      const client = projectClient(await context.settings());
+      const client = anonymousClient(await context.settings());
       context.output(await client.gpu.types());
     });
 

@@ -322,7 +322,8 @@ export async function enforceSpendLimit(tx: MetalDb, organizationId: string) {
       and(
         eq(gpuJobs.organizationId, organizationId),
         eq(gpuJobs.billingMode, "managed"),
-        notInArray(gpuJobs.state, [...TERMINAL_GPU_JOB_STATES]),
+        // A cancelling job already has a cancel operation and job queued.
+        notInArray(gpuJobs.state, [...TERMINAL_GPU_JOB_STATES, "cancelling"]),
       ),
     )
     .for("update");

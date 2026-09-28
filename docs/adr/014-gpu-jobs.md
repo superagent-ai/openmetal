@@ -83,8 +83,10 @@ through the sandbox lifecycle or API.
 
 ## Consequences
 
-- Adding a GPU provider requires an adapter, catalog offers, and a registry entry, but no schema or
-  API change.
+- Adding a GPU provider requires an adapter, catalog offers, and a registry entry. Provider names
+  are enumerated in the public contracts (`GpuJobProviderSchema` and the usage schemas), so a new
+  provider also adds its name there, regenerates OpenAPI, and ships an SDK release. A provider not
+  already in the `provider` check constraints on the shared cost tables also needs a migration.
 - Modal's control-plane gRPC calls are not a public API, and Modal has no public REST API to use
   instead. The adapter is covered by contract tests with a fake client and opt-in live tests
   (`METAL_LIVE_TESTS=1`) that also run daily in the `modal-gpu-live` workflow, and the SDK version

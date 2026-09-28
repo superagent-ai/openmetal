@@ -14,7 +14,12 @@ import {
   type ProviderReportedCost,
   type ProviderSandboxCost,
 } from "@openmetal/provider-core";
-import { createConfirmedUser, deleteUser, loadTestEnv } from "@openmetal/testkit";
+import {
+  createConfirmedUser,
+  deleteGpuJobsForOrganizations,
+  deleteUser,
+  loadTestEnv,
+} from "@openmetal/testkit";
 import { loadWorkerEnv } from "../src/env.js";
 import {
   reconcileGpuJobCosts,
@@ -43,6 +48,7 @@ class FakeGpuJobProvider implements GpuJobProvider {
   listed: ProviderGpuJobListing[] = [];
   reported?: bigint;
   discoveredStart?: Date;
+  logsError?: Error;
   initialStatus: ProviderGpuJobStatus = { state: "running" };
   submitError?: Error;
   reconcileError?: Error;
@@ -86,6 +92,7 @@ class FakeGpuJobProvider implements GpuJobProvider {
   }
 
   async readLogs(input: ProviderGpuJobLogReadInput): Promise<ProviderGpuJobLogReadResult> {
+    if (this.logsError) throw this.logsError;
     const job = this.jobs.get(input.providerResourceId);
     const done = job?.status.state !== "running" && job?.status.state !== "pending";
     const chunks: ProviderGpuJobLogReadResult["chunks"] = [];
@@ -140,6 +147,7 @@ class FakeGpuJobProvider implements GpuJobProvider {
 describe("worker GPU jobs", () => {
   const database = createDatabase({ DATABASE_URL: env.DATABASE_URL });
   const users: string[] = [];
+  const organizations: string[] = [];
   const workerEnv = loadWorkerEnv({
     ...process.env,
     DATABASE_URL: env.DATABASE_URL,
@@ -161,6 +169,7 @@ describe("worker GPU jobs", () => {
   });
 
   afterAll(async () => {
+    await deleteGpuJobsForOrganizations(database.sql, organizations);
     await Promise.all(users.map((id) => deleteUser(id, env)));
     await database.shutdown();
   });
@@ -169,6 +178,7 @@ describe("worker GPU jobs", () => {
     const user = await createConfirmedUser(env);
     users.push(user.user.id);
     const organizationId = crypto.randomUUID();
+    organizations.push(organizationId);
     const projectId = crypto.randomUUID();
     await database.sql`
       insert into public.organizations (id, name, slug)
@@ -972,5 +982,72 @@ describe("worker GPU jobs", () => {
       where gpu_job_id = ${created.id}
     `;
     expect(total?.total).toBe("8000");
+  });
+  it("keeps reconciling when a retried reconciliation fails instead of failing the job", async () => {
+    const scope = await seedOrganization();
+    const created = await createJob(scope);
+    const provider = new FakeGpuJobProvider();
+    provider.submitError = new ProviderError("socket hang up", "unknown_outcome", true);
+    provider.reconcileError = new Error("list failed");
+    await runUntil(provider, created.id, (row) => row.state === "provision_unknown");
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await runDue(provider, created.id);
+    }
+    expect((await job(created.id)).state).toBe("provision_unknown");
+    const [operation] = await database.sql`
+      select state from metal.operations where id = ${created.operationId}
+    `;
+    expect(operation?.state).toBe("reconciling");
+  });
+
+  it("terminates a job an uncertain submit created when it is cancelled", async () => {
+    const scope = await seedOrganization();
+    const created = await createJob(scope);
+    const provider = new FakeGpuJobProvider();
+    provider.submitError = new ProviderError("socket hang up", "unknown_outcome", true);
+    provider.reconcileError = new Error("list failed");
+    await runUntil(provider, created.id, (row) => row.state === "provision_unknown");
+    await database.sql`
+      update metal.gpu_jobs
+      set state = 'cancelling', cancel_requested_at = now(), cancel_reason = 'cancelled_by_user'
+      where id = ${created.id}
+    `;
+    await database.sql`
+      update metal.outbox_jobs set status = 'succeeded'
+      where dedupe_key = ${`gpu_job:submit:${created.id}`}
+    `;
+    await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload)
+      values ('gpu_job.cancel', ${`gpu_job:cancel:${created.id}`}, ${JSON.stringify({
+        job_type: "gpu_job.cancel",
+        gpu_job_id: created.id,
+        reason: "cancelled_by_user",
+      })}::jsonb)
+    `;
+    provider.reconcileError = undefined;
+    provider.reconcileResult = provider.create({
+      metalGpuJobId: created.publicId,
+      gpu: { type: "nvidia-h100", count: 2 },
+    });
+    const cancelled = await runUntil(provider, created.id, (row) => row.state === "cancelled");
+    expect(cancelled.provider_resource_id).toBe(created.providerResourceId);
+    expect(provider.cancelled).toContain(created.providerResourceId);
+  });
+
+  it("keeps draining logs after the job finishes when the final drain fails", async () => {
+    const scope = await seedOrganization();
+    const created = await createJob(scope);
+    const provider = new FakeGpuJobProvider();
+    await runUntil(provider, created.id, (row) => row.state === "running");
+    const fake = provider.jobs.get(created.providerResourceId)!;
+    fake.stdout.push("last line\n");
+    fake.status = { state: "succeeded", exitCode: 0 };
+    provider.logsError = new Error("logs unavailable");
+    const finished = await runUntil(provider, created.id, (row) => row.state === "succeeded");
+    expect(finished.logs_complete).toBe(false);
+
+    provider.logsError = undefined;
+    const drained = await runUntil(provider, created.id, (row) => row.logs_complete === true);
+    expect(Number(drained.log_bytes)).toBeGreaterThan(0);
   });
 });

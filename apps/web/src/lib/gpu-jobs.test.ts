@@ -41,14 +41,16 @@ describe("GPU job helpers", () => {
       .mockResolvedValueOnce({ gpu_jobs: [{ id: "gpj_3" }], next_cursor: null });
     const metal = { gpuJobs: { listForProject } } as never;
 
-    await expect(listAllProjectGpuJobs(metal, "prj_1")).resolves.toEqual([
-      { id: "gpj_1" },
-      { id: "gpj_2" },
-      { id: "gpj_3" },
-    ]);
+    await expect(listAllProjectGpuJobs(metal, "prj_1")).resolves.toEqual({
+      gpuJobs: [{ id: "gpj_1" }, { id: "gpj_2" }, { id: "gpj_3" }],
+      truncated: false,
+    });
     expect(listForProject).toHaveBeenLastCalledWith("prj_1", { cursor: "gpj_2", limit: 100 });
 
     listForProject.mockReset().mockResolvedValue({ gpu_jobs: [{ id: "gpj_x" }], next_cursor: "c" });
-    await expect(listAllProjectGpuJobs(metal, "prj_1", 2)).resolves.toHaveLength(2);
+    await expect(listAllProjectGpuJobs(metal, "prj_1", 2)).resolves.toMatchObject({
+      gpuJobs: [{ id: "gpj_x" }, { id: "gpj_x" }],
+      truncated: true,
+    });
   });
 });

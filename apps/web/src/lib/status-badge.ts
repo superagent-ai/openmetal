@@ -17,7 +17,7 @@ export function statusBadgeClass(status: string) {
   if (status === "failed" || status === "cleanup_failed" || status === "timed_out") {
     return "bg-destructive/10 text-destructive dark:bg-destructive/20";
   }
-  if (status === "provision_unknown") {
+  if (status === "provision_unknown" || status === "runtime_unknown") {
     return "bg-violet-500/15 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300";
   }
   return "bg-muted text-muted-foreground";

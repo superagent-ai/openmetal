@@ -120,9 +120,9 @@ it("captures final Modal usage before termination for reconciliation", async () 
     providerMetadata: {
       modal: {
         finalResourceUsage: {
-          cpuCoreNanosecs: 1_000_000_000,
-          memGibNanosecs: 2_000_000_000,
-          gpuNanosecs: 0,
+          cpuCoreNanosecs: "1000000000",
+          memGibNanosecs: "2000000000",
+          gpuNanosecs: "0",
         },
       },
     },

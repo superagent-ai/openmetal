@@ -55,11 +55,11 @@ All job routes use the project API key and `X-Metal-Project-ID`. `GET /v1/gpu/ty
 
 `requested` → `provisioning` → `running` → `succeeded`, `failed`, `timed_out`, or `cancelled`. `provisioning` includes waiting for GPUs after the provider accepted the job (`submitted_at`); `running` starts when the container starts (`started_at`). A `requested` job with `state_reason` `waiting_for_organization_gpu_limit` or `waiting_for_gpu_capacity` is queued and starts on its own. `cancelling` follows a cancel or a limit. `provision_unknown` means the provider's submit answer was lost and OpenMetal is reconciling; do not create a replacement job while it is set.
 
-Read `state_reason` and `failure` for why a job ended. `exit_code_nonzero` carries `exit_code`. `provider_terminated` usually means preemption; OpenMetal does not restart the job, so resubmit and resume from a checkpoint. `max_cost_reached` and `insufficient_credits` are cancellations by OpenMetal. `start_deadline_exceeded` means no GPU started in time; retry later, with a larger `max_start_seconds`, or without a narrow region.
+Read `state_reason` and `failure` for why a job ended. `exit_code_nonzero` carries `exit_code`. `provider_terminated` usually means preemption; OpenMetal does not restart the job, so resubmit and resume from a checkpoint. `max_cost_reached` cancels a running job. `insufficient_credits` fails a job that has not started yet and cancels one that is running. `start_deadline_exceeded` means no GPU started in time; retry later, with a larger `max_start_seconds`, or without a narrow region.
 
 ## Logs
 
-Log batches contain `stdout`, `stderr`, and `truncated` events with base64 data and per-stream byte offsets. Resume with `Last-Event-ID` and stop once a batch is empty and the job has `logs_complete: true`. Up to 32 MiB is stored per job, kept for 7 days.
+Log batches contain `stdout`, `stderr`, and `truncated` events with base64 data and per-stream byte offsets. Resume with `Last-Event-ID`. Once the job has `logs_complete: true`, fetch one more batch and stop when it is empty. Up to 32 MiB is stored per job, kept for 7 days.
 
 ## Billing
 

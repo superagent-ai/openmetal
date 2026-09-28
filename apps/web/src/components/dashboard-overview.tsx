@@ -148,12 +148,15 @@ export function DashboardOverview({
   organization,
   projectIds,
   resources,
+  resourcesTruncated = false,
   usage,
   billing,
 }: {
   organization: Organization;
   projectIds: string[];
   resources: DashboardSandbox[];
+  /** Older GPU jobs were not loaded, so the total is a lower bound. */
+  resourcesTruncated?: boolean;
   usage: OrganizationUsage;
   billing: OrganizationBilling;
 }) {
@@ -372,7 +375,7 @@ export function DashboardOverview({
           />
           <MetricCard
             title="Resources"
-            value={resources.length.toLocaleString("en-US")}
+            value={`${resources.length.toLocaleString("en-US")}${resourcesTruncated ? "+" : ""}`}
             bars={chartBars(
               sandboxActivity.map((counts) =>
                 sandboxStatuses.map((status) => ({

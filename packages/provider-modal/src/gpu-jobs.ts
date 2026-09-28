@@ -629,9 +629,9 @@ export class ModalGpuJobProvider implements GpuJobProvider {
       usageFromMetadata(input.providerMetadata) ??
       (await this.resourceUsage(input.providerResourceId, input.signal));
     const numerator =
-      BigInt(usage.gpuNanosecs) * offer.gpuMicrousdPerHour +
-      BigInt(usage.cpuCoreNanosecs) * offer.cpuMicrousdPerCoreHour +
-      BigInt(usage.memGibNanosecs) * offer.memoryMicrousdPerGibHour;
+      usage.gpuNanosecs * offer.gpuMicrousdPerHour +
+      usage.cpuCoreNanosecs * offer.cpuMicrousdPerCoreHour +
+      usage.memGibNanosecs * offer.memoryMicrousdPerGibHour;
     const baseMicrousd = (numerator + NANOSECONDS_PER_HOUR / 2n) / NANOSECONDS_PER_HOUR;
     const multiplierBps = input.priceMultiplierBps ?? BASE_PRICE_MULTIPLIER_BPS;
     return {

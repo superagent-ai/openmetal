@@ -33,19 +33,30 @@ export const OperationErrorSchema = z.object({
   details: JsonObjectSchema.optional(),
 });
 
-export const OperationSchema = z.object({
-  id: OperationIdSchema,
-  project_id: ProjectIdSchema,
-  type: OperationTypeSchema,
-  state: OperationStateSchema,
-  resource_type: OperationResourceTypeSchema,
-  resource_id: z.union([SandboxIdSchema, GpuJobIdSchema]),
-  retryable: z.boolean(),
-  error: OperationErrorSchema.nullable(),
-  created_at: IsoDateTimeSchema,
-  updated_at: IsoDateTimeSchema,
-  completed_at: IsoDateTimeSchema.nullable(),
-});
+export const OperationSchema = z
+  .object({
+    id: OperationIdSchema,
+    project_id: ProjectIdSchema,
+    type: OperationTypeSchema,
+    state: OperationStateSchema,
+    resource_type: OperationResourceTypeSchema,
+    resource_id: z.union([SandboxIdSchema, GpuJobIdSchema]),
+    retryable: z.boolean(),
+    error: OperationErrorSchema.nullable(),
+    created_at: IsoDateTimeSchema,
+    updated_at: IsoDateTimeSchema,
+    completed_at: IsoDateTimeSchema.nullable(),
+  })
+  .superRefine((operation, context) => {
+    const expected = operation.resource_type === "gpu_job" ? GpuJobIdSchema : SandboxIdSchema;
+    if (!expected.safeParse(operation.resource_id).success) {
+      context.addIssue({
+        code: "custom",
+        path: ["resource_id"],
+        message: `resource_id must be a ${operation.resource_type} ID`,
+      });
+    }
+  });
 
 export const OperationEventSchema = z.object({
   sequence: z.number().int().positive(),

@@ -158,6 +158,21 @@ export const GpuJobBucketMountSchema = GpuJobBucketMountBaseSchema.extend({
     session_token: CredentialValueSchema.optional(),
   }),
 }).superRefine((mount, context) => {
+  // S3 and R2 cap bucket names at 63 characters; GCS allows up to 222 with dots.
+  if (mount.provider !== "gcs" && mount.bucket.length > 63) {
+    context.addIssue({
+      code: "custom",
+      path: ["bucket"],
+      message: `${mount.provider} bucket names are at most 63 characters`,
+    });
+  }
+  if (mount.provider === "gcs" && mount.bucket.length > 63 && !mount.bucket.includes(".")) {
+    context.addIssue({
+      code: "custom",
+      path: ["bucket"],
+      message: "GCS bucket names longer than 63 characters must contain dots",
+    });
+  }
   if (mount.provider === "r2" && !mount.endpoint_url) {
     context.addIssue({
       code: "custom",

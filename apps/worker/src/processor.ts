@@ -3126,6 +3126,11 @@ async function runJob(ctx: WorkerContext, job: ClaimedJob, guard: JobLeaseGuard)
             { job_id: job.id, gpu_job_id: gpuJobId, err: safeError(error) },
             "GPU job interim cost sync failed",
           ),
+        onLogError: (error) =>
+          child.warn(
+            { job_id: job.id, gpu_job_id: gpuJobId, err: safeError(error) },
+            "GPU job log read failed",
+          ),
       });
     } else if (payload.job_type === "gpu_job.cancel") {
       gpuResult = await cancelGpuJob(db, gpuProviders, {

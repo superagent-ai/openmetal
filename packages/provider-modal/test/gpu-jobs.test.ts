@@ -1,6 +1,7 @@
 import { AlreadyExistsError, NotFoundError } from "modal";
 import { describe, expect, it, vi } from "vitest";
 import { ModalGpuJobProvider, modalUsdToMicrousd } from "../src/gpu-jobs.js";
+import { parseResourceUsage } from "../src/modal-usage.js";
 
 type Batch = {
   entryId: string;
@@ -635,5 +636,21 @@ describe("ModalGpuJobProvider", () => {
     await expect(
       provider.startedAt({ providerResourceId: "sb-1", metalGpuJobId: "gpj_1" }),
     ).resolves.toBeNull();
+  });
+
+  it("keeps usage counters beyond the safe integer range for large day-long jobs", () => {
+    // 2 TiB of memory reserved for 24 hours.
+    const memGibNanosecs = 2_048 * 86_400 * 1_000_000_000;
+    expect(Number.isSafeInteger(memGibNanosecs)).toBe(false);
+    expect(
+      parseResourceUsage({ cpuCoreNanosecs: 0, memGibNanosecs, gpuNanosecs: "691200000000000" }),
+    ).toEqual({
+      cpuCoreNanosecs: 0n,
+      memGibNanosecs: 176_947_200_000_000_000n,
+      gpuNanosecs: 691_200_000_000_000n,
+    });
+    expect(parseResourceUsage({ cpuCoreNanosecs: -1, memGibNanosecs: 0, gpuNanosecs: 0 })).toBe(
+      undefined,
+    );
   });
 });

@@ -269,12 +269,14 @@ export function ProjectResourcesTable({
   projectSlug,
   sandboxes,
   gpuJobs,
+  gpuJobsTruncated = false,
 }: {
   organizationSlug: string;
   projectId: string;
   projectSlug: string;
   sandboxes: Sandbox[];
   gpuJobs: GpuJob[];
+  gpuJobsTruncated?: boolean;
 }) {
   const now = useNow();
   const supabase = useMemo(() => createClient({ isSingleton: false }), []);
@@ -288,6 +290,7 @@ export function ProjectResourcesTable({
   );
   const [sandboxRows, setSandboxRows] = useState(sandboxes);
   const [gpuJobRows, setGpuJobRows] = useState(() => gpuJobs.map(gpuJobRow));
+  const [olderGpuJobsHidden, setOlderGpuJobsHidden] = useState(gpuJobsTruncated);
   const [busyResourceId, setBusyResourceId] = useState<string>();
   const [deletingSandbox, setDeletingSandbox] = useState<Sandbox>();
   const [cancellingGpuJob, setCancellingGpuJob] = useState<GpuJobRow>();
@@ -378,7 +381,8 @@ export function ProjectResourcesTable({
           listAllProjectGpuJobs(metal, projectId),
         ]);
         setSandboxRows(sandboxResult.sandboxes);
-        setGpuJobRows(jobs.map(gpuJobRow));
+        setGpuJobRows(jobs.gpuJobs.map(gpuJobRow));
+        setOlderGpuJobsHidden(jobs.truncated);
         setRefreshError(undefined);
       }),
     [metal, projectId],
@@ -531,6 +535,12 @@ export function ProjectResourcesTable({
           <Alert variant="destructive">
             <AlertDescription>{error ?? refreshError}</AlertDescription>
           </Alert>
+        ) : null}
+        {olderGpuJobsHidden ? (
+          <p className="text-sm text-muted-foreground">
+            Showing the newest {gpuJobRows.length.toLocaleString("en-US")} GPU jobs. Older jobs are
+            available through the API.
+          </p>
         ) : null}
         <ResourceSearchInput
           query={query}

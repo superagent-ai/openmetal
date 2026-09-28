@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { operationEvents, operations, type MetalDb } from "@openmetal/db";
+import { operationEvents, operations, withTransaction, type MetalDb } from "@openmetal/db";
 import { redactString } from "@openmetal/logger";
 import { ProviderError } from "@openmetal/provider-core";
 
@@ -16,15 +16,23 @@ export async function appendOperationEvent(
   type: string,
   data: Record<string, unknown> = {},
 ) {
-  const rows = await db
-    .select({ sequence: operationEvents.sequence })
-    .from(operationEvents)
-    .where(eq(operationEvents.operationId, operationId));
-  await db.insert(operationEvents).values({
-    operationId,
-    sequence: rows.reduce((max, row) => Math.max(max, row.sequence), 0) + 1,
-    type,
-    data,
+  // Locking the operation serializes sequence allocation across the API and workers.
+  await withTransaction(db, async (tx) => {
+    await tx
+      .select({ id: operations.id })
+      .from(operations)
+      .where(eq(operations.id, operationId))
+      .for("update");
+    const rows = await tx
+      .select({ sequence: operationEvents.sequence })
+      .from(operationEvents)
+      .where(eq(operationEvents.operationId, operationId));
+    await tx.insert(operationEvents).values({
+      operationId,
+      sequence: rows.reduce((max, row) => Math.max(max, row.sequence), 0) + 1,
+      type,
+      data,
+    });
   });
 }
 
@@ -41,7 +49,7 @@ export async function setOperationState(
     .update(operations)
     .set({
       state,
-      error,
+      error: error ?? null,
       retryable: Boolean(error?.retryable),
       updatedAt: now,
       completedAt: terminal ? now : null,

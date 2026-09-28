@@ -39,7 +39,7 @@ export default async function ProjectPage({
   if (!project) {
     notFound();
   }
-  const [{ sandboxes }, gpuJobs] = await Promise.all([
+  const [{ sandboxes }, { gpuJobs, truncated }] = await Promise.all([
     metal.sandboxes.list(project.id),
     listAllProjectGpuJobs(metal, project.id),
   ]);
@@ -53,6 +53,7 @@ export default async function ProjectPage({
         projectSlug={project.slug}
         sandboxes={sandboxes}
         gpuJobs={gpuJobs}
+        gpuJobsTruncated={truncated}
       />
     </>
   );

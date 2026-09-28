@@ -243,7 +243,8 @@ workspace. Such requests return `capability_unsupported`.
 
 `GET /v1/gpu/jobs/{gpu_job_id}/logs` returns a finite server-sent event batch of `stdout`,
 `stderr`, and `truncated` events in sequence order. Resume by sending the last received sequence in
-`Last-Event-ID`, and stop once a batch is empty and the job reports `logs_complete: true`. The SDK
+`Last-Event-ID`. Once the job reports `logs_complete: true`, request one more batch and stop when
+it is empty, so events written just before completion are not missed. The SDK
 `gpuJobs.logs` iterator and `openmetal gpu job logs` do this for you.
 
 Logs arrive within a few seconds of being written. OpenMetal stores up to 32 MiB of output per job;

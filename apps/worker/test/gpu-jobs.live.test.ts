@@ -1,7 +1,12 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { grantCredits } from "@openmetal/billing";
 import { createDatabase, withTransaction } from "@openmetal/db";
-import { createConfirmedUser, deleteUser, loadTestEnv } from "@openmetal/testkit";
+import {
+  createConfirmedUser,
+  deleteGpuJobsForOrganizations,
+  deleteUser,
+  loadTestEnv,
+} from "@openmetal/testkit";
 import { loadWorkerEnv } from "../src/env.js";
 import { syncGpuJobCostJob } from "../src/gpu-jobs.js";
 import { processOnce } from "../src/processor.js";
@@ -9,7 +14,10 @@ import { buildGpuJobProviders } from "../src/provider-registry.js";
 
 const enabled =
   process.env.METAL_LIVE_TESTS === "1" &&
-  Boolean(process.env.MODAL_TOKEN_ID && process.env.MODAL_TOKEN_SECRET);
+  Boolean(
+    (process.env.MODAL_TOKEN_ID && process.env.MODAL_TOKEN_SECRET) ||
+    (process.env.MODAL_GPU_TOKEN_ID && process.env.MODAL_GPU_TOKEN_SECRET),
+  );
 const liveTimeoutMs = Number(process.env.METAL_LIVE_TIMEOUT_MS ?? 420_000);
 
 describe.skipIf(!enabled)("live Modal GPU jobs", () => {
@@ -29,6 +37,7 @@ describe.skipIf(!enabled)("live Modal GPU jobs", () => {
   });
   const providers = buildGpuJobProviders(workerEnv);
   const users: string[] = [];
+  const organizations: string[] = [];
   const providerResources = new Set<string>();
   const publisher = { publish: async () => {} };
 
@@ -36,6 +45,7 @@ describe.skipIf(!enabled)("live Modal GPU jobs", () => {
     for (const resource of providerResources) {
       await providers.modal?.cancel(resource).catch(() => undefined);
     }
+    await deleteGpuJobsForOrganizations(database.sql, organizations);
     await Promise.all(users.map((id) => deleteUser(id, env)));
     await database.shutdown();
   });
@@ -48,6 +58,7 @@ describe.skipIf(!enabled)("live Modal GPU jobs", () => {
     const user = await createConfirmedUser(env);
     users.push(user.user.id);
     const organizationId = crypto.randomUUID();
+    organizations.push(organizationId);
     const projectId = crypto.randomUUID();
     await database.sql`
       insert into public.organizations (id, name, slug)

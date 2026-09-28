@@ -1302,7 +1302,11 @@ export class MetalClient {
       },
     ) => {
       const mutation = await this.gpuJobs.createAsync(input, options);
-      const operation = await this.operations.wait(mutation.operation, options);
+      // Jobs can wait for GPU capacity until max_start_seconds before they are submitted.
+      const timeoutMs =
+        options?.timeoutMs ??
+        (mutation.gpu_job.requested.lifecycle.max_start_seconds + 120) * 1_000;
+      const operation = await this.operations.wait(mutation.operation, { ...options, timeoutMs });
       const job = await this.gpuJobs.get(mutation.gpu_job.id, options);
       if (operation.state !== "succeeded" && job.state !== "cancelled") {
         throw new Error(

@@ -42,8 +42,8 @@ const MEMORY_MICROUSD_PER_GIB_HOUR = 24_012n;
 
 function estimateCostMicrousd(usage: ModalResourceUsage): bigint {
   const numerator =
-    BigInt(usage.cpuCoreNanosecs) * CPU_MICROUSD_PER_CORE_HOUR +
-    BigInt(usage.memGibNanosecs) * MEMORY_MICROUSD_PER_GIB_HOUR;
+    usage.cpuCoreNanosecs * CPU_MICROUSD_PER_CORE_HOUR +
+    usage.memGibNanosecs * MEMORY_MICROUSD_PER_GIB_HOUR;
   return (numerator + NANOSECONDS_PER_HOUR / 2n) / NANOSECONDS_PER_HOUR;
 }
 
@@ -441,7 +441,14 @@ export class ModalSandboxProvider implements SandboxProvider {
       return finalResourceUsage
         ? {
             providerMetadata: {
-              modal: { finalResourceUsage },
+              modal: {
+                finalResourceUsage: {
+                  cpuCoreNanosecs: finalResourceUsage.cpuCoreNanosecs.toString(),
+                  memGibNanosecs: finalResourceUsage.memGibNanosecs.toString(),
+                  gpuNanosecs: finalResourceUsage.gpuNanosecs.toString(),
+                  ...(finalResourceUsage.gpuType ? { gpuType: finalResourceUsage.gpuType } : {}),
+                },
+              },
             },
           }
         : undefined;

@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull, isNull, lt, ne, notExists, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
 import { chargeUsageDelta, managedGpuFundingShortfall } from "@openmetal/billing";
 import { GPU_JOB_DEFAULT_MAX_START_SECONDS, GPU_JOB_MAX_LOG_BYTES } from "@openmetal/contracts";
 import {
@@ -47,6 +47,7 @@ export type GpuJobHandlerResult = { rescheduleAt?: Date } | void;
 export type GpuJobWorkerOptions = {
   monitorIntervalMs: number;
   onCostError?: (error: unknown) => void;
+  onLogError?: (error: unknown) => void;
 };
 
 type GpuJobRow = typeof gpuJobs.$inferSelect;
@@ -89,6 +90,9 @@ const PROVIDER_TIMEOUT_GRACE_SECONDS = 120;
 // leaked once it has existed this long without a matching live job.
 const ORPHAN_MIN_AGE_MS = 15 * 60_000;
 const ORPHAN_SWEEP_TIMEOUT_MS = 120_000;
+// Providers keep a finished container's logs available for a while; stop
+// retrying an incomplete drain after this long.
+const TERMINAL_LOG_DRAIN_MS = 10 * 60_000;
 
 function isTerminal(state: string): state is TerminalGpuJobState {
   return (TERMINAL_STATES as readonly string[]).includes(state);
@@ -840,10 +844,22 @@ export async function submitGpuJob(
     });
 
     if (previous?.state === "reconciling") {
-      const reconciled = await provider.reconcileSubmit({
-        ...input,
-        signal: AbortSignal.timeout(PROVIDER_CALL_TIMEOUT_MS),
-      });
+      let reconciled: ProviderGpuJob | null;
+      try {
+        reconciled = await provider.reconcileSubmit({
+          ...input,
+          signal: AbortSignal.timeout(PROVIDER_CALL_TIMEOUT_MS),
+        });
+      } catch (error) {
+        // The earlier submit may still have created the job; keep reconciling
+        // instead of letting retries exhaust into a failure.
+        await markSubmitUnknown(db, job.id, operationId, safeError(error));
+        throw new ProviderError(
+          "GPU job submit reconciliation did not complete",
+          "unknown_outcome",
+          true,
+        );
+      }
       if (reconciled) {
         await adoptProviderJob(db, job, candidate, attempt!.id, reconciled, operationId, "found");
         return;
@@ -900,15 +916,7 @@ export async function submitGpuJob(
           return;
         }
         if (!reconciliationCompleted) {
-          await db
-            .update(gpuJobs)
-            .set({ state: "provision_unknown" })
-            .where(and(eq(gpuJobs.id, job.id), eq(gpuJobs.state, "provisioning")));
-          await setOperationState(db, operationId, "reconciling", {
-            code: "provider_unknown_outcome",
-            message,
-            retryable: true,
-          });
+          await markSubmitUnknown(db, job.id, operationId, message);
           throw new ProviderError(
             "GPU job submit reconciliation did not complete",
             "unknown_outcome",
@@ -949,6 +957,23 @@ export async function submitGpuJob(
  * A job cancelled while its submit outcome was unknown may still have started
  * on the provider. Find it before settling so it is terminated, not leaked.
  */
+async function markSubmitUnknown(
+  db: MetalDb,
+  gpuJobId: string,
+  operationId: string,
+  message: string,
+) {
+  await db
+    .update(gpuJobs)
+    .set({ state: "provision_unknown" })
+    .where(and(eq(gpuJobs.id, gpuJobId), eq(gpuJobs.state, "provisioning")));
+  await setOperationState(db, operationId, "reconciling", {
+    code: "provider_unknown_outcome",
+    message,
+    retryable: true,
+  });
+}
+
 async function settleCancelledSubmit(
   db: MetalDb,
   providers: GpuJobProviders,
@@ -1150,15 +1175,22 @@ async function finalizeGpuJob(
   provider: GpuJobProvider,
   gpuJobId: string,
   status: ProviderTerminalStatus,
-) {
+): Promise<{ logsComplete: boolean }> {
+  let logsComplete = false;
   for (let pass = 0; pass < LOG_DRAIN_PASSES; pass += 1) {
     const current = await loadGpuJob(db, gpuJobId);
-    if (!current || current.logsComplete) break;
+    if (!current || current.logsComplete) {
+      logsComplete = true;
+      break;
+    }
     const pulled = await pullLogs(db, provider, current).catch(() => ({ complete: false }));
-    if (pulled.complete) break;
+    if (pulled.complete) {
+      logsComplete = true;
+      break;
+    }
   }
   const job = await loadGpuJob(db, gpuJobId);
-  if (!job || isTerminal(job.state)) return;
+  if (!job || isTerminal(job.state)) return { logsComplete: true };
   const outcome = terminalOutcome(job, status);
   // Short jobs can start and exit between two monitor passes.
   const discoveredStart =
@@ -1183,7 +1215,8 @@ async function finalizeGpuJob(
         failureCode: outcome.failure?.code ?? null,
         failureMessage: outcome.failure?.message ?? null,
         exitCode: outcome.exitCode,
-        logsComplete: true,
+        // An incomplete drain is finished by the monitor instead of dropping the tail.
+        logsComplete,
         finishedAt: now,
       })
       .where(
@@ -1215,6 +1248,23 @@ async function finalizeGpuJob(
   if (finished) {
     await syncGpuJobCost(db, provider, finished, false).catch(() => undefined);
   }
+  return { logsComplete };
+}
+
+/** Keeps draining a finished job's logs until the provider reports the end of both streams. */
+async function drainTerminalLogs(
+  db: MetalDb,
+  provider: GpuJobProvider,
+  job: GpuJobRow,
+  monitorIntervalMs: number,
+): Promise<GpuJobHandlerResult> {
+  const pulled = await pullLogs(db, provider, job).catch(() => ({ bytes: 0, complete: false }));
+  const expired = !job.finishedAt || Date.now() - job.finishedAt.getTime() >= TERMINAL_LOG_DRAIN_MS;
+  if (pulled.complete || expired) {
+    await db.update(gpuJobs).set({ logsComplete: true }).where(eq(gpuJobs.id, job.id));
+    return;
+  }
+  return { rescheduleAt: new Date(Date.now() + monitorIntervalMs) };
 }
 
 function isTerminalStatus(status: ProviderGpuJobStatus): status is ProviderTerminalStatus {
@@ -1228,21 +1278,30 @@ export async function monitorGpuJob(
   options: GpuJobWorkerOptions,
 ): Promise<GpuJobHandlerResult> {
   const job = await loadGpuJob(db, gpuJobId);
-  if (
-    !job?.providerResourceId ||
-    (job.state !== "provisioning" && job.state !== "running" && job.state !== "cancelling")
-  ) {
+  if (!job?.providerResourceId) return;
+  if (isTerminal(job.state)) {
+    if (job.logsComplete) return;
+    const provider = await resolveGpuJobProvider(db, providers, job);
+    return drainTerminalLogs(db, provider, job, options.monitorIntervalMs);
+  }
+  if (job.state !== "provisioning" && job.state !== "running" && job.state !== "cancelling") {
     return;
   }
   const provider = await resolveGpuJobProvider(db, providers, job);
-  const pulled = await pullLogs(db, provider, job);
+  // A log read failure must not stop status checks; the final drain retries.
+  const pulled = await pullLogs(db, provider, job).catch((error: unknown) => {
+    options.onLogError?.(error);
+    return { bytes: 0, complete: false };
+  });
   const status = await provider.status(
     job.providerResourceId,
     AbortSignal.timeout(PROVIDER_CALL_TIMEOUT_MS),
   );
   if (isTerminalStatus(status)) {
-    await finalizeGpuJob(db, provider, job.id, status);
-    return;
+    const { logsComplete } = await finalizeGpuJob(db, provider, job.id, status);
+    return logsComplete
+      ? undefined
+      : { rescheduleAt: new Date(Date.now() + options.monitorIntervalMs) };
   }
   if (status.state === "running" && !job.startedAt) {
     await markGpuJobStarted(db, job);
@@ -1324,6 +1383,17 @@ export async function cancelGpuJob(
         .where(eq(gpuJobs.id, job.id));
       throw new ProviderError("GPU job submit has not settled yet", "unavailable", true);
     }
+    // An uncertain submit may have created the job; find it before settling.
+    const [uncertain] = await db
+      .select({ operationId: providerAttempts.operationId })
+      .from(providerAttempts)
+      .where(and(eq(providerAttempts.gpuJobId, job.id), eq(providerAttempts.state, "reconciling")))
+      .limit(1);
+    if (uncertain) {
+      await settleCancelledSubmit(db, providers, job, uncertain.operationId);
+      // A found job was adopted as cancelling; terminate it in this same pass.
+      return cancelGpuJob(db, providers, input);
+    }
     await cancelBeforeStart(db, job, reason);
     return;
   }
@@ -1349,7 +1419,8 @@ export async function cancelGpuJob(
     AbortSignal.timeout(PROVIDER_CALL_TIMEOUT_MS),
   );
   if (isTerminalStatus(status)) {
-    await finalizeGpuJob(db, provider, job.id, status);
+    const { logsComplete } = await finalizeGpuJob(db, provider, job.id, status);
+    if (!logsComplete) await scheduleMonitor(db, job.id, new Date(Date.now() + 2_000));
   } else {
     await scheduleMonitor(db, job.id, new Date(Date.now() + 2_000));
   }
@@ -1571,7 +1642,13 @@ export async function scheduleMissingGpuJobWork(db: MetalDb, now = new Date()) {
     .from(gpuJobs)
     .where(
       and(
-        inArray(gpuJobs.state, ["provisioning", "running", "cancelling"]),
+        or(
+          inArray(gpuJobs.state, ["provisioning", "running", "cancelling"]),
+          and(
+            eq(gpuJobs.logsComplete, false),
+            gte(gpuJobs.finishedAt, new Date(now.getTime() - TERMINAL_LOG_DRAIN_MS)),
+          ),
+        ),
         isNotNull(gpuJobs.providerResourceId),
         notExists(
           db

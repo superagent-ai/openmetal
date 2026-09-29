@@ -1187,6 +1187,22 @@ describe("metal api integration", () => {
         ) jobs
     `;
     expect(counts).toMatchObject({ operations: 1, jobs: 1 });
+
+    const dashboardPause = await fetch(
+      `${appUrl}/v1/projects/${project.id}/sandboxes/${automatic.sandbox.id}/pause`,
+      { method: "POST", headers: { authorization: `Bearer ${owner.accessToken}` } },
+    );
+    expect(dashboardPause.status).toBe(409);
+    expect(await dashboardPause.json()).toMatchObject({ code: "invalid_sandbox_state" });
+    const dashboardDelete = await fetch(
+      `${appUrl}/v1/projects/${project.id}/sandboxes/${first.sandbox.id}`,
+      { method: "DELETE", headers: { authorization: `Bearer ${owner.accessToken}` } },
+    );
+    expect(dashboardDelete.status).toBe(200);
+    expect(await dashboardDelete.json()).toMatchObject({
+      sandbox: { id: first.sandbox.id, state: "stopping" },
+      operation: { type: "sandbox_destroy", resource_id: first.sandbox.id },
+    });
   });
 
   it("invites members to a specific organization and auto-accepts on login", async () => {

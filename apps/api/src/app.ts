@@ -1152,7 +1152,7 @@ export async function buildApp(
       await requestSandboxPause(db.db, {
         sandboxId,
         organizationId: project.organizationId,
-        projectId,
+        projectId: project.id,
       }),
     );
   });
@@ -1167,7 +1167,7 @@ export async function buildApp(
       await requestSandboxDeletion(db.db, {
         sandboxId,
         organizationId: project.organizationId,
-        projectId,
+        projectId: project.id,
       }),
     );
   });

@@ -10,7 +10,7 @@ export type ModalResourceUsage = {
 function usageCounter(value: unknown): bigint | undefined {
   if (typeof value === "bigint") return value >= 0n ? value : undefined;
   if (typeof value === "number") {
-    return Number.isFinite(value) && value >= 0 ? BigInt(Math.round(value)) : undefined;
+    return Number.isInteger(value) && value >= 0 ? BigInt(value) : undefined;
   }
   if (typeof value === "string" && /^\d+$/.test(value)) return BigInt(value);
   return undefined;

@@ -48,6 +48,7 @@ export default async function ProjectPage({
     <>
       <h1 className="sr-only">Resources</h1>
       <ProjectResourcesTable
+        key={project.id}
         organizationSlug={organization.slug}
         projectId={project.id}
         projectSlug={project.slug}

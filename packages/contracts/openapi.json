@@ -7683,7 +7683,7 @@
                 },
                 "bucket": {
                   "type": "string",
-                  "pattern": "^[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]$"
+                  "pattern": "^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$"
                 },
                 "mount_path": {
                   "type": "string",
@@ -8105,7 +8105,7 @@
                     },
                     "bucket": {
                       "type": "string",
-                      "pattern": "^[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]$"
+                      "pattern": "^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$"
                     },
                     "mount_path": {
                       "type": "string",

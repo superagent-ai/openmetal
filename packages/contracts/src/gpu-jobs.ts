@@ -139,7 +139,7 @@ const MountPathSchema = PortablePathSchema.refine((path) => path !== "/", "mount
 const GpuJobBucketMountBaseSchema = z.object({
   kind: z.literal("bucket"),
   provider: z.enum(["s3", "r2", "gcs"]),
-  bucket: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]$/),
+  bucket: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/),
   mount_path: MountPathSchema,
   key_prefix: z
     .string()

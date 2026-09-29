@@ -655,6 +655,9 @@ describe("ModalGpuJobProvider", () => {
     expect(parseResourceUsage({ cpuCoreNanosecs: -1, memGibNanosecs: 0, gpuNanosecs: 0 })).toBe(
       undefined,
     );
+    expect(parseResourceUsage({ cpuCoreNanosecs: 1.5, memGibNanosecs: 0, gpuNanosecs: 0 })).toBe(
+      undefined,
+    );
   });
 
   it("reports no billed cost before the managed app has been created", async () => {

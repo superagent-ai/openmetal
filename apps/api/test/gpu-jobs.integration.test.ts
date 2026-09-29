@@ -397,6 +397,22 @@ describe("GPU jobs API", () => {
         "capability_unsupported",
       ],
       [{ ...baseRequest, placement: { regions: ["mars"] } }, 422, "validation_error"],
+      [
+        {
+          ...baseRequest,
+          mounts: [
+            {
+              kind: "bucket",
+              provider: "gcs",
+              bucket: `${"a".repeat(111)}.${"b".repeat(111)}`,
+              mount_path: "/outputs",
+              credentials: { access_key_id: "a", secret_access_key: "b" },
+            },
+          ],
+        },
+        422,
+        "validation_error",
+      ],
       [{ ...baseRequest, placement: { regions: ["us", "us"] } }, 422, "validation_error"],
       [
         {

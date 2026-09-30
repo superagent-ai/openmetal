@@ -1,0 +1,16 @@
+{
+  "title": "Gpu jobs",
+  "description": "Run containers to completion on provider GPUs, with logs and metered cost.",
+  "pages": [
+    "listGpuTypes",
+    "listGpuJobs",
+    "createGpuJob",
+    "getGpuJob",
+    "cancelGpuJob",
+    "streamGpuJobLogs",
+    "listProjectGpuJobs",
+    "getProjectGpuJob",
+    "cancelProjectGpuJob",
+    "streamProjectGpuJobLogs"
+  ]
+}

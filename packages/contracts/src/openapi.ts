@@ -90,6 +90,15 @@ import {
   UpdateAutoTopupRequestSchema,
 } from "./billing.js";
 import { OrganizationUsageSchema } from "./usage.js";
+import {
+  CreateGpuJobRequestSchema,
+  GpuJobListResponseSchema,
+  GpuJobLogEventSchema,
+  GpuJobMutationSchema,
+  GpuJobSchema,
+  GpuJobStateSchema,
+  GpuTypeCatalogResponseSchema,
+} from "./gpu-jobs.js";
 
 type OpenApiObject = Record<string, unknown>;
 
@@ -148,6 +157,8 @@ const reusableObjectSchemas = new Set([
   "BillingQuote",
   "OrganizationBilling",
   "OrganizationUsage",
+  "GpuJob",
+  "GpuJobLogEvent",
 ]);
 
 function referenceReusableObjectSchemas(
@@ -211,6 +222,10 @@ export function buildOpenApiDocument(): OpenApiObject {
       { name: "api keys", description: "Project scoped API keys." },
       { name: "sandboxes", description: "Portable sandbox lifecycle." },
       { name: "runtime", description: "Processes, files, and leased HTTP endpoints." },
+      {
+        name: "gpu jobs",
+        description: "Run containers to completion on provider GPUs, with logs and metered cost.",
+      },
       { name: "operations", description: "Asynchronous lifecycle operation status and events." },
       { name: "events", description: "Durable project event history." },
       { name: "webhooks", description: "Outbound organization webhook endpoints and deliveries." },
@@ -289,6 +304,16 @@ export function buildOpenApiDocument(): OpenApiObject {
         OrganizationBilling: json(OrganizationBillingSchema),
         BillingSetupResponse: json(BillingSetupResponseSchema),
         OrganizationUsage: json(OrganizationUsageSchema),
+        CreateGpuJobRequest: json(CreateGpuJobRequestSchema),
+        GpuJob: json(GpuJobSchema),
+        GpuJobMutation: json(GpuJobMutationSchema),
+        GpuJobListResponse: json(GpuJobListResponseSchema),
+        GpuJobLogEvent: json(GpuJobLogEventSchema),
+        GpuTypeCatalogResponse: json(GpuTypeCatalogResponseSchema),
+        GpuJobId: {
+          type: "string",
+          pattern: "^gpj_[A-Za-z0-9]+$",
+        },
         ProjectId: json(ProjectIdSchema),
         SandboxId: {
           type: "string",
@@ -406,6 +431,19 @@ export function buildOpenApiDocument(): OpenApiObject {
           in: "path",
           required: true,
           schema: ref("SandboxEndpointId"),
+        },
+        GpuJobIdPath: {
+          name: "gpu_job_id",
+          in: "path",
+          required: true,
+          schema: ref("GpuJobId"),
+        },
+        LastGpuJobLogEventIdHeader: {
+          name: "Last-Event-ID",
+          in: "header",
+          required: false,
+          description: "Resume after the last received GPU job log event sequence.",
+          schema: { type: "integer", minimum: 0 },
         },
         ProjectScopeHeader: {
           name: "X-Metal-Project-ID",
@@ -1521,6 +1559,192 @@ export function buildOpenApiDocument(): OpenApiObject {
             "401": errorResponse("Authentication required"),
             "403": errorResponse("Access denied"),
             "404": errorResponse("Endpoint not found"),
+          },
+        },
+      },
+      "/v1/gpu/types": {
+        get: {
+          operationId: "listGpuTypes",
+          tags: ["gpu jobs"],
+          description:
+            "Lists supported GPU types, the providers that offer them, per-GPU limits, and the published per-second rates OpenMetal passes through for managed jobs.",
+          responses: {
+            "200": response("GPU type catalog", "GpuTypeCatalogResponse"),
+          },
+        },
+      },
+      "/v1/gpu/jobs": {
+        parameters: [parameterRef("ProjectScopeHeader")],
+        get: {
+          operationId: "listGpuJobs",
+          tags: ["gpu jobs"],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            parameterRef("CursorQuery"),
+            parameterRef("LimitQuery"),
+            {
+              name: "state",
+              in: "query",
+              required: false,
+              schema: json(GpuJobStateSchema),
+            },
+          ],
+          responses: {
+            "200": response("GPU job page, newest first", "GpuJobListResponse"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "422": errorResponse("Invalid cursor or filter"),
+          },
+        },
+        post: {
+          operationId: "createGpuJob",
+          tags: ["gpu jobs"],
+          security: [{ bearerAuth: [] }],
+          description:
+            "Runs a container image to completion on the requested GPUs. Secret values are encrypted at rest, injected into the job, deleted once the job finishes, and never returned.",
+          parameters: [parameterRef("IdempotencyKeyHeader")],
+          requestBody: {
+            required: true,
+            content: jsonContent("CreateGpuJobRequest"),
+          },
+          responses: {
+            "202": response("GPU job submit operation accepted", "GpuJobMutation"),
+            "400": errorResponse("Idempotency-Key is required"),
+            "401": errorResponse("Authentication required"),
+            "402": errorResponse("Insufficient credits"),
+            "403": errorResponse("Access denied"),
+            "409": errorResponse("Idempotency conflict"),
+            "422": errorResponse("Invalid request or unsupported GPU requirement"),
+          },
+        },
+      },
+      "/v1/gpu/jobs/{gpu_job_id}": {
+        parameters: [parameterRef("GpuJobIdPath"), parameterRef("ProjectScopeHeader")],
+        get: {
+          operationId: "getGpuJob",
+          tags: ["gpu jobs"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("GPU job", "GpuJob"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("GPU job not found"),
+          },
+        },
+      },
+      "/v1/gpu/jobs/{gpu_job_id}/actions/cancel": {
+        parameters: [parameterRef("GpuJobIdPath"), parameterRef("ProjectScopeHeader")],
+        post: {
+          operationId: "cancelGpuJob",
+          tags: ["gpu jobs"],
+          security: [{ bearerAuth: [] }],
+          description:
+            "Cancels a GPU job. A job that has not started is cancelled immediately; a running job moves to cancelling and becomes cancelled once the provider has stopped it.",
+          responses: {
+            "202": response("GPU job cancellation accepted", "GpuJobMutation"),
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("GPU job not found"),
+            "409": errorResponse("GPU job is already terminal"),
+          },
+        },
+      },
+      "/v1/gpu/jobs/{gpu_job_id}/logs": {
+        parameters: [
+          parameterRef("GpuJobIdPath"),
+          parameterRef("ProjectScopeHeader"),
+          parameterRef("LastGpuJobLogEventIdHeader"),
+        ],
+        get: {
+          operationId: "streamGpuJobLogs",
+          tags: ["gpu jobs"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": {
+              description:
+                "Finite SSE batch of stdout, stderr, and truncation events in sequence order. Each data field is a GpuJobLogEvent. Poll with Last-Event-ID until the job reports logs_complete.",
+              content: {
+                "text/event-stream": {
+                  schema: {
+                    type: "string",
+                    examples: [
+                      'id: 1\nevent: stdout\ndata: {"sequence":1,"gpu_job_id":"gpj_example","type":"stdout","occurred_at":"2026-09-27T08:00:00.000Z","data":{"data_base64":"ZXBvY2ggMQo=","byte_length":8,"stream_offset_bytes":0}}\n\n',
+                    ],
+                  },
+                },
+              },
+            },
+            "401": errorResponse("Authentication required"),
+            "403": errorResponse("Access denied"),
+            "404": errorResponse("GPU job not found"),
+          },
+        },
+      },
+      "/v1/projects/{project_id}/gpu-jobs": {
+        parameters: [parameterRef("ProjectIdPath")],
+        get: {
+          operationId: "listProjectGpuJobs",
+          tags: ["gpu jobs"],
+          security: [{ bearerAuth: [] }],
+          description: "Lists a project's GPU jobs with a user access token, newest first.",
+          parameters: [
+            parameterRef("CursorQuery"),
+            parameterRef("LimitQuery"),
+            { name: "state", in: "query", required: false, schema: json(GpuJobStateSchema) },
+          ],
+          responses: {
+            "200": response("GPU job page, newest first", "GpuJobListResponse"),
+            "401": errorResponse("Authentication required"),
+            "404": errorResponse("Project not found"),
+            "422": errorResponse("Invalid cursor or filter"),
+          },
+        },
+      },
+      "/v1/projects/{project_id}/gpu-jobs/{gpu_job_id}": {
+        parameters: [parameterRef("ProjectIdPath"), parameterRef("GpuJobIdPath")],
+        get: {
+          operationId: "getProjectGpuJob",
+          tags: ["gpu jobs"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": response("GPU job", "GpuJob"),
+            "401": errorResponse("Authentication required"),
+            "404": errorResponse("Project or GPU job not found"),
+          },
+        },
+      },
+      "/v1/projects/{project_id}/gpu-jobs/{gpu_job_id}/actions/cancel": {
+        parameters: [parameterRef("ProjectIdPath"), parameterRef("GpuJobIdPath")],
+        post: {
+          operationId: "cancelProjectGpuJob",
+          tags: ["gpu jobs"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "202": response("GPU job cancellation accepted", "GpuJobMutation"),
+            "401": errorResponse("Authentication required"),
+            "404": errorResponse("Project or GPU job not found"),
+            "409": errorResponse("GPU job is already terminal"),
+          },
+        },
+      },
+      "/v1/projects/{project_id}/gpu-jobs/{gpu_job_id}/logs": {
+        parameters: [
+          parameterRef("ProjectIdPath"),
+          parameterRef("GpuJobIdPath"),
+          parameterRef("LastGpuJobLogEventIdHeader"),
+        ],
+        get: {
+          operationId: "streamProjectGpuJobLogs",
+          tags: ["gpu jobs"],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": {
+              description:
+                "Finite SSE batch of GPU job log events in sequence order, read with a user access token.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            "401": errorResponse("Authentication required"),
+            "404": errorResponse("Project or GPU job not found"),
           },
         },
       },

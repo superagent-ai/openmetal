@@ -1,8 +1,13 @@
 import { eq, sql } from "drizzle-orm";
 import { ProviderCredentialInputSchema } from "@openmetal/contracts";
 import { organizationProviderCredentials, type MetalDb } from "@openmetal/db";
-import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
-import { buildByokSandboxProvider } from "./provider-registry.js";
+import type {
+  GpuJobProvider,
+  GpuJobProviderName,
+  SandboxProvider,
+  SandboxProviderName,
+} from "@openmetal/provider-core";
+import { buildByokGpuJobProvider, buildByokSandboxProvider } from "./provider-registry.js";
 
 type DecryptedCredentialRow = {
   credentialId: string;
@@ -93,4 +98,72 @@ export async function getByokProviderByCredentialId(
     throw new Error("sandbox provider credentials could not be decrypted");
   }
   return parseCredential(row).provider;
+}
+
+export type ResolvedByokGpuJobProvider = {
+  credentialId: string;
+  provider?: GpuJobProvider;
+  invalid?: true;
+};
+
+function parseGpuCredential(row: DecryptedCredentialRow): GpuJobProvider | undefined {
+  const input = ProviderCredentialInputSchema.parse(JSON.parse(row.decryptedSecret));
+  if (input.provider !== row.provider) {
+    throw new Error("provider credential metadata does not match its encrypted payload");
+  }
+  return buildByokGpuJobProvider(input);
+}
+
+export async function listOrganizationByokGpuJobProviders(
+  db: MetalDb,
+  organizationId: string,
+): Promise<Partial<Record<GpuJobProviderName, ResolvedByokGpuJobProvider>>> {
+  const rows = (await db.execute(sql`
+    select
+      credentials.id as "credentialId",
+      credentials.provider,
+      secrets.decrypted_secret as "decryptedSecret"
+    from metal.organization_provider_credentials credentials
+    inner join vault.decrypted_secrets secrets
+      on secrets.id = credentials.secret_id
+    where credentials.organization_id = ${organizationId}
+      and credentials.disabled_at is null
+  `)) as unknown as DecryptedCredentialRow[];
+  const providers: Partial<Record<GpuJobProviderName, ResolvedByokGpuJobProvider>> = {};
+  for (const row of rows) {
+    let provider: GpuJobProvider | undefined;
+    try {
+      provider = parseGpuCredential(row);
+    } catch {
+      if (row.provider === "modal") {
+        providers.modal = { credentialId: row.credentialId, invalid: true };
+      }
+      continue;
+    }
+    if (provider) providers[provider.name] = { credentialId: row.credentialId, provider };
+  }
+  return providers;
+}
+
+export async function getByokGpuJobProviderByCredentialId(
+  db: MetalDb,
+  credentialId: string,
+): Promise<GpuJobProvider> {
+  const rows = (await db.execute(sql`
+    select
+      credentials.id as "credentialId",
+      credentials.provider,
+      secrets.decrypted_secret as "decryptedSecret"
+    from metal.organization_provider_credentials credentials
+    inner join vault.decrypted_secrets secrets
+      on secrets.id = credentials.secret_id
+    where credentials.id = ${credentialId}
+    limit 1
+  `)) as unknown as DecryptedCredentialRow[];
+  const row = rows[0];
+  const provider = row ? parseGpuCredential(row) : undefined;
+  if (!provider) {
+    throw new Error("GPU job provider credentials are not available");
+  }
+  return provider;
 }

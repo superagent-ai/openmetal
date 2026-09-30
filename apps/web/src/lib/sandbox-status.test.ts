@@ -21,6 +21,19 @@ describe("summarizeSandboxStatuses", () => {
     });
   });
 
+  it("groups GPU job states alongside sandboxes", () => {
+    expect(
+      summarizeSandboxStatuses([
+        { id: "gpj_running", state: "running", created_at: createdAt },
+        { id: "gpj_cancelling", state: "cancelling", created_at: createdAt },
+        { id: "gpj_succeeded", state: "succeeded", created_at: createdAt },
+        { id: "gpj_cancelled", state: "cancelled", created_at: createdAt },
+        { id: "gpj_failed", state: "failed", created_at: createdAt },
+        { id: "gpj_timed_out", state: "timed_out", created_at: createdAt },
+      ]),
+    ).toEqual({ active: 2, stopped: 2, failed: 2 });
+  });
+
   it("returns zeroes when an organization has no sandboxes", () => {
     expect(summarizeSandboxStatuses([])).toEqual({
       active: 0,

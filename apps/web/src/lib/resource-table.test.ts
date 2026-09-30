@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   applyResourceTableState,
-  applySandboxCostUpdate,
+  applyResourceCostUpdate,
   deleteResourceSearchQualifierAtCaret,
   getResourceSearchSuggestionMode,
   parseResourceSearchQuery,
   PENDING_PROVIDER_FILTER,
   providerLabel,
+  resourceSearchQualifiers,
   tokenizeResourceSearchQuery,
   toggleSearchQualifier,
   type ResourceTableRow,
@@ -376,14 +377,14 @@ describe("applyResourceTableState", () => {
   });
 });
 
-describe("applySandboxCostUpdate", () => {
+describe("applyResourceCostUpdate", () => {
   const costRows = [
     { ...row({ id: "sbx_a", cost_microusd: "100" }), cost_updated_at: "2026-08-01T00:05:00.000Z" },
     { ...row({ id: "sbx_b", cost_microusd: null }), cost_updated_at: null },
   ];
 
   it("patches the matching row from a sandbox.cost_updated payload", () => {
-    const next = applySandboxCostUpdate(costRows, {
+    const next = applyResourceCostUpdate(costRows, {
       provider: "daytona",
       sandbox_id: "sbx_b",
       cost_microusd: "40520",
@@ -400,14 +401,89 @@ describe("applySandboxCostUpdate", () => {
 
   it("keeps rows unchanged for unknown sandboxes or malformed payloads", () => {
     expect(
-      applySandboxCostUpdate(costRows, {
+      applyResourceCostUpdate(costRows, {
         sandbox_id: "sbx_missing",
         cost_microusd: "1",
         cost_updated_at: "2026-08-01T00:06:00.000Z",
       }),
     ).toBe(costRows);
-    expect(applySandboxCostUpdate(costRows, { sandbox_id: "sbx_a", cost_microusd: 1 })).toBe(
+    expect(applyResourceCostUpdate(costRows, { sandbox_id: "sbx_a", cost_microusd: 1 })).toBe(
       costRows,
     );
+  });
+
+  it("patches a GPU job row from a gpu_job.cost_updated payload", () => {
+    const gpuRows = [
+      {
+        ...row({ id: "gpj_a", type: "gpu_job", cost_microusd: null }),
+        cost_updated_at: null,
+      },
+    ];
+    expect(
+      applyResourceCostUpdate(gpuRows, {
+        provider: "modal",
+        gpu_job_id: "gpj_a",
+        cost_microusd: "5340",
+        cost_updated_at: "2026-09-27T10:00:00.000Z",
+      })[0],
+    ).toMatchObject({ id: "gpj_a", cost_microusd: "5340" });
+  });
+});
+
+describe("GPU job rows", () => {
+  const mixed = [
+    ...rows,
+    row({
+      id: "gpj_train",
+      type: "gpu_job",
+      gpu_label: "2 × NVIDIA H100",
+      provider: "modal",
+      state: "running",
+      created_at: "2026-08-01T00:06:00.000Z",
+      ready_at: "2026-08-01T00:07:00.000Z",
+      cost_microusd: "7000000",
+    }),
+    row({
+      id: "gpj_done",
+      type: "gpu_job",
+      gpu_label: "1 × NVIDIA T4",
+      provider: "modal",
+      state: "succeeded",
+      created_at: "2026-08-01T00:07:00.000Z",
+      ready_at: "2026-08-01T00:08:00.000Z",
+      stopped_at: "2026-08-01T00:18:00.000Z",
+      cost_microusd: "100000",
+    }),
+  ];
+  const mixedTable = (query: string) =>
+    applyResourceTableState(mixed, { query, sort: null, page: 1, now });
+
+  it("filters by resource type, GPU label, and GPU job states", () => {
+    expect(ids(mixedTable("type:gpu"))).toEqual(["gpj_train", "gpj_done"]);
+    expect(ids(mixedTable("type:sandbox"))).toHaveLength(5);
+    expect(ids(mixedTable("h100"))).toEqual(["gpj_train"]);
+    expect(ids(mixedTable("gpu job"))).toEqual(["gpj_train", "gpj_done"]);
+    expect(ids(mixedTable("status:succeeded"))).toEqual(["gpj_done"]);
+  });
+
+  it("offers GPU job types and states as search qualifiers", () => {
+    const qualifiers = resourceSearchQualifiers();
+    expect(qualifiers.find((item) => item.key === "type")?.values).toEqual([
+      { value: "sandbox", label: "Sandbox" },
+      { value: "gpu_job", label: "GPU job" },
+    ]);
+    expect(
+      qualifiers.find((item) => item.key === "status")?.values.map((item) => item.value),
+    ).toEqual(expect.arrayContaining(["running", "succeeded", "timed_out", "cancelled"]));
+  });
+
+  it("measures GPU job activity from start to finish", () => {
+    const result = applyResourceTableState(mixed, {
+      query: "type:gpu",
+      sort: { column: "activeFor", direction: "asc" },
+      page: 1,
+      now,
+    });
+    expect(ids(result)).toEqual(["gpj_done", "gpj_train"]);
   });
 });

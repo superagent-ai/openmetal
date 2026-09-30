@@ -1,5 +1,13 @@
-import { and, eq } from "drizzle-orm";
-import { operationEvents, operations, projects, sandboxes, type MetalDb } from "@openmetal/db";
+import { and, eq, or } from "drizzle-orm";
+import {
+  gpuJobs,
+  operationEvents,
+  operations,
+  projects,
+  sandboxes,
+  withTransaction,
+  type MetalDb,
+} from "@openmetal/db";
 import type { OperationState, OperationType } from "@openmetal/contracts";
 import { ApiError } from "./errors.js";
 
@@ -9,16 +17,24 @@ export async function appendOperationEvent(
   type: string,
   data: Record<string, unknown> = {},
 ) {
-  const rows = await db
-    .select({ sequence: operationEvents.sequence })
-    .from(operationEvents)
-    .where(eq(operationEvents.operationId, operationId));
-  const sequence = rows.reduce((max, row) => Math.max(max, row.sequence), 0) + 1;
-  const [event] = await db
-    .insert(operationEvents)
-    .values({ operationId, sequence, type, data })
-    .returning();
-  return event;
+  // Locking the operation serializes sequence allocation across the API and workers.
+  return withTransaction(db, async (tx) => {
+    await tx
+      .select({ id: operations.id })
+      .from(operations)
+      .where(eq(operations.id, operationId))
+      .for("update");
+    const rows = await tx
+      .select({ sequence: operationEvents.sequence })
+      .from(operationEvents)
+      .where(eq(operationEvents.operationId, operationId));
+    const sequence = rows.reduce((max, row) => Math.max(max, row.sequence), 0) + 1;
+    const [event] = await tx
+      .insert(operationEvents)
+      .values({ operationId, sequence, type, data })
+      .returning();
+    return event;
+  });
 }
 
 export async function createOperation(
@@ -26,16 +42,16 @@ export async function createOperation(
   input: {
     organizationId: string;
     projectId: string;
-    sandboxId: string;
     type: OperationType;
-  },
+  } & ({ sandboxId: string; gpuJobId?: never } | { gpuJobId: string; sandboxId?: never }),
 ) {
   const [operation] = await db
     .insert(operations)
     .values({
       organizationId: input.organizationId,
       projectId: input.projectId,
-      sandboxId: input.sandboxId,
+      sandboxId: input.sandboxId ?? null,
+      gpuJobId: input.gpuJobId ?? null,
       type: input.type,
     })
     .returning();
@@ -82,16 +98,29 @@ export async function getOperationForPrincipal(
   operationPublicId: string,
 ) {
   const row = await db
-    .select({ operation: operations })
+    .select({
+      operation: operations,
+      sandboxPublicId: sandboxes.publicId,
+      gpuJobPublicId: gpuJobs.publicId,
+    })
     .from(operations)
     .innerJoin(projects, eq(projects.id, operations.projectId))
-    .innerJoin(sandboxes, eq(sandboxes.id, operations.sandboxId))
-    .where(and(eq(operations.publicId, operationPublicId), eq(sandboxes.createdBy, userId)))
+    .leftJoin(sandboxes, eq(sandboxes.id, operations.sandboxId))
+    .leftJoin(gpuJobs, eq(gpuJobs.id, operations.gpuJobId))
+    .where(
+      and(
+        eq(operations.publicId, operationPublicId),
+        or(eq(sandboxes.createdBy, userId), eq(gpuJobs.createdBy, userId)),
+      ),
+    )
     .then((rows) => rows[0]);
   if (!row) {
     throw new ApiError(404, "not_found", "operation not found");
   }
-  return row.operation;
+  return {
+    ...row.operation,
+    resourcePublicId: row.sandboxPublicId ?? row.gpuJobPublicId ?? null,
+  };
 }
 
 export async function listOperationEvents(db: MetalDb, operationId: string, after = 0) {

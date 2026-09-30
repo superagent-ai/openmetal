@@ -24,6 +24,12 @@ export const OutboxJobTypeSchema = z.enum([
   "endpoint.revoke",
   "billing.auto_topup.evaluate",
   "billing.spend_limit.enforce",
+  "gpu_job.submit",
+  "gpu_job.monitor",
+  "gpu_job.cancel",
+  "gpu_job.cost.sync",
+  "gpu_job.orphan_sweep",
+  "gpu_job.cost_reconcile",
 ]);
 export type OutboxJobType = z.infer<typeof OutboxJobTypeSchema>;
 
@@ -125,6 +131,42 @@ export const BillingSpendLimitEnforceJobPayloadSchema = z.object({
   organization_id: z.uuid(),
   reason: z.string().min(1),
 });
+export const GpuJobSubmitJobPayloadSchema = z.object({
+  job_type: z.literal("gpu_job.submit"),
+  gpu_job_id: z.uuid(),
+  operation_id: z.uuid(),
+});
+export const GpuJobMonitorJobPayloadSchema = z.object({
+  job_type: z.literal("gpu_job.monitor"),
+  gpu_job_id: z.uuid(),
+});
+export const GpuJobCancelReasonSchema = z.enum([
+  "cancelled_by_user",
+  "max_runtime_exceeded",
+  "max_cost_reached",
+  "insufficient_credits",
+  "start_deadline_exceeded",
+]);
+export type GpuJobCancelReason = z.infer<typeof GpuJobCancelReasonSchema>;
+export const GpuJobCancelJobPayloadSchema = z.object({
+  job_type: z.literal("gpu_job.cancel"),
+  gpu_job_id: z.uuid(),
+  operation_id: z.uuid().optional(),
+  reason: GpuJobCancelReasonSchema,
+});
+export const GpuJobCostSyncJobPayloadSchema = z.object({
+  job_type: z.literal("gpu_job.cost.sync"),
+  gpu_job_id: z.uuid(),
+  final: z.boolean().default(false),
+});
+export const GpuJobOrphanSweepJobPayloadSchema = z.object({
+  job_type: z.literal("gpu_job.orphan_sweep"),
+});
+export const GpuJobCostReconcileJobPayloadSchema = z.object({
+  job_type: z.literal("gpu_job.cost_reconcile"),
+  window_start: z.iso.datetime(),
+  window_end: z.iso.datetime(),
+});
 export const OutboxJobPayloadSchema = z.discriminatedUnion("job_type", [
   RealtimeBroadcastJobPayloadSchema,
   WebhookDeliverJobPayloadSchema,
@@ -148,6 +190,12 @@ export const OutboxJobPayloadSchema = z.discriminatedUnion("job_type", [
   EndpointRevokeJobPayloadSchema,
   BillingAutoTopupEvaluateJobPayloadSchema,
   BillingSpendLimitEnforceJobPayloadSchema,
+  GpuJobSubmitJobPayloadSchema,
+  GpuJobMonitorJobPayloadSchema,
+  GpuJobCancelJobPayloadSchema,
+  GpuJobCostSyncJobPayloadSchema,
+  GpuJobOrphanSweepJobPayloadSchema,
+  GpuJobCostReconcileJobPayloadSchema,
 ]);
 export type OutboxJobPayload = z.infer<typeof OutboxJobPayloadSchema>;
 

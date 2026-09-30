@@ -9,7 +9,13 @@ import {
   CreateSandboxEndpointRequestSchema,
   CreateSandboxRecordingRequestSchema,
   CreateSandboxRequestSchema,
+  CreateGpuJobRequestSchema,
   ConfiguredProviderCredentialSchema,
+  GpuJobListResponseSchema,
+  GpuJobLogEventSchema,
+  GpuJobMutationSchema,
+  GpuJobSchema,
+  GpuTypeCatalogResponseSchema,
   DeleteFileRequestSchema,
   ListFilesRequestSchema,
   OrganizationBillingSchema,
@@ -49,7 +55,14 @@ import {
   WebhookEndpointSchema,
   WebhookEndpointWithSecretSchema,
   type CreateSandboxRequest,
+  type CreateGpuJobRequest,
   type CreateWebhookEndpointRequest,
+  type GpuJob,
+  type GpuJobListResponse,
+  type GpuJobLogEvent,
+  type GpuJobMutation,
+  type GpuJobState,
+  type GpuTypeCatalogResponse,
   type InvitationRole,
   type UpdateWebhookEndpointRequest,
   type OrganizationUsageQuery,
@@ -103,6 +116,21 @@ export type RuntimeWaitOptions = {
 };
 
 const TERMINAL_PROCESS_STATES = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
+const TERMINAL_GPU_JOB_STATES = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
+
+export type GpuJobLogStreamOptions = {
+  lastEventId?: number;
+  projectId?: string;
+  reconnectDelayMs?: number;
+  signal?: AbortSignal;
+};
+
+export type GpuJobWaitOptions = {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  projectId?: string;
+  signal?: AbortSignal;
+};
 
 type RequestOptions = {
   method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
@@ -210,6 +238,18 @@ const OperationEventBatchSseSchema = z.string().transform((raw, context) => {
     context.addIssue({
       code: "custom",
       message: error instanceof Error ? error.message : "invalid operation event batch",
+    });
+    return z.NEVER;
+  }
+});
+
+const GpuJobLogEventBatchSseSchema = z.string().transform((raw, context) => {
+  try {
+    return parseEventBatch(raw, GpuJobLogEventSchema, "GPU job log");
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "invalid GPU job log batch",
     });
     return z.NEVER;
   }
@@ -1240,6 +1280,140 @@ export class MetalClient {
     },
   };
 
+  readonly gpu = {
+    types: () =>
+      this.request({
+        method: "GET",
+        path: "/v1/gpu/types",
+        schema: GpuTypeCatalogResponseSchema,
+      }) as Promise<GpuTypeCatalogResponse>,
+  };
+
+  readonly gpuJobs = {
+    createAsync: (
+      input: CreateGpuJobRequest,
+      options?: { idempotencyKey?: string; projectId?: string },
+    ) =>
+      this.request({
+        method: "POST",
+        path: "/v1/gpu/jobs",
+        body: CreateGpuJobRequestSchema.parse(input),
+        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        projectId: options?.projectId,
+        schema: GpuJobMutationSchema,
+      }) as Promise<GpuJobMutation>,
+    /** Submits a GPU job and resolves once the provider has accepted it. */
+    create: async (
+      input: CreateGpuJobRequest,
+      options?: {
+        idempotencyKey?: string;
+        projectId?: string;
+        timeoutMs?: number;
+        signal?: AbortSignal;
+      },
+    ) => {
+      const mutation = await this.gpuJobs.createAsync(input, options);
+      // Jobs can wait for GPU capacity until max_start_seconds before they are submitted.
+      const timeoutMs =
+        options?.timeoutMs ??
+        (mutation.gpu_job.requested.lifecycle.max_start_seconds + 120) * 1_000;
+      const operation = await this.operations.wait(mutation.operation, { ...options, timeoutMs });
+      const job = await this.gpuJobs.get(mutation.gpu_job.id, options);
+      if (operation.state !== "succeeded" && job.state !== "cancelled") {
+        throw new Error(
+          operation.error?.message ?? job.failure?.message ?? "GPU job submit failed",
+        );
+      }
+      return job;
+    },
+    get: (gpuJobId: string, options?: { projectId?: string }) =>
+      this.request({
+        method: "GET",
+        path: `/v1/gpu/jobs/${gpuJobId}`,
+        projectId: options?.projectId,
+        schema: GpuJobSchema,
+      }) as Promise<GpuJob>,
+    list: (options?: {
+      projectId?: string;
+      cursor?: string;
+      limit?: number;
+      state?: GpuJobState;
+    }) =>
+      this.request({
+        method: "GET",
+        path: "/v1/gpu/jobs",
+        projectId: options?.projectId,
+        query: { cursor: options?.cursor, limit: options?.limit, state: options?.state },
+        schema: GpuJobListResponseSchema,
+      }) as Promise<GpuJobListResponse>,
+    cancelAsync: (gpuJobId: string, options?: { projectId?: string }) =>
+      this.request({
+        method: "POST",
+        path: `/v1/gpu/jobs/${gpuJobId}/actions/cancel`,
+        projectId: options?.projectId,
+        schema: GpuJobMutationSchema,
+      }) as Promise<GpuJobMutation>,
+    /** Requests cancellation and resolves with the job once it is terminal. */
+    cancel: async (gpuJobId: string, options?: GpuJobWaitOptions) => {
+      await this.gpuJobs.cancelAsync(gpuJobId, options);
+      return this.gpuJobs.wait(gpuJobId, options);
+    },
+    /** Polls until the job reaches succeeded, failed, timed_out, or cancelled. */
+    wait: async (gpuJobId: string, options: GpuJobWaitOptions = {}) => {
+      const deadline = Date.now() + (options.timeoutMs ?? 24 * 60 * 60_000);
+      while (Date.now() < deadline) {
+        const job = await this.gpuJobs.get(gpuJobId, options);
+        if (TERMINAL_GPU_JOB_STATES.has(job.state)) return job;
+        await abortableSleep(options.pollIntervalMs ?? 2_000, options.signal);
+      }
+      throw new Error(`GPU job ${gpuJobId} did not finish before timeout`);
+    },
+    /** Streams stdout, stderr, and truncation events until the job's logs are complete. */
+    logs: (gpuJobId: string, options: GpuJobLogStreamOptions = {}): AsyncIterable<GpuJobLogEvent> =>
+      this.streamGpuJobLogs(gpuJobId, options),
+    /** Lists a project's GPU jobs with a user access token, newest first. */
+    listForProject: (
+      projectId: string,
+      options?: { cursor?: string; limit?: number; state?: GpuJobState },
+    ) =>
+      this.request({
+        method: "GET",
+        path: `/v1/projects/${projectId}/gpu-jobs`,
+        query: { cursor: options?.cursor, limit: options?.limit, state: options?.state },
+        schema: GpuJobListResponseSchema,
+      }) as Promise<GpuJobListResponse>,
+    getForProject: (projectId: string, gpuJobId: string) =>
+      this.request({
+        method: "GET",
+        path: `/v1/projects/${projectId}/gpu-jobs/${gpuJobId}`,
+        schema: GpuJobSchema,
+      }) as Promise<GpuJob>,
+    cancelForProject: (projectId: string, gpuJobId: string) =>
+      this.request({
+        method: "POST",
+        path: `/v1/projects/${projectId}/gpu-jobs/${gpuJobId}/actions/cancel`,
+        schema: GpuJobMutationSchema,
+      }) as Promise<GpuJobMutation>,
+    /** Reads one bounded batch of log events after `lastEventId` with a user access token. */
+    logBatchForProject: (
+      projectId: string,
+      gpuJobId: string,
+      options: { lastEventId?: number; signal?: AbortSignal } = {},
+    ) =>
+      this.request({
+        method: "GET",
+        path: `/v1/projects/${projectId}/gpu-jobs/${gpuJobId}/logs`,
+        lastEventId: z
+          .number()
+          .int()
+          .nonnegative()
+          .parse(options.lastEventId ?? 0),
+        responseFormat: "text",
+        schema: GpuJobLogEventBatchSseSchema,
+        signal: options.signal,
+      }) as Promise<GpuJobLogEvent[]>,
+  };
+
   readonly events = {
     list: (input: { projectId: string; after?: string; limit?: number }) =>
       this.request({
@@ -1266,6 +1440,57 @@ export class MetalClient {
         }),
       }),
   };
+
+  private async *streamGpuJobLogs(
+    gpuJobId: string,
+    options: GpuJobLogStreamOptions,
+  ): AsyncGenerator<GpuJobLogEvent> {
+    let lastEventId =
+      options.lastEventId === undefined
+        ? 0
+        : z.number().int().nonnegative().parse(options.lastEventId);
+    const reconnectDelayMs = z
+      .number()
+      .nonnegative()
+      .parse(options.reconnectDelayMs ?? 1_000);
+    // Logs can land between the empty batch and the completion check, so one
+    // more read after the job reports complete must also be empty to finish.
+    let completeObserved = false;
+    while (true) {
+      if (options.signal?.aborted) {
+        throw options.signal.reason ?? new Error("GPU job log stream aborted");
+      }
+      const events = await this.request({
+        method: "GET",
+        path: `/v1/gpu/jobs/${gpuJobId}/logs`,
+        lastEventId,
+        projectId: options.projectId,
+        responseFormat: "text",
+        schema: GpuJobLogEventBatchSseSchema,
+        signal: options.signal,
+      });
+      for (const event of events) {
+        if (event.sequence !== lastEventId + 1) {
+          throw new MetalError({
+            status: 200,
+            code: "internal_error",
+            message: `GPU job log sequence ${event.sequence} followed ${lastEventId}`,
+            requestId: crypto.randomUUID(),
+          });
+        }
+        lastEventId = event.sequence;
+        yield event;
+      }
+      if (events.length > 0) continue;
+      if (completeObserved) return;
+      const job = await this.gpuJobs.get(gpuJobId, { projectId: options.projectId });
+      if (job.logs_complete) {
+        completeObserved = true;
+        continue;
+      }
+      await abortableSleep(reconnectDelayMs, options.signal);
+    }
+  }
 
   private async *streamProcessEvents(
     sandboxId: string,

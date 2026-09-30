@@ -74,6 +74,7 @@ export function SiteHeader({
   const parentHref =
     isProfileRoute || !activeOrganization ? "/dashboard" : `/dashboard/${activeOrganization.slug}`;
   const routeProjectSlug = pathname.split("/")[4];
+  const routeGpuJobId = pathname.split("/")[5] === "gpu-jobs" ? pathname.split("/")[6] : undefined;
   const isProjectDetail = Boolean(
     activeOrganization && pathname.includes("/projects/") && routeProjectSlug,
   );
@@ -130,9 +131,25 @@ export function SiteHeader({
                   </BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Resources</BreadcrumbPage>
-                </BreadcrumbItem>
+                {routeGpuJobId ? (
+                  <>
+                    <BreadcrumbItem>
+                      <BreadcrumbLink
+                        render={<Link href={`${parentHref}/projects/${routeProjectSlug}`} />}
+                      >
+                        Resources
+                      </BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage className="font-mono text-xs">{routeGpuJobId}</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </>
+                ) : (
+                  <BreadcrumbItem>
+                    <BreadcrumbPage>Resources</BreadcrumbPage>
+                  </BreadcrumbItem>
+                )}
               </>
             ) : (
               <BreadcrumbItem>

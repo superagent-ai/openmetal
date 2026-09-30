@@ -1,15 +1,19 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { parsePublicEvent, projectTopic } from "@openmetal/events";
+import type { GpuJob } from "@openmetal/sdk";
 import {
   ArrowDown01Icon,
   ArrowUp01Icon,
+  Cancel01Icon,
   Delete02Icon,
   MoreHorizontalIcon,
   PauseIcon,
   Tick02Icon,
+  ViewIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -44,10 +48,17 @@ import {
 } from "@/components/ui/table";
 import { ResourceSearchInput } from "@/components/resource-search-input";
 import { coalesceAsync } from "@/lib/coalesce";
+import {
+  gpuJobGpuLabel,
+  gpuJobHref,
+  isGpuJobCancellable,
+  listAllProjectGpuJobs,
+  TERMINAL_GPU_JOB_STATES,
+} from "@/lib/gpu-jobs";
 import { createMetalClient } from "@/lib/metal";
 import {
+  applyResourceCostUpdate,
   applyResourceTableState,
-  applySandboxCostUpdate,
   parseResourceSearchQuery,
   PENDING_PROVIDER_FILTER,
   providerLabel,
@@ -58,7 +69,10 @@ import {
   type ResourceTableSort,
   type ResourceTableSortColumn,
 } from "@/lib/resource-table";
+import { formatDuration, formatMicrousd, resourceDateFormatter } from "@/lib/resource-format";
+import { statusBadgeClass } from "@/lib/status-badge";
 import { createClient } from "@/lib/supabase/client";
+import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 
 type Sandbox = {
@@ -86,60 +100,39 @@ type Sandbox = {
   stopped_at: string | null;
 };
 
-const dateFormatter = new Intl.DateTimeFormat("en", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
+type GpuJobRow = {
+  id: string;
+  type: "gpu_job";
+  gpu_label: string;
+  provider: GpuJob["provider"];
+  cost_microusd: string | null;
+  cost_updated_at: string | null;
+  state: string;
+  created_at: string;
+  ready_at: string | null;
+  paused_at: null;
+  stopped_at: string | null;
+};
 
-function subscribeToClock(onStoreChange: () => void) {
-  const interval = window.setInterval(onStoreChange, 30_000);
-  return () => window.clearInterval(interval);
+type ResourceRow = Sandbox | GpuJobRow;
+
+function gpuJobRow(job: GpuJob): GpuJobRow {
+  return {
+    id: job.id,
+    type: "gpu_job",
+    gpu_label: gpuJobGpuLabel(job),
+    provider: job.provider,
+    cost_microusd: job.cost_microusd,
+    cost_updated_at: job.cost_updated_at,
+    state: job.state,
+    created_at: job.created_at,
+    ready_at: job.started_at,
+    paused_at: null,
+    stopped_at: job.finished_at,
+  };
 }
 
-function getClockSnapshot() {
-  return Math.floor(Date.now() / 30_000) * 30_000;
-}
-
-function getServerClockSnapshot() {
-  return 0;
-}
-
-function formatDuration(startedAt: string | null, endedAt: string | null, now: number) {
-  if (!startedAt || now === 0) {
-    return "Not active";
-  }
-  const durationMs = Math.max(
-    0,
-    (endedAt ? new Date(endedAt).getTime() : now) - new Date(startedAt).getTime(),
-  );
-  const totalMinutes = Math.floor(durationMs / 60_000);
-  if (totalMinutes < 1) {
-    return "Less than a minute";
-  }
-  const days = Math.floor(totalMinutes / 1_440);
-  const hours = Math.floor((totalMinutes % 1_440) / 60);
-  const minutes = totalMinutes % 60;
-  if (days > 0) {
-    return `${days}d ${hours}h`;
-  }
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  return `${minutes}m`;
-}
-
-function formatMicrousd(value: string | null) {
-  if (value === null) {
-    return "Pending";
-  }
-  const amount = BigInt(value);
-  const whole = amount / 1_000_000n;
-  const fraction = (amount % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
-  return `$${whole.toLocaleString("en-US")}.${fraction || "00"}`;
-}
-
-function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
+function ProviderMark({ provider }: { provider: ResourceRow["provider"] }) {
   if (!provider) {
     return null;
   }
@@ -171,25 +164,6 @@ function ProviderMark({ provider }: { provider: Sandbox["provider"] }) {
     return <Image src="/providers/runloop.png" alt="" width={13} height={13} />;
   }
   return <Image src="/providers/vercel.ico" alt="" width={13} height={13} />;
-}
-
-function statusBadgeClass(status: string) {
-  if (status === "ready") {
-    return "bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300";
-  }
-  if (status === "requested" || status === "provisioning") {
-    return "bg-sky-500/15 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300";
-  }
-  if (status === "pausing" || status === "stopping" || status === "cleanup_pending") {
-    return "bg-amber-500/15 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300";
-  }
-  if (status === "failed" || status === "cleanup_failed") {
-    return "bg-destructive/10 text-destructive dark:bg-destructive/20";
-  }
-  if (status === "provision_unknown") {
-    return "bg-violet-500/15 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300";
-  }
-  return "bg-muted text-muted-foreground";
 }
 
 function sortAria(sort: ResourceTableSort, column: ResourceTableSortColumn) {
@@ -290,13 +264,21 @@ function ColumnHeaderMenu({
 }
 
 export function ProjectResourcesTable({
+  organizationSlug,
   projectId,
+  projectSlug,
   sandboxes,
+  gpuJobs,
+  gpuJobsTruncated = false,
 }: {
+  organizationSlug: string;
   projectId: string;
+  projectSlug: string;
   sandboxes: Sandbox[];
+  gpuJobs: GpuJob[];
+  gpuJobsTruncated?: boolean;
 }) {
-  const now = useSyncExternalStore(subscribeToClock, getClockSnapshot, getServerClockSnapshot);
+  const now = useNow();
   const supabase = useMemo(() => createClient({ isSingleton: false }), []);
   const metal = useMemo(
     () =>
@@ -307,23 +289,33 @@ export function ProjectResourcesTable({
     [supabase],
   );
   const [sandboxRows, setSandboxRows] = useState(sandboxes);
-  const [busySandboxId, setBusySandboxId] = useState<string>();
+  const [gpuJobRows, setGpuJobRows] = useState(() => gpuJobs.map(gpuJobRow));
+  const [olderGpuJobsHidden, setOlderGpuJobsHidden] = useState(gpuJobsTruncated);
+  const [busyResourceId, setBusyResourceId] = useState<string>();
   const [deletingSandbox, setDeletingSandbox] = useState<Sandbox>();
+  const [cancellingGpuJob, setCancellingGpuJob] = useState<GpuJobRow>();
   const [error, setError] = useState<string>();
   const [refreshError, setRefreshError] = useState<string>();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<ResourceTableSort>(null);
   const [page, setPage] = useState(1);
   const parsedQuery = useMemo(() => parseResourceSearchQuery(query), [query]);
+  const resourceRows = useMemo<ResourceRow[]>(
+    () =>
+      [...sandboxRows, ...gpuJobRows].sort(
+        (left, right) => Date.parse(right.created_at) - Date.parse(left.created_at),
+      ),
+    [gpuJobRows, sandboxRows],
+  );
   const table = useMemo(
     () =>
-      applyResourceTableState(sandboxRows, {
+      applyResourceTableState(resourceRows, {
         query,
         sort,
         page,
         now,
       }),
-    [now, page, query, sandboxRows, sort],
+    [now, page, query, resourceRows, sort],
   );
   const providerOptions = useMemo(
     () =>
@@ -381,11 +373,16 @@ export function ProjectResourcesTable({
     setPage(1);
   }
 
-  const refreshSandboxes = useMemo(
+  const refreshResources = useMemo(
     () =>
       coalesceAsync(async () => {
-        const result = await metal.sandboxes.list(projectId);
-        setSandboxRows(result.sandboxes);
+        const [sandboxResult, jobs] = await Promise.all([
+          metal.sandboxes.list(projectId),
+          listAllProjectGpuJobs(metal, projectId),
+        ]);
+        setSandboxRows(sandboxResult.sandboxes);
+        setGpuJobRows(jobs.gpuJobs.map(gpuJobRow));
+        setOlderGpuJobsHidden(jobs.truncated);
         setRefreshError(undefined);
       }),
     [metal, projectId],
@@ -394,7 +391,7 @@ export function ProjectResourcesTable({
   useEffect(() => {
     let cancelled = false;
     const refresh = () => {
-      void refreshSandboxes().catch((caught) => {
+      void refreshResources().catch((caught) => {
         if (!cancelled) {
           setRefreshError(caught instanceof Error ? caught.message : "Could not refresh resources");
         }
@@ -406,11 +403,17 @@ export function ProjectResourcesTable({
     channel.on("broadcast", { event: "*" }, (message) => {
       try {
         const event = parsePublicEvent(message.payload);
-        if (event.project_id !== projectId || !event.type.startsWith("sandbox.") || cancelled) {
+        if (
+          event.project_id !== projectId ||
+          !(event.type.startsWith("sandbox.") || event.type.startsWith("gpu_job.")) ||
+          cancelled
+        ) {
           return;
         }
         if (event.type === "sandbox.cost_updated") {
-          setSandboxRows((current) => applySandboxCostUpdate(current, event.data));
+          setSandboxRows((current) => applyResourceCostUpdate(current, event.data));
+        } else if (event.type === "gpu_job.cost_updated") {
+          setGpuJobRows((current) => applyResourceCostUpdate(current, event.data));
         } else {
           refresh();
         }
@@ -445,7 +448,7 @@ export function ProjectResourcesTable({
       authListener.subscription.unsubscribe();
       void supabase.removeChannel(channel);
     };
-  }, [projectId, refreshSandboxes, supabase]);
+  }, [projectId, refreshResources, supabase]);
 
   function updateSandbox(updated: Sandbox) {
     setSandboxRows((current) =>
@@ -467,14 +470,14 @@ export function ProjectResourcesTable({
 
   async function pauseSandbox(sandbox: Sandbox) {
     setError(undefined);
-    setBusySandboxId(sandbox.id);
+    setBusyResourceId(sandbox.id);
     try {
       updateSandbox(await metal.sandboxes.pauseFromProject(projectId, sandbox.id));
       await refreshUntil(sandbox.id, ["paused", "failed"]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not pause the sandbox");
     } finally {
-      setBusySandboxId(undefined);
+      setBusyResourceId(undefined);
     }
   }
 
@@ -483,7 +486,7 @@ export function ProjectResourcesTable({
       return;
     }
     setError(undefined);
-    setBusySandboxId(deletingSandbox.id);
+    setBusyResourceId(deletingSandbox.id);
     try {
       updateSandbox(await metal.sandboxes.deleteFromProject(projectId, deletingSandbox.id));
       setDeletingSandbox(undefined);
@@ -491,7 +494,37 @@ export function ProjectResourcesTable({
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not delete the sandbox");
     } finally {
-      setBusySandboxId(undefined);
+      setBusyResourceId(undefined);
+    }
+  }
+
+  async function cancelGpuJob() {
+    if (!cancellingGpuJob) {
+      return;
+    }
+    const jobId = cancellingGpuJob.id;
+    setError(undefined);
+    setBusyResourceId(jobId);
+    try {
+      const { gpu_job: updated } = await metal.gpuJobs.cancelForProject(projectId, jobId);
+      setGpuJobRows((current) =>
+        current.map((job) => (job.id === updated.id ? gpuJobRow(updated) : job)),
+      );
+      setCancellingGpuJob(undefined);
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+        const job = await metal.gpuJobs.getForProject(projectId, jobId);
+        setGpuJobRows((current) =>
+          current.map((candidate) => (candidate.id === job.id ? gpuJobRow(job) : candidate)),
+        );
+        if (TERMINAL_GPU_JOB_STATES.has(job.state)) {
+          break;
+        }
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not cancel the GPU job");
+    } finally {
+      setBusyResourceId(undefined);
     }
   }
 
@@ -502,6 +535,12 @@ export function ProjectResourcesTable({
           <Alert variant="destructive">
             <AlertDescription>{error ?? refreshError}</AlertDescription>
           </Alert>
+        ) : null}
+        {olderGpuJobsHidden ? (
+          <p className="text-sm text-muted-foreground">
+            Showing the newest {gpuJobRows.length.toLocaleString("en-US")} GPU jobs. Older jobs are
+            available through the API.
+          </p>
         ) : null}
         <ResourceSearchInput
           query={query}
@@ -574,7 +613,7 @@ export function ProjectResourcesTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sandboxRows.length === 0 ? (
+              {resourceRows.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
                   <TableCell
                     colSpan={8}
@@ -595,89 +634,144 @@ export function ProjectResourcesTable({
                   </TableCell>
                 </TableRow>
               ) : (
-                table.rows.map((sandbox) => (
-                  <TableRow key={sandbox.id}>
-                    <TableCell className="pl-4">Sandbox</TableCell>
+                table.rows.map((resource) => (
+                  <TableRow key={resource.id}>
+                    <TableCell className="pl-4">
+                      {resource.type === "gpu_job" ? (
+                        <Link
+                          href={gpuJobHref(organizationSlug, projectSlug, resource.id)}
+                          className="flex flex-col hover:underline"
+                        >
+                          <span>GPU job</span>
+                          <span className="text-xs text-muted-foreground">
+                            {resource.gpu_label}
+                          </span>
+                        </Link>
+                      ) : (
+                        "Sandbox"
+                      )}
+                    </TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2">
                         <span className="flex size-6 items-center justify-center rounded-md bg-muted">
-                          <ProviderMark provider={sandbox.provider} />
+                          <ProviderMark provider={resource.provider} />
                         </span>
-                        <span className="normal-case">{providerLabel(sandbox.provider)}</span>
+                        <span className="normal-case">{providerLabel(resource.provider)}</span>
                       </span>
                     </TableCell>
                     <TableCell>
                       <Badge
                         variant="secondary"
-                        className={cn("capitalize", statusBadgeClass(sandbox.state))}
+                        className={cn("capitalize", statusBadgeClass(resource.state))}
                       >
-                        {sandbox.state.replaceAll("_", " ")}
+                        {resource.state.replaceAll("_", " ")}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {dateFormatter.format(new Date(sandbox.created_at))}
+                      {resourceDateFormatter.format(new Date(resource.created_at))}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {sandbox.ready_at
-                        ? dateFormatter.format(new Date(sandbox.ready_at))
+                      {resource.ready_at
+                        ? resourceDateFormatter.format(new Date(resource.ready_at))
                         : "Not started"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDuration(
-                        sandbox.ready_at,
-                        sandbox.paused_at ?? sandbox.stopped_at,
+                        resource.ready_at,
+                        resource.paused_at ?? resource.stopped_at,
                         now,
                       )}
                     </TableCell>
                     <TableCell
                       title={
-                        sandbox.cost_updated_at
-                          ? `Updated ${dateFormatter.format(new Date(sandbox.cost_updated_at))}`
-                          : `Waiting for ${sandbox.provider} usage data`
+                        resource.cost_updated_at
+                          ? `Updated ${resourceDateFormatter.format(new Date(resource.cost_updated_at))}`
+                          : `Waiting for ${resource.provider} usage data`
                       }
                     >
-                      {formatMicrousd(sandbox.cost_microusd)}
+                      {formatMicrousd(resource.cost_microusd)}
                     </TableCell>
                     <TableCell className="pr-4 text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={`Open actions for ${sandbox.id}`}
-                              disabled={busySandboxId === sandbox.id || sandbox.state === "stopped"}
-                            />
-                          }
-                        >
-                          <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            disabled={
-                              sandbox.provider === "blaxel" ||
-                              sandbox.provider === "modal" ||
-                              sandbox.provider === "cloudflare" ||
-                              sandbox.provider === "vercel" ||
-                              sandbox.state !== "ready"
+                      {resource.type === "gpu_job" ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={`Open actions for ${resource.id}`}
+                                disabled={busyResourceId === resource.id}
+                              />
                             }
-                            onClick={() => void pauseSandbox(sandbox)}
                           >
-                            <HugeiconsIcon icon={PauseIcon} strokeWidth={2} />
-                            Pause
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            disabled={sandbox.state === "stopping"}
-                            onClick={() => setDeletingSandbox(sandbox)}
+                            <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              render={
+                                <Link
+                                  href={gpuJobHref(organizationSlug, projectSlug, resource.id)}
+                                />
+                              }
+                            >
+                              <HugeiconsIcon icon={ViewIcon} strokeWidth={2} />
+                              View details and logs
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              disabled={!isGpuJobCancellable(resource.state)}
+                              onClick={() => setCancellingGpuJob(resource)}
+                            >
+                              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+                              Cancel job
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={`Open actions for ${resource.id}`}
+                                disabled={
+                                  busyResourceId === resource.id || resource.state === "stopped"
+                                }
+                              />
+                            }
                           >
-                            <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                            <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              disabled={
+                                resource.provider === "blaxel" ||
+                                resource.provider === "modal" ||
+                                resource.provider === "cloudflare" ||
+                                resource.provider === "vercel" ||
+                                resource.state !== "ready"
+                              }
+                              onClick={() => void pauseSandbox(resource)}
+                            >
+                              <HugeiconsIcon icon={PauseIcon} strokeWidth={2} />
+                              Pause
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              disabled={resource.state === "stopping"}
+                              onClick={() => setDeletingSandbox(resource)}
+                            >
+                              <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -718,7 +812,7 @@ export function ProjectResourcesTable({
         <AlertDialog
           open
           onOpenChange={(open) => {
-            if (!open && busySandboxId !== deletingSandbox.id) {
+            if (!open && busyResourceId !== deletingSandbox.id) {
               setDeletingSandbox(undefined);
             }
           }}
@@ -738,15 +832,52 @@ export function ProjectResourcesTable({
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel disabled={busySandboxId === deletingSandbox.id}>
+              <AlertDialogCancel disabled={busyResourceId === deletingSandbox.id}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 variant="destructive"
-                disabled={busySandboxId === deletingSandbox.id}
+                disabled={busyResourceId === deletingSandbox.id}
                 onClick={() => void deleteSandbox()}
               >
-                {busySandboxId === deletingSandbox.id ? "Deleting" : "Delete sandbox"}
+                {busyResourceId === deletingSandbox.id ? "Deleting" : "Delete sandbox"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
+
+      {cancellingGpuJob ? (
+        <AlertDialog
+          open
+          onOpenChange={(open) => {
+            if (!open && busyResourceId !== cancellingGpuJob.id) {
+              setCancellingGpuJob(undefined);
+            }
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogMedia>
+                <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+              </AlertDialogMedia>
+              <AlertDialogTitle>Cancel this GPU job?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The {cancellingGpuJob.gpu_label} job stops on{" "}
+                <span className="normal-case">{providerLabel(cancellingGpuJob.provider)}</span>. GPU
+                time used so far is still billed, and files already written to volumes are kept.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={busyResourceId === cancellingGpuJob.id}>
+                Keep running
+              </AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={busyResourceId === cancellingGpuJob.id}
+                onClick={() => void cancelGpuJob()}
+              >
+                {busyResourceId === cancellingGpuJob.id ? "Cancelling" : "Cancel job"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

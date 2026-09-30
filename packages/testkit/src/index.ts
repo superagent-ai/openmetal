@@ -5,3 +5,4 @@ export * from "./boundaries.js";
 export * from "./fake-provider.js";
 export * from "./fake-transport.js";
 export * from "./conformance.js";
+export * from "./gpu-jobs.js";

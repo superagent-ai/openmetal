@@ -1,6 +1,6 @@
 ---
 name: openmetal
-description: Use this skill whenever a user wants to provision, configure, inspect, pause, resume, or destroy cloud sandboxes with OpenMetal; run processes, move or manage files, expose HTTP endpoints, or automate OpenMetal through its CLI or TypeScript SDK; configure projects, API keys, provider routing, fallback, resources, lifecycle, BYOK credentials, or billing; or diagnose OpenMetal operations and errors. Use it for Metal sandbox tasks even when the user does not explicitly ask for this skill.
+description: Use this skill whenever a user wants to provision, configure, inspect, pause, resume, or destroy cloud sandboxes with OpenMetal; run GPU jobs for training, fine-tuning, batch inference, or evaluation; run processes, move or manage files, expose HTTP endpoints, or automate OpenMetal through its CLI or TypeScript SDK; configure projects, API keys, provider routing, fallback, resources, lifecycle, BYOK credentials, or billing; or diagnose OpenMetal operations and errors. Use it for Metal sandbox and GPU tasks even when the user does not explicitly ask for this skill.
 compatibility: Requires network access and either the OpenMetal CLI or Node.js 22+ for the TypeScript SDK.
 metadata:
   author: openmetal
@@ -106,6 +106,18 @@ openmetal --yes endpoint revoke <sandbox-id> <endpoint-id>
 ```
 
 Processes, filesystem operations, and endpoint provisioning are asynchronous. The high-level CLI waits for processes and filesystem results, while endpoint exposure returns the initial `provisioning` representation. Provider capabilities differ and are checked after acceptance. Read [references/runtime.md](references/runtime.md) and [references/providers-and-billing.md](references/providers-and-billing.md) before choosing a provider or relying on cancellation, append, list/delete, parent creation, or endpoint revocation.
+
+## Run GPU Jobs
+
+GPU jobs are a separate resource from sandboxes: one OCI image runs an argv command to completion on one to eight GPUs, then stops. They are not interactive and have no processes, filesystem, or endpoint routes. Read [references/gpu-jobs.md](references/gpu-jobs.md) before creating one.
+
+```bash
+openmetal gpu types
+openmetal gpu job create --image <image> --gpu nvidia-l4 --max-runtime 600 --max-cost 1.00 \
+  --secret-env HF_TOKEN --follow -- python train.py
+```
+
+Always set `max_runtime_seconds` and `max_cost_usd`. Put tokens in `secrets`, never `environment`. Write outputs to storage the user controls; the job filesystem is discarded.
 
 ## Operations And Failures
 

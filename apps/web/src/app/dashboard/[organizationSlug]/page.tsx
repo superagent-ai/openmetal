@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { DashboardOverview } from "@/components/dashboard-overview";
 import { requireOrganizationBySlug } from "@/lib/dashboard-organizations";
+import { listAllProjectGpuJobs } from "@/lib/gpu-jobs";
 import { requireMetalSession } from "@/lib/metal-server";
 import { dashboardPageMetadata } from "@/lib/page-metadata";
 import { usageQueryForFilters } from "@/lib/usage-filters";
@@ -35,16 +36,24 @@ export default async function OrganizationDashboardPage({
     ),
     metal.billing.get(organization.id),
   ]);
-  const sandboxResponses = await Promise.all(
-    projectResponse.projects.map((project) => metal.sandboxes.list(project.id)),
-  );
-  const sandboxes = sandboxResponses.flatMap((response) => response.sandboxes);
+  const [sandboxResponses, gpuJobLists] = await Promise.all([
+    Promise.all(projectResponse.projects.map((project) => metal.sandboxes.list(project.id))),
+    Promise.all(
+      projectResponse.projects.map((project) => listAllProjectGpuJobs(metal, project.id)),
+    ),
+  ]);
+  const resources = [
+    ...sandboxResponses.flatMap((response) => response.sandboxes),
+    ...gpuJobLists.flatMap((list) => list.gpuJobs),
+  ].map(({ id, state, created_at }) => ({ id, state, created_at }));
+  const resourcesTruncated = gpuJobLists.some((list) => list.truncated);
 
   return (
     <DashboardOverview
       organization={organization}
       projectIds={projectResponse.projects.map((project) => project.id)}
-      sandboxes={sandboxes}
+      resources={resources}
+      resourcesTruncated={resourcesTruncated}
       usage={usage}
       billing={billing}
     />

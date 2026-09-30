@@ -144,13 +144,16 @@ function MetricCard({
 export function DashboardOverview({
   organization,
   projectIds,
-  sandboxes,
+  resources,
+  resourcesTruncated = false,
   usage,
   billing,
 }: {
   organization: Organization;
   projectIds: string[];
-  sandboxes: DashboardSandbox[];
+  resources: DashboardSandbox[];
+  /** Older GPU jobs were not loaded, so the total is a lower bound. */
+  resourcesTruncated?: boolean;
   usage: OrganizationUsage;
   billing: OrganizationBilling;
 }) {
@@ -201,7 +204,7 @@ export function DashboardOverview({
             if (
               event.organization_id === organization.id &&
               event.project_id === projectId &&
-              event.type.startsWith("sandbox.")
+              (event.type.startsWith("sandbox.") || event.type.startsWith("gpu_job."))
             ) {
               refresh();
             }
@@ -251,8 +254,8 @@ export function DashboardOverview({
     usage.daily.map((day) => [day.date, Number(day.total_cost.microusd) / 1_000_000]),
   );
   const dailySpend = weekDates.map((date) => spendByDate.get(date) ?? 0);
-  const sandboxCounts = summarizeSandboxStatuses(sandboxes);
-  const sandboxActivity = sandboxStatusesByDate(sandboxes, weekDates);
+  const sandboxCounts = summarizeSandboxStatuses(resources);
+  const sandboxActivity = sandboxStatusesByDate(resources, weekDates);
   const creditBarColor = billing.auto_topup.enabled ? legendColors[0] : legendColors[1];
   const creditsByDate = new Map(
     billing.weekly_activity.map((day) => [day.date, Number(day.amount_microusd) / 1_000_000]),
@@ -261,7 +264,7 @@ export function DashboardOverview({
   const navigation = [
     {
       title: "Projects",
-      description: "Create projects and manage their sandbox resources.",
+      description: "Create projects and manage their sandboxes and GPU jobs.",
       href: `${basePath}/projects`,
       icon: FolderCodeIcon,
     },
@@ -384,7 +387,7 @@ export function DashboardOverview({
           />
           <MetricCard
             title="Resources"
-            value={sandboxes.length.toLocaleString("en-US")}
+            value={`${resources.length.toLocaleString("en-US")}${resourcesTruncated ? "+" : ""}`}
             bars={chartBars(
               sandboxActivity.map((counts) =>
                 sandboxStatuses.map((status) => ({

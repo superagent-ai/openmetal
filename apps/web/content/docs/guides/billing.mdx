@@ -48,9 +48,14 @@ A declined payment or required customer action pauses the policy instead of retr
 Managed sandbox creation requires a balance above zero. A request without sufficient credits
 returns `insufficient_credits` with HTTP 402.
 
+Managed [GPU jobs](/guides/gpu-jobs) need more than a positive balance: the balance must cover 15
+minutes of the new job and the organization's other running managed GPU jobs at their estimated
+rates. They can also set a per-job `limits.max_cost_usd`. Jobs pinned to regions are charged the
+provider's region multiplier.
+
 Usage is applied when provider measurements are available. Delayed measurements can temporarily
 produce a negative balance. If the balance reaches zero and automatic top up cannot run, OpenMetal
-schedules managed sandboxes to stop.
+schedules managed sandboxes to stop and cancels managed GPU jobs.
 
 Some providers report monetary usage directly. Others are calculated from provider runtime
 measurements and documented rates. The Usage page labels the source and confidence of each amount.

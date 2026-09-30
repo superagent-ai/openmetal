@@ -61,6 +61,12 @@ export const WorkerEnvSchema = z.object({
   MODAL_TOKEN_PROFILE: z.string().min(1).optional(),
   MODAL_ENVIRONMENT: z.string().min(1).optional(),
   MODAL_APP_NAME: z.string().min(1).optional(),
+  MODAL_GPU_APP_NAME: z.string().min(1).optional(),
+  // A separate Modal workspace for managed GPU jobs keeps their concurrency
+  // and billing apart from sandboxes and other workloads.
+  MODAL_GPU_TOKEN_ID: z.string().min(1).optional(),
+  MODAL_GPU_TOKEN_SECRET: z.string().min(1).optional(),
+  MODAL_GPU_ENVIRONMENT: z.string().min(1).optional(),
   VERCEL_OIDC_TOKEN: z.string().min(1).optional(),
   VERCEL_TOKEN: z.string().min(1).optional(),
   VERCEL_TEAM_ID: z.string().min(1).optional(),
@@ -82,6 +88,24 @@ export const WorkerEnvSchema = z.object({
     .min(60_000)
     .default(5 * 60_000),
   WORKER_PROCESS_EVENT_RETENTION_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(7 * 24 * 60 * 60_000),
+  WORKER_GPU_JOB_MONITOR_MS: z.coerce.number().int().min(250).default(5_000),
+  WORKER_GPU_JOB_MAX_MANAGED_GPUS_PER_ORGANIZATION: z.coerce.number().int().min(1).default(8),
+  /** Set to the managed Modal workspace's GPU concurrency limit. */
+  WORKER_GPU_JOB_MAX_MANAGED_GPUS: z.coerce.number().int().min(1).optional(),
+  /**
+   * Stray-resource sweeps and billing reconciliation for managed GPU jobs.
+   * Defaults to on only in production, where the managed Modal app is not
+   * shared with local workers.
+   */
+  WORKER_GPU_JOB_SWEEPS: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
+  WORKER_GPU_JOB_LOG_RETENTION_MS: z.coerce
     .number()
     .int()
     .min(60_000)

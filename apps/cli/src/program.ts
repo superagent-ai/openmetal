@@ -38,6 +38,7 @@ import {
   CliProcessStreamError,
   registerRuntimeCommands,
 } from "./runtime-commands.js";
+import { registerGpuCommands } from "./gpu-commands.js";
 
 declare const __OPENMETAL_VERSION__: string;
 declare const __OPENMETAL_COMMIT__: string;
@@ -129,7 +130,7 @@ export function createProgram(runtime: CliRuntime): Command {
   const program = new Command();
   program
     .name("openmetal")
-    .description("Manage OpenMetal organizations, projects, and sandboxes")
+    .description("Manage OpenMetal organizations, projects, sandboxes, and GPU jobs")
     .version(VERSION)
     .option("--profile <name>", "configuration profile")
     .option("--api-url <url>", "Metal API origin")
@@ -180,6 +181,14 @@ export function createProgram(runtime: CliRuntime): Command {
   registerComputeCommands(program, runtime, settings, output, confirmation);
   registerRuntimeCommands(program, {
     io,
+    settings,
+    output,
+    json: () => Boolean(globalOptions().json),
+    confirmation,
+  });
+  registerGpuCommands(program, {
+    io,
+    env,
     settings,
     output,
     json: () => Boolean(globalOptions().json),

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import {
   autoTopupAttempts,
   creditPurchases,
+  gpuJobs,
   insertDomainEventAndBroadcast,
   sendRealtimeBroadcast,
   organizationInvitations,
@@ -238,6 +239,25 @@ async function requireOrganizationDeletionReady(tx: MetalDb, organizationId: str
       "organization_has_active_resources",
       "stop all sandboxes before deleting the organization",
       { resource: "sandbox", id: blockingSandbox.id, state: blockingSandbox.state },
+    );
+  }
+
+  const [blockingGpuJob] = await tx
+    .select({ id: gpuJobs.publicId, state: gpuJobs.state })
+    .from(gpuJobs)
+    .where(
+      and(
+        eq(gpuJobs.organizationId, organizationId),
+        notInArray(gpuJobs.state, ["succeeded", "failed", "timed_out", "cancelled"]),
+      ),
+    )
+    .limit(1);
+  if (blockingGpuJob) {
+    throw new ApiError(
+      409,
+      "organization_has_active_resources",
+      "cancel all GPU jobs before deleting the organization",
+      { resource: "gpu_job", id: blockingGpuJob.id, state: blockingGpuJob.state },
     );
   }
 

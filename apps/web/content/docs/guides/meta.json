@@ -6,6 +6,7 @@
     "run-process",
     "filesystem",
     "expose-endpoint",
+    "gpu-jobs",
     "routing-and-providers",
     "prime-intellect",
     "billing",

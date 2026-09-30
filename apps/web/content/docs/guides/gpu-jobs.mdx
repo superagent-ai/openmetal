@@ -1,0 +1,353 @@
+---
+title: Run a GPU job
+description: Run a container to completion on provider GPUs, stream its logs, and pay per second.
+---
+
+A GPU job runs one OCI container image on one or more GPUs until its command exits. OpenMetal
+starts it on a GPU provider, captures stdout and stderr, meters its cost, and stops it at the
+runtime or cost limit you set. Use GPU jobs for training, fine-tuning, batch inference, and
+evaluation.
+
+GPU jobs run on [Modal](https://modal.com) today, with managed OpenMetal credits or your own Modal
+credentials.
+
+## Before you begin
+
+Create a project and project API key through the [agent setup](/get-started/agents) or the
+[OpenMetal dashboard](https://www.openmetal.sh/dashboard), then set:
+
+```bash
+export OPENMETAL_API_URL="https://api.openmetal.sh"
+export OPENMETAL_PROJECT_ID="prj_your_project"
+export OPENMETAL_API_KEY="metal_sk_your_key"
+```
+
+Managed GPU jobs need enough credits to run for 15 minutes at the job's estimated rate, on top of
+the organization's other running GPU jobs. Without them, the create request returns
+`insufficient_credits` with the required amount.
+
+## Choose a GPU
+
+List the GPU types, the providers that offer them, the maximum GPU count per job, and the
+per-second rates:
+
+```bash
+openmetal gpu types
+```
+
+The same catalog is available without authentication at `GET /v1/gpu/types`.
+
+| GPU type              | VRAM per GPU | Max GPUs per job |
+| --------------------- | ------------ | ---------------- |
+| `nvidia-t4`           | 16 GB        | 8                |
+| `nvidia-l4`           | 24 GB        | 8                |
+| `nvidia-a10`          | 24 GB        | 4                |
+| `nvidia-l40s`         | 48 GB        | 8                |
+| `nvidia-a100-40gb`    | 40 GB        | 8                |
+| `nvidia-a100-80gb`    | 80 GB        | 8                |
+| `nvidia-rtx-pro-6000` | 96 GB        | 8                |
+| `nvidia-h100`         | 80 GB        | 8                |
+| `nvidia-h200`         | 141 GB       | 8                |
+| `nvidia-b200`         | 180 GB       | 8                |
+| `nvidia-b300`         | 288 GB       | 8                |
+
+Modal may run an `nvidia-a100-40gb` job on an 80 GB A100, or an `nvidia-h100` job on an H200, at
+the price of the type you requested. `nvidia-b300` requires CUDA 13.1 or later.
+
+## Choose a region
+
+Jobs run in any region by default. Pin a job with `placement.regions` when it must stay close to
+your data or inside a jurisdiction. The catalog lists every region:
+
+| Scope  | Regions                                                                                                                                                                                       | Price multiplier |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| Broad  | `us`, `eu`, `ap`                                                                                                                                                                              | 1.15×            |
+| Narrow | `us-east`, `us-central`, `us-south`, `us-west`, `eu-west`, `eu-north`, `eu-south`, `ap-northeast`, `ap-southeast`, `ap-south`, `ap-melbourne`, `jp`, `au`, `uk`, `ca`, `me`, `sa`, `af`, `mx` | 1.75×            |
+
+The multiplier applies to every rate of a pinned job. A job listing both broad and narrow regions
+pays the broad multiplier. Pinning shrinks the pool of GPUs the job can use, so prefer broad
+regions and give pinned jobs a longer `max_start_seconds`.
+
+## Run a job
+
+<Tabs items={["TypeScript", "CLI", "curl"]}>
+  <Tab value="TypeScript">
+
+```ts
+import { MetalClient } from "@openmetal/sdk";
+
+const metal = new MetalClient({
+  baseUrl: process.env.OPENMETAL_API_URL!,
+  projectId: process.env.OPENMETAL_PROJECT_ID!,
+  accessToken: () => process.env.OPENMETAL_API_KEY,
+});
+
+const job = await metal.gpuJobs.create({
+  source: {
+    kind: "oci_image",
+    image: "pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime",
+    command: ["python", "-c", "import torch; print(torch.cuda.get_device_name(0))"],
+  },
+  gpu: { type: "nvidia-l4", count: 1 },
+  lifecycle: { max_runtime_seconds: 600 },
+  limits: { max_cost_usd: "1.00" },
+  environment: { PYTHONUNBUFFERED: "1" },
+  secrets: { HF_TOKEN: process.env.HF_TOKEN! },
+});
+
+for await (const event of metal.gpuJobs.logs(job.id)) {
+  if (event.type === "stdout" || event.type === "stderr") {
+    process[event.type].write(Buffer.from(event.data.data_base64, "base64"));
+  }
+}
+
+const finished = await metal.gpuJobs.wait(job.id);
+console.log(finished.state, finished.exit_code, finished.cost_microusd);
+```
+
+`gpuJobs.create` resolves once the provider has accepted the job. Use `gpuJobs.createAsync` to
+return immediately with the job and its operation.
+
+  </Tab>
+  <Tab value="CLI">
+
+```bash
+openmetal gpu job create \
+  --image pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime \
+  --gpu nvidia-l4 \
+  --max-runtime 600 \
+  --max-cost 1.00 \
+  --env PYTHONUNBUFFERED=1 \
+  --secret-env HF_TOKEN \
+  --follow \
+  -- python -c "import torch; print(torch.cuda.get_device_name(0))"
+```
+
+`--follow` streams stdout and stderr, then exits with the job's exit code. `--secret-env` reads
+the value from your local environment so it never appears in shell history. Pass `--file job.json`
+to submit a full request body instead of flags.
+
+  </Tab>
+  <Tab value="curl">
+
+```bash
+curl "$OPENMETAL_API_URL/v1/gpu/jobs" \
+  --request POST \
+  --header "Authorization: Bearer $OPENMETAL_API_KEY" \
+  --header "X-Metal-Project-ID: $OPENMETAL_PROJECT_ID" \
+  --header "Idempotency-Key: $(uuidgen)" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "source": {
+      "kind": "oci_image",
+      "image": "pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime",
+      "command": ["python", "-c", "import torch; print(torch.cuda.get_device_name(0))"]
+    },
+    "gpu": { "type": "nvidia-l4", "count": 1 },
+    "lifecycle": { "max_runtime_seconds": 600 },
+    "limits": { "max_cost_usd": "1.00" }
+  }'
+```
+
+The response contains the `gpu_job` and a `gpu_job_create` `operation`. Poll
+`GET /v1/gpu/jobs/{gpu_job_id}` until the state is terminal.
+
+  </Tab>
+</Tabs>
+
+Keep one stable `Idempotency-Key` when you retry an uncertain create. A new key starts a new job.
+
+## Request fields
+
+| Field                                   | Required | Notes                                                                                                                  |
+| --------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `source.image`                          | Yes      | Public OCI image. The first run of a new image includes the pull.                                                      |
+| `source.command`                        | Yes      | Argument vector. It runs without a shell; wrap it in `["sh", "-c", "..."]` if you need one.                            |
+| `source.working_dir`                    | No       | Absolute path.                                                                                                         |
+| `source.registry_auth`                  | No       | Credentials for a private image. See below.                                                                            |
+| `gpu.type`, `gpu.count`                 | Yes      | One type per job, 1 to 8 GPUs on one machine.                                                                          |
+| `lifecycle.max_runtime_seconds`         | Yes      | 60 to 86,400, measured from container start. The job is stopped and marked `timed_out` when it is exceeded.            |
+| `lifecycle.max_start_seconds`           | No       | Default 1,800. The job fails with `start_deadline_exceeded` if its container has not started this long after creation. |
+| `placement.regions`                     | No       | Up to 8 regions. Pinned jobs cost more; see [Choose a region](#choose-a-region).                                       |
+| `resources.vcpu`, `resources.memory_mb` | No       | Reserved CPU and memory. Without them, the job receives a small reservation and can burst; you pay for what it uses.   |
+| `limits.max_cost_usd`                   | No       | Decimal USD string. The job is cancelled with `max_cost_reached` once its metered cost reaches this amount.            |
+| `environment`                           | No       | Plain values, returned when you read the job.                                                                          |
+| `secrets`                               | No       | Write-only values, injected as environment variables. See below.                                                       |
+| `mounts`                                | No       | Up to 8 S3, R2, or GCS buckets mounted into the container. See below.                                                  |
+| `provider_options.modal.volumes`        | No       | BYOK only. Mounts Modal volumes from your own workspace.                                                               |
+| `metadata`                              | No       | Up to 50 string values for your own bookkeeping.                                                                       |
+
+## Secrets, private images, and outputs
+
+Values in `secrets` are encrypted at rest, passed to the provider as a secret when the job starts,
+and deleted from OpenMetal when the job reaches a terminal state. They are never returned; the job
+lists only their names in `requested.secret_names`. A name cannot appear in both `environment` and
+`secrets`. Registry and bucket credentials are handled the same way and are never returned either.
+
+### Private images
+
+Pull from a private registry with `source.registry_auth`:
+
+| `kind`                  | Fields                                         | Registries                                                                                 |
+| ----------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `basic`                 | `username`, `password`                         | Docker Hub, GitHub Container Registry, ACR tokens, and other username and token registries |
+| `aws_ecr`               | `access_key_id`, `secret_access_key`, `region` | Amazon ECR                                                                                 |
+| `gcp_artifact_registry` | `service_account_json`                         | Google Artifact Registry and Container Registry                                            |
+
+Use read-only credentials. With the CLI, pass `--registry-username` and
+`--registry-password-env NAME` to read the token from your local environment.
+
+### Outputs in your own bucket
+
+A job's filesystem is discarded when it exits. Mount a bucket you own to keep checkpoints, models,
+and results. This works for managed and BYOK jobs:
+
+```json
+{
+  "mounts": [
+    {
+      "kind": "bucket",
+      "provider": "r2",
+      "bucket": "training-outputs",
+      "mount_path": "/outputs",
+      "key_prefix": "runs/2026-09-27/",
+      "endpoint_url": "https://<account-id>.r2.cloudflarestorage.com",
+      "credentials": { "access_key_id": "...", "secret_access_key": "..." }
+    }
+  ]
+}
+```
+
+`provider` is `s3`, `r2`, or `gcs`. R2 needs its account `endpoint_url`; S3 accepts an optional
+`region` and `credentials.session_token`; GCS uses HMAC keys. `key_prefix` must end with `/`, and
+`read_only: true` mounts a bucket for reading only. Mounts write objects sequentially: files cannot
+be appended to or rewritten at an offset, so write to a local file and move it into the mount.
+
+### Modal volumes
+
+With your own Modal credentials, you can also mount Modal volumes from your workspace:
+
+```json
+{
+  "provider": "modal",
+  "provider_options": {
+    "modal": { "volumes": [{ "name": "checkpoints", "mount_path": "/checkpoints" }] }
+  }
+}
+```
+
+Managed jobs cannot mount volumes, because volumes would persist in OpenMetal's provider
+workspace. Such requests return `capability_unsupported`.
+
+## Logs
+
+`GET /v1/gpu/jobs/{gpu_job_id}/logs` returns a finite server-sent event batch of `stdout`,
+`stderr`, and `truncated` events in sequence order. Resume by sending the last received sequence in
+`Last-Event-ID`. Once the job reports `logs_complete: true`, request one more batch and stop when
+it is empty, so events written just before completion are not missed. The SDK
+`gpuJobs.logs` iterator and `openmetal gpu job logs` do this for you.
+
+Logs arrive within a few seconds of being written. OpenMetal stores up to 32 MiB of output per job;
+later output is not stored and a single `truncated` event marks the cut. Logs are kept for 7 days
+after the job finishes.
+
+## States
+
+| State               | Meaning                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `requested`         | Accepted, not yet submitted. `state_reason` says when it is waiting for capacity.     |
+| `provisioning`      | Submitted to a provider and waiting for GPUs; `submitted_at` is set once accepted.    |
+| `provision_unknown` | The provider's answer was lost; OpenMetal is reconciling instead of submitting again. |
+| `running`           | The container started at `started_at`. The runtime limit counts from here.            |
+| `cancelling`        | A cancel was requested and the provider is stopping the job.                          |
+| `succeeded`         | The command exited with code 0.                                                       |
+| `failed`            | See `state_reason` and `failure`.                                                     |
+| `timed_out`         | `max_runtime_seconds` was exceeded.                                                   |
+| `cancelled`         | See `state_reason`.                                                                   |
+
+`state_reason` values:
+
+| Reason                               | State       | Meaning                                                                                             |
+| ------------------------------------ | ----------- | --------------------------------------------------------------------------------------------------- |
+| `waiting_for_organization_gpu_limit` | `requested` | The organization's running managed jobs already use its GPU limit. The job starts when they finish. |
+| `waiting_for_gpu_capacity`           | `requested` | OpenMetal's managed GPU pool is full. The job starts when capacity frees up.                        |
+| `start_deadline_exceeded`            | `failed`    | No GPU started the container within `max_start_seconds`.                                            |
+| `gpu_limit_exceeded`                 | `failed`    | The job asks for more GPUs than the organization may use at once.                                   |
+| `insufficient_credits`               | `failed`    | The balance no longer covered 15 minutes of GPU spend when the job was about to start.              |
+| `exit_code_nonzero`                  | `failed`    | The command exited with the non-zero `exit_code`.                                                   |
+| `provider_init_failed`               | `failed`    | The container never started, for example because the image could not be pulled.                     |
+| `provider_terminated`                | `failed`    | The provider stopped the job before it finished, for example by preemption.                         |
+| `provider_lost`                      | `failed`    | The provider no longer has the job.                                                                 |
+| `provider_internal_failure`          | `failed`    | The provider reported an internal error.                                                            |
+| `no_eligible_provider`               | `failed`    | No configured provider could run the job.                                                           |
+| `max_runtime_exceeded`               | `timed_out` | `max_runtime_seconds` was exceeded.                                                                 |
+| `cancelled_by_user`                  | `cancelled` | You cancelled the job.                                                                              |
+| `max_cost_reached`                   | `cancelled` | Metered cost reached `limits.max_cost_usd`.                                                         |
+| `insufficient_credits`               | `cancelled` | The organization balance reached zero and automatic top up could not run.                           |
+
+Modal may preempt GPU containers. OpenMetal does not restart a preempted job; resubmit it and make
+long jobs resume from their last checkpoint.
+
+## Cancel a job
+
+```bash
+openmetal gpu job cancel gpj_your_job --wait
+```
+
+A job that has not been submitted is cancelled immediately. A running job moves to `cancelling`
+and becomes `cancelled` once the provider has stopped it. Cancelling a terminal job returns
+`gpu_job_terminal` with HTTP 409.
+
+## Billing
+
+Managed jobs are charged the provider's published per-second rates with no markup: the per-GPU
+rate for the requested type multiplied by GPU seconds, plus CPU and memory usage, times the region
+multiplier for pinned jobs. Rates are listed by `GET /v1/gpu/types`, and every job's `pricing`
+shows its multiplier and an estimated hourly cost at its requested size. Time spent waiting for a
+GPU is not billed.
+
+Each organization can run up to 8 managed GPUs at once; further jobs wait in `requested` and start
+as capacity frees up. Contact us to raise the limit.
+
+While a job runs, OpenMetal charges it every 30 seconds for the time its container has run, at its
+requested size and region multiplier, without waiting for the provider's usage report. When the
+provider's metered usage is higher, for example because the job used more CPU or memory than it
+reserved, the metered amount is charged instead. Ten minutes after the job finishes, the charge is
+settled to the provider's metered usage, but never below the time the provider recorded the
+container running. Settlement can move the cost slightly up or down. The job's
+`cost_microusd` shows the running total, and the charges appear on the Usage page.
+
+`max_cost_usd` is checked against the elapsed-time cost every few seconds, so a job is stopped close
+to its limit. The final cost can still exceed the limit by the few seconds it takes the provider to
+stop the container, plus any unreserved CPU and memory the job used.
+
+BYOK jobs run on your Modal account, are billed by Modal, and do not consume OpenMetal credits.
+
+## Limitations
+
+- Modal is the only GPU provider. Multi-node jobs and interruptible pricing are not available.
+- One job runs one container on one machine; GPUs are not shared between jobs.
+- Jobs cannot be paused, resumed, or attached to interactively.
+- Modal stops a container 24 hours after submission, including time spent waiting for a GPU.
+
+## Errors
+
+| Code                       | HTTP | When                                                                              |
+| -------------------------- | ---- | --------------------------------------------------------------------------------- |
+| `validation_error`         | 422  | The request does not match the schema.                                            |
+| `capability_unsupported`   | 422  | No provider offers the GPU type, count, runtime, or requested option.             |
+| `insufficient_credits`     | 402  | The balance does not cover 15 minutes of GPU spend. `details` has `required_usd`. |
+| `idempotency_key_required` | 400  | `Idempotency-Key` is missing.                                                     |
+| `idempotency_mismatch`     | 409  | The key was reused with a different request.                                      |
+| `gpu_job_terminal`         | 409  | Cancel was requested for a finished job.                                          |
+| `not_found`                | 404  | The job does not exist in this project.                                           |
+
+## Events
+
+Webhooks and the event history receive `gpu_job.requested`, `gpu_job.started` (when the container
+starts),
+`gpu_job.attempt_failed`, `gpu_job.cost_updated`, `gpu_job.succeeded`, `gpu_job.failed`,
+`gpu_job.timed_out`, and `gpu_job.cancelled`. Each carries the `gpu_job_id`.
+
+See the [GPU jobs API reference](/api-reference/endpoints/gpu-jobs/createGpuJob) for request and
+response schemas.

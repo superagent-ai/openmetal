@@ -1,7 +1,8 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import {
   autoTopupAttempts,
   autoTopupPolicies,
+  gpuJobs,
   operations,
   outboxJobs,
   pricingVersions,
@@ -25,6 +26,7 @@ const ACTIVE_SANDBOX_STATES = [
   "resuming",
   "runtime_unknown",
 ] as const;
+const TERMINAL_GPU_JOB_STATES = ["succeeded", "failed", "timed_out", "cancelled"] as const;
 
 export async function organizationBalance(tx: MetalDb, organizationId: string): Promise<bigint> {
   const account = await ensureBillingAccount(tx, organizationId);
@@ -45,21 +47,83 @@ export async function requirePositiveManagedBalance(
   }
 }
 
+/**
+ * Managed GPU jobs must be funded for this long at their estimated rate, on top
+ * of the organization's other active managed GPU jobs, before they start.
+ */
+export const MANAGED_GPU_FUNDING_WINDOW_SECONDS = 900;
+
+export type ManagedGpuFundingShortfall = {
+  requiredMicrousd: bigint;
+  balanceMicrousd: bigint;
+  windowSeconds: number;
+};
+
+export async function managedGpuFundingShortfall(
+  tx: MetalDb,
+  organizationId: string,
+  input: { hourlyMicrousd: bigint; excludeGpuJobId?: string },
+): Promise<ManagedGpuFundingShortfall | null> {
+  const [active] = await tx
+    .select({
+      hourly: sql<string>`coalesce(sum(${gpuJobs.estimatedHourlyMicrousd}), 0)::text`,
+    })
+    .from(gpuJobs)
+    .where(
+      and(
+        eq(gpuJobs.organizationId, organizationId),
+        eq(gpuJobs.billingMode, "managed"),
+        inArray(gpuJobs.state, ["provisioning", "provision_unknown", "running", "cancelling"]),
+        input.excludeGpuJobId ? ne(gpuJobs.id, input.excludeGpuJobId) : undefined,
+      ),
+    );
+  const hourly = BigInt(active?.hourly ?? "0") + input.hourlyMicrousd;
+  const window = BigInt(MANAGED_GPU_FUNDING_WINDOW_SECONDS);
+  const requiredMicrousd = (hourly * window + 3_599n) / 3_600n;
+  const balanceMicrousd = await organizationBalance(tx, organizationId);
+  if (balanceMicrousd > 0n && balanceMicrousd >= requiredMicrousd) return null;
+  return {
+    requiredMicrousd,
+    balanceMicrousd,
+    windowSeconds: MANAGED_GPU_FUNDING_WINDOW_SECONDS,
+  };
+}
+
+type UsageResource =
+  { sandboxId: string; gpuJobId?: never } | { gpuJobId: string; sandboxId?: never };
+
 export async function chargeUsageDelta(
   tx: MetalDb,
   input: {
     organizationId: string;
     projectId: string;
-    sandboxId: string;
     snapshotId: string;
     currentCostMicrousd: bigint;
     measuredFrom?: Date | null;
     measuredThrough: Date;
     actorId: string;
-  },
+  } & UsageResource,
 ) {
   await ensureBillingAccount(tx, input.organizationId);
-  await tx.execute(sql`select id from metal.sandboxes where id = ${input.sandboxId} for update`);
+  const resource = input.gpuJobId
+    ? await tx
+        .select({
+          billingMode: gpuJobs.billingMode,
+          customerChargedMicrousd: gpuJobs.customerChargedMicrousd,
+        })
+        .from(gpuJobs)
+        .where(eq(gpuJobs.id, input.gpuJobId))
+        .for("update")
+        .then((rows) => rows[0])
+    : await tx
+        .select({
+          billingMode: sandboxes.billingMode,
+          customerChargedMicrousd: sandboxes.customerChargedMicrousd,
+        })
+        .from(sandboxes)
+        .where(eq(sandboxes.id, input.sandboxId!))
+        .for("update")
+        .then((rows) => rows[0]);
   const [existingCharge] = await tx
     .select({ id: usageCharges.id })
     .from(usageCharges)
@@ -67,17 +131,10 @@ export async function chargeUsageDelta(
   if (existingCharge) {
     return { charged: false, balanceMicrousd: await organizationBalance(tx, input.organizationId) };
   }
-  const [sandbox] = await tx
-    .select({
-      billingMode: sandboxes.billingMode,
-      customerChargedMicrousd: sandboxes.customerChargedMicrousd,
-    })
-    .from(sandboxes)
-    .where(eq(sandboxes.id, input.sandboxId));
-  if (sandbox?.billingMode === "byok") {
+  if (resource?.billingMode === "byok") {
     return { charged: false, balanceMicrousd: await organizationBalance(tx, input.organizationId) };
   }
-  const previousChargedMicrousd = toMicrousd(sandbox?.customerChargedMicrousd);
+  const previousChargedMicrousd = toMicrousd(resource?.customerChargedMicrousd);
   const delta = toMicrousd(input.currentCostMicrousd) - previousChargedMicrousd;
   if (delta === 0n) {
     return { charged: false, balanceMicrousd: await organizationBalance(tx, input.organizationId) };
@@ -96,7 +153,7 @@ export async function chargeUsageDelta(
     kind,
     referenceType: "usage_charge",
     referenceId: input.snapshotId,
-    description: delta > 0n ? "Managed sandbox usage" : "Managed sandbox usage correction",
+    description: `Managed ${input.gpuJobId ? "GPU job" : "sandbox"} usage${delta > 0n ? "" : " correction"}`,
     actorId: input.actorId,
     lines: [
       { account: "customer_credits", amountMicrousd: -delta },
@@ -108,7 +165,8 @@ export async function chargeUsageDelta(
     .values({
       organizationId: input.organizationId,
       projectId: input.projectId,
-      sandboxId: input.sandboxId,
+      sandboxId: input.sandboxId ?? null,
+      gpuJobId: input.gpuJobId ?? null,
       snapshotId: input.snapshotId,
       pricingVersionId: pricing.id,
       providerCostDeltaMicrousd: delta,
@@ -122,20 +180,24 @@ export async function chargeUsageDelta(
   if (!inserted[0]) {
     throw new Error("duplicate usage charge");
   }
-  await tx
-    .update(sandboxes)
-    .set({
-      customerChargedMicrousd: input.currentCostMicrousd,
-      updatedAt: new Date(),
-    })
-    .where(eq(sandboxes.id, input.sandboxId));
+  if (input.gpuJobId) {
+    await tx
+      .update(gpuJobs)
+      .set({ customerChargedMicrousd: input.currentCostMicrousd, updatedAt: new Date() })
+      .where(eq(gpuJobs.id, input.gpuJobId));
+  } else {
+    await tx
+      .update(sandboxes)
+      .set({ customerChargedMicrousd: input.currentCostMicrousd, updatedAt: new Date() })
+      .where(eq(sandboxes.id, input.sandboxId!));
+  }
   await recordBillingEvent(tx, {
     type: "billing.usage_charged",
     organizationId: input.organizationId,
     projectId: input.projectId,
     actorId: input.actorId,
     data: {
-      sandbox_id: input.sandboxId,
+      ...(input.gpuJobId ? { gpu_job_id: input.gpuJobId } : { sandbox_id: input.sandboxId }),
       snapshot_id: input.snapshotId,
       delta_microusd: delta.toString(),
       balance_microusd: posted.balanceMicrousd.toString(),
@@ -248,16 +310,82 @@ export async function enforceSpendLimit(tx: MetalDb, organizationId: string) {
         },
       });
   }
+  const gpuJobRows = await tx
+    .select({
+      id: gpuJobs.id,
+      organizationId: gpuJobs.organizationId,
+      projectId: gpuJobs.projectId,
+      state: gpuJobs.state,
+    })
+    .from(gpuJobs)
+    .where(
+      and(
+        eq(gpuJobs.organizationId, organizationId),
+        eq(gpuJobs.billingMode, "managed"),
+        // A cancelling job already has a cancel operation and job queued.
+        notInArray(gpuJobs.state, [...TERMINAL_GPU_JOB_STATES, "cancelling"]),
+      ),
+    )
+    .for("update");
+  for (const job of gpuJobRows) {
+    const now = new Date();
+    const operationId = crypto.randomUUID();
+    await tx.insert(operations).values({
+      id: operationId,
+      publicId: `op_${operationId.replaceAll("-", "")}`,
+      organizationId: job.organizationId,
+      projectId: job.projectId,
+      gpuJobId: job.id,
+      type: "gpu_job_cancel",
+      state: "queued",
+    });
+    await tx
+      .update(gpuJobs)
+      .set({
+        state: "cancelling",
+        cancelRequestedAt: now,
+        cancelReason: "insufficient_credits",
+        updatedAt: now,
+      })
+      .where(eq(gpuJobs.id, job.id));
+    const payload = {
+      job_type: "gpu_job.cancel",
+      gpu_job_id: job.id,
+      operation_id: operationId,
+      reason: "insufficient_credits",
+    };
+    await tx
+      .insert(outboxJobs)
+      .values({ jobType: "gpu_job.cancel", dedupeKey: `gpu_job:cancel:${job.id}`, payload })
+      .onConflictDoUpdate({
+        target: outboxJobs.dedupeKey,
+        set: {
+          payload,
+          status: "pending",
+          attemptCount: 0,
+          availableAt: now,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          leaseToken: null,
+          lastError: null,
+          completedAt: null,
+          updatedAt: now,
+        },
+        setWhere: sql`${outboxJobs.status} <> 'leased'`,
+      });
+  }
   await recordBillingEvent(tx, {
     type: "billing.spend_limit_reached",
     organizationId,
     actorId: SYSTEM_ACTOR_ID,
     data: {
       balance_microusd: account.balanceMicrousd.toString(),
-      terminated_count: rows.length,
+      terminated_count: rows.length + gpuJobRows.length,
+      terminated_sandbox_count: rows.length,
+      cancelled_gpu_job_count: gpuJobRows.length,
     },
   });
-  return { terminated: rows.length };
+  return { terminated: rows.length + gpuJobRows.length };
 }
 
 export async function scheduleAutoTopupEvaluation(

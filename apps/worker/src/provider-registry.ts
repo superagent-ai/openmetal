@@ -4,13 +4,18 @@ import { CodeSandboxProvider } from "@openmetal/provider-codesandbox";
 import { DaytonaSandboxProvider } from "@openmetal/provider-daytona";
 import { E2BSandboxProvider } from "@openmetal/provider-e2b";
 import { FreestyleSandboxProvider } from "@openmetal/provider-freestyle";
-import { ModalSandboxProvider } from "@openmetal/provider-modal";
+import { ModalGpuJobProvider, ModalSandboxProvider } from "@openmetal/provider-modal";
 import { NorthflankSandboxProvider } from "@openmetal/provider-northflank";
 import { PrimeSandboxProvider } from "@openmetal/provider-prime";
 import { RunloopSandboxProvider } from "@openmetal/provider-runloop";
 import { VercelSandboxProvider } from "@openmetal/provider-vercel";
 import type { ProviderCredentialInput } from "@openmetal/contracts";
-import type { SandboxProvider, SandboxProviderName } from "@openmetal/provider-core";
+import type {
+  GpuJobProvider,
+  GpuJobProviderName,
+  SandboxProvider,
+  SandboxProviderName,
+} from "@openmetal/provider-core";
 import type { WorkerEnv } from "./env.js";
 
 function usdRateToMicrousd(value: string | undefined): bigint | undefined {
@@ -135,6 +140,39 @@ export function buildSandboxProviders(
     });
   }
   return providers;
+}
+
+export function buildGpuJobProviders(
+  env: WorkerEnv,
+): Partial<Record<GpuJobProviderName, GpuJobProvider>> {
+  const providers: Partial<Record<GpuJobProviderName, GpuJobProvider>> = {};
+  const dedicated = env.MODAL_GPU_TOKEN_ID && env.MODAL_GPU_TOKEN_SECRET;
+  const tokenId = dedicated ? env.MODAL_GPU_TOKEN_ID : env.MODAL_TOKEN_ID;
+  const tokenSecret = dedicated ? env.MODAL_GPU_TOKEN_SECRET : env.MODAL_TOKEN_SECRET;
+  if (tokenId && tokenSecret) {
+    providers.modal = new ModalGpuJobProvider({
+      tokenId,
+      tokenSecret,
+      appName: env.MODAL_GPU_APP_NAME,
+      environment: dedicated ? env.MODAL_GPU_ENVIRONMENT : env.MODAL_ENVIRONMENT,
+      metalEnvironment: env.METAL_ENVIRONMENT,
+    });
+  }
+  return providers;
+}
+
+export function buildByokGpuJobProvider(
+  credential: ProviderCredentialInput,
+): GpuJobProvider | undefined {
+  if (credential.provider === "modal") {
+    return new ModalGpuJobProvider({
+      tokenId: credential.token_id,
+      tokenSecret: credential.token_secret,
+      environment: credential.environment,
+      allowVolumes: true,
+    });
+  }
+  return undefined;
 }
 
 export function buildByokSandboxProvider(credential: ProviderCredentialInput): SandboxProvider {

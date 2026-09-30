@@ -1,10 +1,12 @@
 import { z } from "zod";
 import {
+  GpuJobIdSchema,
   IsoDateTimeSchema,
   PaginationLimitSchema,
   ProjectIdSchema,
   SandboxIdSchema,
 } from "./primitives.js";
+import { GpuJobProviderSchema, GpuJobStateSchema } from "./gpu-jobs.js";
 import { SandboxProviderSchema, SandboxStatusSchema } from "./sandboxes.js";
 
 export const UsageBillingModeSchema = z.enum(["managed", "byok"]);
@@ -144,6 +146,42 @@ export const UsageActivityItemSchema = z.object({
 });
 export type UsageActivityItem = z.infer<typeof UsageActivityItemSchema>;
 
+export const UsageGpuJobBreakdownSchema = z.object({
+  gpu_job_id: GpuJobIdSchema,
+  project_id: ProjectIdSchema,
+  project_name: z.string(),
+  project_slug: z.string(),
+  provider: GpuJobProviderSchema,
+  billing_mode: UsageBillingModeSchema,
+  status: GpuJobStateSchema,
+  cost: UsageCostAmountSchema,
+  previous_cost: UsageCostAmountSchema,
+  change_percent: z.number().nullable(),
+  provenance: CostProvenanceSchema,
+  confidence: CostConfidenceSchema,
+  cost_source: z.string().nullable(),
+});
+export type UsageGpuJobBreakdown = z.infer<typeof UsageGpuJobBreakdownSchema>;
+
+export const UsageGpuJobActivityItemSchema = z.object({
+  id: z.uuid(),
+  measured_through: IsoDateTimeSchema,
+  gpu_job_id: GpuJobIdSchema,
+  project_id: ProjectIdSchema,
+  project_name: z.string(),
+  project_slug: z.string(),
+  provider: GpuJobProviderSchema,
+  billing_mode: UsageBillingModeSchema,
+  status: GpuJobStateSchema,
+  cost_delta: UsageCostAmountSchema,
+  cumulative_cost: UsageCostAmountSchema,
+  provenance: CostProvenanceSchema,
+  confidence: CostConfidenceSchema,
+  cost_source: z.string().nullable(),
+  rate_card_version: z.string().nullable(),
+});
+export type UsageGpuJobActivityItem = z.infer<typeof UsageGpuJobActivityItemSchema>;
+
 export const OrganizationUsageSchema = z.object({
   organization_id: z.uuid(),
   period: z.object({
@@ -169,6 +207,8 @@ export const OrganizationUsageSchema = z.object({
   by_project: z.array(UsageProjectBreakdownSchema),
   top_sandboxes: z.array(UsageSandboxBreakdownSchema),
   activity: z.array(UsageActivityItemSchema),
+  top_gpu_jobs: z.array(UsageGpuJobBreakdownSchema).default([]),
+  gpu_job_activity: z.array(UsageGpuJobActivityItemSchema).default([]),
   generated_at: IsoDateTimeSchema,
 });
 export type OrganizationUsage = z.infer<typeof OrganizationUsageSchema>;

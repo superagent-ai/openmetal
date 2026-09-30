@@ -238,6 +238,250 @@ export type Database = {
         }
         Relationships: []
       }
+      gpu_cost_reconciliations: {
+        Row: {
+          created_at: string
+          drift_microusd: number
+          id: string
+          metal_metered_microusd: number
+          provider: string
+          provider_reported_microusd: number
+          provider_scope: string
+          raw_payload: Json
+          window_end: string
+          window_start: string
+        }
+        Insert: {
+          created_at?: string
+          drift_microusd: number
+          id?: string
+          metal_metered_microusd: number
+          provider: string
+          provider_reported_microusd: number
+          provider_scope: string
+          raw_payload?: Json
+          window_end: string
+          window_start: string
+        }
+        Update: {
+          created_at?: string
+          drift_microusd?: number
+          id?: string
+          metal_metered_microusd?: number
+          provider?: string
+          provider_reported_microusd?: number
+          provider_scope?: string
+          raw_payload?: Json
+          window_end?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
+      gpu_job_log_events: {
+        Row: {
+          data: Json
+          gpu_job_id: string
+          id: string
+          occurred_at: string
+          sequence: number
+          type: string
+        }
+        Insert: {
+          data: Json
+          gpu_job_id: string
+          id?: string
+          occurred_at?: string
+          sequence: number
+          type: string
+        }
+        Update: {
+          data?: Json
+          gpu_job_id?: string
+          id?: string
+          occurred_at?: string
+          sequence?: number
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gpu_job_log_events_gpu_job_id_fkey"
+            columns: ["gpu_job_id"]
+            isOneToOne: false
+            referencedRelation: "gpu_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gpu_jobs: {
+        Row: {
+          billing_mode: string
+          cancel_reason: string | null
+          cancel_requested_at: string | null
+          created_at: string
+          created_by: string
+          customer_charged_microusd: number
+          deadline_at: string | null
+          environment: Json
+          estimated_hourly_microusd: number
+          exit_code: number | null
+          failure_code: string | null
+          failure_message: string | null
+          finished_at: string | null
+          gpu: Json
+          id: string
+          lifecycle: Json
+          limits: Json
+          log_bytes: number
+          log_cursors: Json
+          log_stream_offsets: Json
+          logs_complete: boolean
+          logs_truncated: boolean
+          max_cost_microusd: number | null
+          metadata: Json
+          mounts: Json
+          organization_id: string
+          placement: Json
+          price_multiplier_bps: number
+          primary_provider: string
+          project_id: string
+          provider: string | null
+          provider_cost_measured_through: string | null
+          provider_cost_microusd: number | null
+          provider_cost_updated_at: string | null
+          provider_credential_id: string | null
+          provider_metadata: Json
+          provider_options: Json
+          provider_organization_id: string | null
+          provider_resource_id: string | null
+          public_id: string
+          rate_card_version: string | null
+          resolved: Json | null
+          resources: Json
+          secret_names: Json
+          secrets_vault_id: string | null
+          source: Json
+          started_at: string | null
+          state: string
+          state_reason: string | null
+          submitted_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          billing_mode?: string
+          cancel_reason?: string | null
+          cancel_requested_at?: string | null
+          created_at?: string
+          created_by: string
+          customer_charged_microusd?: number
+          deadline_at?: string | null
+          environment?: Json
+          estimated_hourly_microusd?: number
+          exit_code?: number | null
+          failure_code?: string | null
+          failure_message?: string | null
+          finished_at?: string | null
+          gpu: Json
+          id?: string
+          lifecycle: Json
+          limits?: Json
+          log_bytes?: number
+          log_cursors?: Json
+          log_stream_offsets?: Json
+          logs_complete?: boolean
+          logs_truncated?: boolean
+          max_cost_microusd?: number | null
+          metadata?: Json
+          mounts?: Json
+          organization_id: string
+          placement?: Json
+          price_multiplier_bps?: number
+          primary_provider: string
+          project_id: string
+          provider?: string | null
+          provider_cost_measured_through?: string | null
+          provider_cost_microusd?: number | null
+          provider_cost_updated_at?: string | null
+          provider_credential_id?: string | null
+          provider_metadata?: Json
+          provider_options?: Json
+          provider_organization_id?: string | null
+          provider_resource_id?: string | null
+          public_id?: string
+          rate_card_version?: string | null
+          resolved?: Json | null
+          resources?: Json
+          secret_names?: Json
+          secrets_vault_id?: string | null
+          source: Json
+          started_at?: string | null
+          state?: string
+          state_reason?: string | null
+          submitted_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          billing_mode?: string
+          cancel_reason?: string | null
+          cancel_requested_at?: string | null
+          created_at?: string
+          created_by?: string
+          customer_charged_microusd?: number
+          deadline_at?: string | null
+          environment?: Json
+          estimated_hourly_microusd?: number
+          exit_code?: number | null
+          failure_code?: string | null
+          failure_message?: string | null
+          finished_at?: string | null
+          gpu?: Json
+          id?: string
+          lifecycle?: Json
+          limits?: Json
+          log_bytes?: number
+          log_cursors?: Json
+          log_stream_offsets?: Json
+          logs_complete?: boolean
+          logs_truncated?: boolean
+          max_cost_microusd?: number | null
+          metadata?: Json
+          mounts?: Json
+          organization_id?: string
+          placement?: Json
+          price_multiplier_bps?: number
+          primary_provider?: string
+          project_id?: string
+          provider?: string | null
+          provider_cost_measured_through?: string | null
+          provider_cost_microusd?: number | null
+          provider_cost_updated_at?: string | null
+          provider_credential_id?: string | null
+          provider_metadata?: Json
+          provider_options?: Json
+          provider_organization_id?: string | null
+          provider_resource_id?: string | null
+          public_id?: string
+          rate_card_version?: string | null
+          resolved?: Json | null
+          resources?: Json
+          secret_names?: Json
+          secrets_vault_id?: string | null
+          source?: Json
+          started_at?: string | null
+          state?: string
+          state_reason?: string | null
+          submitted_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gpu_jobs_provider_credential_id_fkey"
+            columns: ["provider_credential_id"]
+            isOneToOne: false
+            referencedRelation: "organization_provider_credentials"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       idempotency_keys: {
         Row: {
           created_at: string
@@ -382,12 +626,13 @@ export type Database = {
           completed_at: string | null
           created_at: string
           error: Json | null
+          gpu_job_id: string | null
           id: string
           organization_id: string
           project_id: string
           public_id: string
           retryable: boolean
-          sandbox_id: string
+          sandbox_id: string | null
           state: string
           type: string
           updated_at: string
@@ -396,12 +641,13 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           error?: Json | null
+          gpu_job_id?: string | null
           id?: string
           organization_id: string
           project_id: string
           public_id?: string
           retryable?: boolean
-          sandbox_id: string
+          sandbox_id?: string | null
           state?: string
           type: string
           updated_at?: string
@@ -410,17 +656,25 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           error?: Json | null
+          gpu_job_id?: string | null
           id?: string
           organization_id?: string
           project_id?: string
           public_id?: string
           retryable?: boolean
-          sandbox_id?: string
+          sandbox_id?: string | null
           state?: string
           type?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "operations_gpu_job_id_fkey"
+            columns: ["gpu_job_id"]
+            isOneToOne: false
+            referencedRelation: "gpu_jobs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "operations_sandbox_id_fkey"
             columns: ["sandbox_id"]
@@ -635,6 +889,7 @@ export type Database = {
           error_code: string | null
           error_message: string | null
           exclusions: Json
+          gpu_job_id: string | null
           id: string
           operation_id: string
           outcome: string | null
@@ -643,7 +898,7 @@ export type Database = {
           provider_metadata: Json
           provider_resource_id: string | null
           resolved_resources: Json | null
-          sandbox_id: string
+          sandbox_id: string | null
           started_at: string | null
           state: string
           updated_at: string
@@ -655,6 +910,7 @@ export type Database = {
           error_code?: string | null
           error_message?: string | null
           exclusions?: Json
+          gpu_job_id?: string | null
           id?: string
           operation_id: string
           outcome?: string | null
@@ -663,7 +919,7 @@ export type Database = {
           provider_metadata?: Json
           provider_resource_id?: string | null
           resolved_resources?: Json | null
-          sandbox_id: string
+          sandbox_id?: string | null
           started_at?: string | null
           state?: string
           updated_at?: string
@@ -675,6 +931,7 @@ export type Database = {
           error_code?: string | null
           error_message?: string | null
           exclusions?: Json
+          gpu_job_id?: string | null
           id?: string
           operation_id?: string
           outcome?: string | null
@@ -683,12 +940,19 @@ export type Database = {
           provider_metadata?: Json
           provider_resource_id?: string | null
           resolved_resources?: Json | null
-          sandbox_id?: string
+          sandbox_id?: string | null
           started_at?: string | null
           state?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "provider_attempts_gpu_job_id_fkey"
+            columns: ["gpu_job_id"]
+            isOneToOne: false
+            referencedRelation: "gpu_jobs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "provider_attempts_operation_id_fkey"
             columns: ["operation_id"]
@@ -721,6 +985,7 @@ export type Database = {
           cost_delta_microusd: number
           cost_provenance: string
           cost_source: string | null
+          gpu_job_id: string | null
           id: string
           measured_from: string | null
           measured_through: string
@@ -730,7 +995,7 @@ export type Database = {
           provider_resource_id: string
           rate_card_version: string | null
           raw_payload: Json
-          sandbox_id: string
+          sandbox_id: string | null
         }
         Insert: {
           amount_microusd: number
@@ -740,6 +1005,7 @@ export type Database = {
           cost_delta_microusd: number
           cost_provenance?: string
           cost_source?: string | null
+          gpu_job_id?: string | null
           id?: string
           measured_from?: string | null
           measured_through: string
@@ -749,7 +1015,7 @@ export type Database = {
           provider_resource_id: string
           rate_card_version?: string | null
           raw_payload: Json
-          sandbox_id: string
+          sandbox_id?: string | null
         }
         Update: {
           amount_microusd?: number
@@ -759,6 +1025,7 @@ export type Database = {
           cost_delta_microusd?: number
           cost_provenance?: string
           cost_source?: string | null
+          gpu_job_id?: string | null
           id?: string
           measured_from?: string | null
           measured_through?: string
@@ -768,9 +1035,16 @@ export type Database = {
           provider_resource_id?: string
           rate_card_version?: string | null
           raw_payload?: Json
-          sandbox_id?: string
+          sandbox_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "provider_cost_snapshots_gpu_job_id_fkey"
+            columns: ["gpu_job_id"]
+            isOneToOne: false
+            referencedRelation: "gpu_jobs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "provider_cost_snapshots_sandbox_id_fkey"
             columns: ["sandbox_id"]
@@ -1093,11 +1367,11 @@ export type Database = {
           primary_provider: string
           project_id: string
           provider: string
+          provider_capabilities: Json | null
           provider_cost_measured_through: string | null
           provider_cost_microusd: number | null
           provider_cost_updated_at: string | null
           provider_credential_id: string | null
-          provider_capabilities: Json | null
           provider_metadata: Json
           provider_options: Json
           provider_organization_id: string | null
@@ -1135,11 +1409,11 @@ export type Database = {
           primary_provider: string
           project_id: string
           provider?: string
+          provider_capabilities?: Json | null
           provider_cost_measured_through?: string | null
           provider_cost_microusd?: number | null
           provider_cost_updated_at?: string | null
           provider_credential_id?: string | null
-          provider_capabilities?: Json | null
           provider_metadata?: Json
           provider_options: Json
           provider_organization_id?: string | null
@@ -1177,11 +1451,11 @@ export type Database = {
           primary_provider?: string
           project_id?: string
           provider?: string
+          provider_capabilities?: Json | null
           provider_cost_measured_through?: string | null
           provider_cost_microusd?: number | null
           provider_cost_updated_at?: string | null
           provider_credential_id?: string | null
-          provider_capabilities?: Json | null
           provider_metadata?: Json
           provider_options?: Json
           provider_organization_id?: string | null
@@ -1232,6 +1506,7 @@ export type Database = {
         Row: {
           created_at: string
           customer_charge_microusd: number
+          gpu_job_id: string | null
           id: string
           ledger_transaction_id: string
           measured_from: string | null
@@ -1240,12 +1515,13 @@ export type Database = {
           pricing_version_id: string
           project_id: string
           provider_cost_delta_microusd: number
-          sandbox_id: string
+          sandbox_id: string | null
           snapshot_id: string
         }
         Insert: {
           created_at?: string
           customer_charge_microusd: number
+          gpu_job_id?: string | null
           id?: string
           ledger_transaction_id: string
           measured_from?: string | null
@@ -1254,12 +1530,13 @@ export type Database = {
           pricing_version_id: string
           project_id: string
           provider_cost_delta_microusd: number
-          sandbox_id: string
+          sandbox_id?: string | null
           snapshot_id: string
         }
         Update: {
           created_at?: string
           customer_charge_microusd?: number
+          gpu_job_id?: string | null
           id?: string
           ledger_transaction_id?: string
           measured_from?: string | null
@@ -1268,10 +1545,17 @@ export type Database = {
           pricing_version_id?: string
           project_id?: string
           provider_cost_delta_microusd?: number
-          sandbox_id?: string
+          sandbox_id?: string | null
           snapshot_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "usage_charges_gpu_job_id_fkey"
+            columns: ["gpu_job_id"]
+            isOneToOne: false
+            referencedRelation: "gpu_jobs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "usage_charges_ledger_transaction_id_fkey"
             columns: ["ledger_transaction_id"]
@@ -1364,7 +1648,7 @@ export type Database = {
           delivered_at?: string | null
           endpoint_id: string
           endpoint_url: string
-          event: Json
+          event?: Json
           event_id: string
           event_type: string
           id?: string
@@ -1520,6 +1804,10 @@ export type Database = {
         Returns: string
       }
       project_topic_id: { Args: { p_topic: string }; Returns: string }
+      purge_gpu_job_secrets: {
+        Args: { target_gpu_job_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       auto_topup_attempt_status:
@@ -1546,7 +1834,6 @@ export type Database = {
         | "usage_correction"
         | "adjustment"
       outbox_job_status: "pending" | "leased" | "succeeded" | "failed"
-      webhook_delivery_status: "pending" | "delivering" | "succeeded" | "retrying" | "failed"
       pricing_kind: "purchase_fee" | "usage"
       process_state:
         | "queued"
@@ -1576,7 +1863,12 @@ export type Database = {
         | "revoked"
         | "expired"
         | "failed"
-      sandbox_recording_state: "starting" | "recording" | "stopping" | "stopped" | "failed"
+      sandbox_recording_state:
+        | "starting"
+        | "recording"
+        | "stopping"
+        | "stopped"
+        | "failed"
       sandbox_status:
         | "requested"
         | "provisioning"
@@ -1594,6 +1886,12 @@ export type Database = {
         | "runtime_unknown"
         | "stopping"
         | "stopped"
+      webhook_delivery_status:
+        | "pending"
+        | "delivering"
+        | "succeeded"
+        | "retrying"
+        | "failed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1906,7 +2204,6 @@ export const Constants = {
         "adjustment",
       ],
       outbox_job_status: ["pending", "leased", "succeeded", "failed"],
-      webhook_delivery_status: ["pending", "delivering", "succeeded", "retrying", "failed"],
       pricing_kind: ["purchase_fee", "usage"],
       process_state: [
         "queued",
@@ -1940,7 +2237,13 @@ export const Constants = {
         "expired",
         "failed",
       ],
-      sandbox_recording_state: ["starting", "recording", "stopping", "stopped", "failed"],
+      sandbox_recording_state: [
+        "starting",
+        "recording",
+        "stopping",
+        "stopped",
+        "failed",
+      ],
       sandbox_status: [
         "requested",
         "provisioning",
@@ -1958,6 +2261,13 @@ export const Constants = {
         "runtime_unknown",
         "stopping",
         "stopped",
+      ],
+      webhook_delivery_status: [
+        "pending",
+        "delivering",
+        "succeeded",
+        "retrying",
+        "failed",
       ],
     },
   },

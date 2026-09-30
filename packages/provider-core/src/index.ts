@@ -589,4 +589,5 @@ export function resolveMetalEnvironment(source: ProviderCreateSandboxInput["sour
 
 export const MetalEnvironmentCatalog = environments;
 
+export * from "./gpu.js";
 export * from "./eligibility.js";

@@ -27,6 +27,9 @@ import type {
   SandboxProvider,
 } from "@openmetal/provider-core";
 import { ProviderError } from "@openmetal/provider-core";
+import { parseResourceUsage, usageFromMetadata, type ModalResourceUsage } from "./modal-usage.js";
+
+export { ModalGpuJobProvider, type ModalGpuJobProviderOptions } from "./gpu-jobs.js";
 
 const MAX_OUTPUT_BYTES = 100 * 1_024 * 1_024;
 const MAX_FILE_BYTES = 10 * 1_024 * 1_024;
@@ -37,49 +40,10 @@ const MODAL_RATE_CARD_VERSION = "2026-09-11";
 const CPU_MICROUSD_PER_CORE_HOUR = 141_912n;
 const MEMORY_MICROUSD_PER_GIB_HOUR = 24_012n;
 
-type ModalResourceUsage = {
-  cpuCoreNanosecs: number;
-  memGibNanosecs: number;
-  gpuNanosecs: number;
-  gpuType?: string;
-};
-
-function validUsageValue(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function parseResourceUsage(value: unknown): ModalResourceUsage | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  if (
-    !("cpuCoreNanosecs" in value) ||
-    !validUsageValue(value.cpuCoreNanosecs) ||
-    !("memGibNanosecs" in value) ||
-    !validUsageValue(value.memGibNanosecs) ||
-    !("gpuNanosecs" in value) ||
-    !validUsageValue(value.gpuNanosecs)
-  ) {
-    return undefined;
-  }
-  const gpuType =
-    "gpuType" in value && typeof value.gpuType === "string" ? value.gpuType : undefined;
-  return {
-    cpuCoreNanosecs: value.cpuCoreNanosecs,
-    memGibNanosecs: value.memGibNanosecs,
-    gpuNanosecs: value.gpuNanosecs,
-    ...(gpuType ? { gpuType } : {}),
-  };
-}
-
-function usageFromMetadata(metadata: Record<string, unknown> | undefined) {
-  const modal = metadata?.modal;
-  if (!modal || typeof modal !== "object" || !("finalResourceUsage" in modal)) return undefined;
-  return parseResourceUsage(modal.finalResourceUsage);
-}
-
 function estimateCostMicrousd(usage: ModalResourceUsage): bigint {
   const numerator =
-    BigInt(usage.cpuCoreNanosecs) * CPU_MICROUSD_PER_CORE_HOUR +
-    BigInt(usage.memGibNanosecs) * MEMORY_MICROUSD_PER_GIB_HOUR;
+    usage.cpuCoreNanosecs * CPU_MICROUSD_PER_CORE_HOUR +
+    usage.memGibNanosecs * MEMORY_MICROUSD_PER_GIB_HOUR;
   return (numerator + NANOSECONDS_PER_HOUR / 2n) / NANOSECONDS_PER_HOUR;
 }
 
@@ -482,7 +446,14 @@ export class ModalSandboxProvider implements SandboxProvider {
       return finalResourceUsage
         ? {
             providerMetadata: {
-              modal: { finalResourceUsage },
+              modal: {
+                finalResourceUsage: {
+                  cpuCoreNanosecs: finalResourceUsage.cpuCoreNanosecs.toString(),
+                  memGibNanosecs: finalResourceUsage.memGibNanosecs.toString(),
+                  gpuNanosecs: finalResourceUsage.gpuNanosecs.toString(),
+                  ...(finalResourceUsage.gpuType ? { gpuType: finalResourceUsage.gpuType } : {}),
+                },
+              },
             },
           }
         : undefined;

@@ -51,8 +51,23 @@ const testEnv = enabled ? loadTestEnv() : undefined;
   let organizationId: string | undefined;
   let projectId: string | undefined;
   let apiKeyId: string | undefined;
+  let demandBefore: Record<string, number> = {};
+
+  async function demandCounts(): Promise<Record<string, number>> {
+    const rows = await database.sql`
+      select 'excluded:' || provider || ':' || requirement as key, sandboxes
+      from metal.capability_exclusions_daily
+      where day = (now() at time zone 'utc')::date
+      union all
+      select 'unserved:' || requirement, sandboxes
+      from metal.unserved_requirements_daily
+      where day = (now() at time zone 'utc')::date
+    `;
+    return Object.fromEntries(rows.map((row) => [String(row.key), Number(row.sandboxes)]));
+  }
 
   beforeAll(async () => {
+    demandBefore = await demandCounts();
     const apiEnv = loadApiEnv({
       ...process.env,
       DATABASE_URL: testEnv.DATABASE_URL,
@@ -396,23 +411,13 @@ const testEnv = enabled ? loadTestEnv() : undefined;
   }, 120_000);
 
   it("aggregates the run into the capability demand views", async () => {
-    const [excluded] = await database.sql`
-      select sandboxes from metal.capability_exclusions_daily
-      where day = (now() at time zone 'utc')::date
-        and provider = 'e2b' and requirement = 'isolation'
-    `;
-    expect(Number(excluded?.sandboxes)).toBeGreaterThanOrEqual(1);
-    const unserved = await database.sql`
-      select requirement from metal.unserved_requirements_daily
-      where day = (now() at time zone 'utc')::date
-        and requirement in ('network.allow_domains', 'regions', 'pty', 'process.execute')
-      order by requirement
-    `;
-    expect(unserved.map((row) => row.requirement)).toEqual([
-      "network.allow_domains",
-      "process.execute",
-      "pty",
-      "regions",
-    ]);
+    const after = await demandCounts();
+    const added = (key: string) => (after[key] ?? 0) - (demandBefore[key] ?? 0);
+    expect(added("excluded:codesandbox:process.execute")).toBeGreaterThanOrEqual(2);
+    expect(added("excluded:e2b:isolation")).toBeGreaterThanOrEqual(1);
+    expect(added("unserved:network.allow_domains")).toBeGreaterThanOrEqual(1);
+    expect(added("unserved:regions")).toBeGreaterThanOrEqual(1);
+    expect(added("unserved:pty")).toBeGreaterThanOrEqual(1);
+    expect(added("unserved:process.execute")).toBeGreaterThanOrEqual(2);
   });
 });

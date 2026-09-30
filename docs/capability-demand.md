@@ -1,6 +1,6 @@
 # Capability demand
 
-OpenMetal records why each provider was excluded from a sandbox request and which provider-specific options customers send. Three views in the `metal` schema aggregate that data by UTC day. They are revoked from `anon` and `authenticated`, so query them with the service role or from the Supabase SQL editor.
+OpenMetal records why each provider was excluded from a sandbox request and which provider-specific options customers send. Three views in the `metal` schema aggregate that data by UTC day. They are revoked from `anon` and `authenticated` and not granted to `service_role`, so query them as the `postgres` role, for example from the Supabase SQL editor or a direct database connection.
 
 | View                                | One row per                | Answers                                                                             |
 | ----------------------------------- | -------------------------- | ----------------------------------------------------------------------------------- |
@@ -17,7 +17,7 @@ Unserved requirements are demand no provider can currently meet:
 ```sql
 select requirement, sum(sandboxes) as sandboxes, sum(organizations) as organization_days
 from metal.unserved_requirements_daily
-where day >= current_date - 30
+where day >= (now() at time zone 'utc')::date - 30
 group by requirement
 order by sandboxes desc;
 ```
@@ -29,7 +29,7 @@ Provider options show where customers leave the portable API:
 ```sql
 select provider, option, sum(sandboxes) as sandboxes, sum(applied_sandboxes) as applied
 from metal.provider_option_usage_daily
-where day >= current_date - 30
+where day >= (now() at time zone 'utc')::date - 30
 group by provider, option
 order by sandboxes desc;
 ```

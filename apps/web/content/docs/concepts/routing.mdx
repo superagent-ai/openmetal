@@ -70,6 +70,6 @@ to opt out. Explicit providers only need what you request.
 
 ## Fallback safety
 
-Capacity, provider unavailable, and known absent timeout failures can move to the next candidate. Unknown provider outcomes enter `reconciling` first so OpenMetal does not create duplicate live capacity.
+Capacity, provider unavailable, known absent timeout, and provider-declined unsupported requests can move to the next candidate. Unknown provider outcomes enter `reconciling` first so OpenMetal does not create duplicate live capacity.
 
 See [route across providers](/guides/routing-and-providers) for a complete request.

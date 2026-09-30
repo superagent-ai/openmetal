@@ -569,6 +569,34 @@ describe("worker outbox", () => {
     expect(Number(options[0]!.sandboxes)).toBeGreaterThan(Number(options[0]!.applied_sandboxes));
   });
 
+  it("falls back when a provider declines an unsupported request during create", async () => {
+    const seeded = await seedProvisionJob({ primaryProvider: "prime", fallbackProviders: ["e2b"] });
+    const declining = new FakeSandboxProvider("prime", {
+      failures: [{ kind: "unsupported", retryable: false }],
+    });
+    const fallback = new FakeSandboxProvider("e2b");
+    await processUntilJob(
+      seeded.jobId,
+      { publish: async () => undefined },
+      seeded.workerEnv,
+      (row) => row.status === "succeeded",
+      { prime: declining, e2b: fallback },
+    );
+    const [sandbox] = await database.sql`
+      select provider, status from metal.sandboxes where id = ${seeded.sandboxId}
+    `;
+    expect(sandbox).toMatchObject({ provider: "e2b", status: "ready" });
+    const attempts = await database.sql`
+      select provider, outcome, error_code from metal.provider_attempts
+      where operation_id = ${seeded.operationId}
+      order by attempt_index
+    `;
+    expect(attempts).toMatchObject([
+      { provider: "prime", outcome: "absent", error_code: "unsupported" },
+      { provider: "e2b", outcome: "created" },
+    ]);
+  });
+
   it("fails closed with unmet requirements when no candidate can enforce the request", async () => {
     const seeded = await seedProvisionJob({
       primaryProvider: "e2b",

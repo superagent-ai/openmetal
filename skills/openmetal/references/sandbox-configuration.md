@@ -48,7 +48,7 @@ Omitting `provider` behaves as automatic selection. Prefer automatic selection u
 
 `fallback.providers` is an ordered array of up to nine providers. `fallback.max_attempts` is an integer from 1 through 10 and defaults to 9. It limits provider calls; candidates skipped for unmet requirements do not count. Primary and fallback candidates must be unique.
 
-With automatic selection, explicit fallback providers are tried first, followed by other configured providers in registry order. With an explicit provider, the primary is tried first, followed by the listed fallbacks. Candidates that fail a requirement in [Features](#features), [Network](#network), [Regions](#regions), source, or resources are skipped before OpenMetal calls them. After a provider call, safe fallback is currently limited to capacity, provider-unavailable, and known-absent timeout failures. Unknown outcomes enter reconciliation before another provider is attempted.
+With automatic selection, explicit fallback providers are tried first, followed by other configured providers in registry order. With an explicit provider, the primary is tried first, followed by the listed fallbacks. Candidates that fail a requirement in [Features](#features), [Network](#network), [Regions](#regions), source, or resources are skipped before OpenMetal calls them. After a provider call, safe fallback is currently limited to capacity, provider-unavailable, known-absent timeout, and provider-declined unsupported-request failures. Unknown outcomes enter reconciliation before another provider is attempted.
 
 ## Sources
 

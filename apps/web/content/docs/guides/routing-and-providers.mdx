@@ -35,8 +35,9 @@ by other managed or BYOK providers in their configured order.
 Current routing uses your fallback order and the configured provider order. It does not rank
 candidates by price, speed, reliability, or a balanced score.
 
-Automatic routing only considers providers that can execute processes and read and write files.
-Add `features` to require more, such as `{"process": {"ordered_output": true}}` for streamed
+By default, automatic routing only considers providers that can execute processes and read and
+write files. Set `features.process.execute`, `features.filesystem.read`, or
+`features.filesystem.write` to `false` to opt out. Add `features` to require more, such as `{"process": {"ordered_output": true}}` for streamed
 output or `{"isolation": ["microvm"]}` for a microVM boundary.
 
 ## Choose a provider explicitly
@@ -49,11 +50,10 @@ Provider templates work with CodeSandbox, E2B, Freestyle, Prime Intellect, and R
 
 OpenMetal skips any candidate that cannot satisfy the requested source, resources, features,
 network policy, or regions before calling it. After a provider call, it falls back after capacity,
-unavailable, and known absent timeout failures. Unknown outcomes enter reconciliation before any
-further provider attempt.
+unavailable, known absent timeout, and unsupported-request failures. Unknown outcomes enter
+reconciliation before any further provider attempt.
 
-Authentication, invalid request, customer errors, and unsupported errors raised by the provider
-itself do not fan out.
+Authentication, invalid request, and customer errors do not fan out.
 
 ## Bring your own key
 

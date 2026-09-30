@@ -191,7 +191,9 @@ function classifyProviderFailure(error: unknown): {
     return {
       kind: error.kind,
       retryable: error.retryable,
-      fallbackSafe: ["capacity", "unavailable", "timeout_absent"].includes(error.kind),
+      fallbackSafe: ["capacity", "unavailable", "timeout_absent", "unsupported"].includes(
+        error.kind,
+      ),
       unknown: error.kind === "unknown_outcome",
     };
   }

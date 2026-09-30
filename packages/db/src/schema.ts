@@ -562,6 +562,10 @@ export const providerAttempts = metalSchema.table(
     resolvedResources: jsonb("resolved_resources").$type<Record<string, unknown>>(),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
+    exclusions: jsonb("exclusions")
+      .$type<Array<{ requirement: string; message: string }>>()
+      .notNull()
+      .default([]),
     outcome: text("outcome"),
     startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
     completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),

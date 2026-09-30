@@ -23,7 +23,7 @@ Read this reference before constructing a full sandbox request, selecting a sour
     "on_runtime_timeout": "destroy"
   },
   "fallback": {
-    "providers": ["e2b", "codesandbox", "runloop"],
+    "providers": ["e2b", "runloop", "daytona"],
     "max_attempts": 3
   },
   "metadata": {
@@ -46,9 +46,9 @@ northflank, prime, runloop, vercel
 
 Omitting `provider` behaves as automatic selection. Prefer automatic selection unless the task has a concrete provider requirement.
 
-`fallback.providers` is an ordered array of up to nine providers. `fallback.max_attempts` is an integer from 1 through 10. Primary and fallback candidates must be unique.
+`fallback.providers` is an ordered array of up to nine providers. `fallback.max_attempts` is an integer from 1 through 10 and defaults to 9. It limits provider calls; candidates skipped for unmet requirements do not count. Primary and fallback candidates must be unique.
 
-With automatic selection, explicit fallback providers are tried first, followed by other configured providers in registry order. With an explicit provider, the primary is tried first, followed by the listed fallbacks. Safe fallback is currently limited to capacity, provider-unavailable, and known-absent timeout failures. Unknown outcomes enter reconciliation before another provider is attempted.
+With automatic selection, explicit fallback providers are tried first, followed by other configured providers in registry order. With an explicit provider, the primary is tried first, followed by the listed fallbacks. Candidates that fail a requirement in [Features](#features), [Network](#network), [Regions](#regions), source, or resources are skipped before OpenMetal calls them. After a provider call, safe fallback is currently limited to capacity, provider-unavailable, known-absent timeout, and provider-declined unsupported-request failures. Unknown outcomes enter reconciliation before another provider is attempted.
 
 ## Sources
 
@@ -138,17 +138,24 @@ Current enforcement limitation: runtime expiry schedules destruction even if `on
 ```json
 {
   "isolation": ["microvm", "vm"],
-  "pty": true,
   "pause_resume": true,
-  "public_ports": [3000, 8080]
+  "public_ports": [3000, 8080],
+  "process": { "execute": true, "ordered_output": true },
+  "filesystem": { "list": true, "delete": true, "write_modes": ["overwrite"] }
 }
 ```
 
-- Isolation values are `microvm`, `vm`, and `container`.
-- Public ports are integers from 1 through 65535, with at most 64 entries.
-- `pty` and `pause_resume` are booleans.
+Every feature is a hard routing requirement. The worker removes any candidate provider that cannot satisfy it before calling that provider, records why, and tries the next candidate. When no candidate qualifies, the create operation fails with `no_eligible_provider` and `error.details.attempts[].unmet_requirements`.
 
-Current enforcement limitation: feature requirements reach provider adapters, and Prime rejects unsupported PTY, pause/resume, computer-use, recording, and public-port requests before provisioning. It rejects container-only isolation requests; Prime's VM isolation is provider-reported, not independently verified. Other adapters may not enforce all features during routing.
+- `isolation` lists acceptable boundaries: `microvm`, `vm`, and `container`. A provider qualifies only when its declared boundary is in the list. Unknown isolation never qualifies. Current claims are provider-reported, not independently verified: microVM for Blaxel, CodeSandbox, E2B, Runloop, and Vercel; VM for Freestyle and Prime; container for Cloudflare, Daytona, and Modal. Northflank is unknown.
+- `pause_resume: true` requires reliable pause and resume.
+- `public_ports` requires leased HTTP endpoints, which only Blaxel currently provides.
+- `pty: true` always fails. Interactive PTY sessions are not part of the OpenMetal API.
+- `process` accepts `execute`, `ordered_output` (streamed output), and `cancel`.
+- `filesystem` accepts `read`, `write`, `write_modes`, `create_parents`, `list`, and `delete`.
+- `computer_use` and `recording` require those computer capabilities.
+
+When `provider` is omitted or `auto`, routing also requires process execution and file read and write unless you set `process.execute`, `filesystem.read`, or `filesystem.write` to `false`. This keeps automatic routing off providers such as CodeSandbox and Northflank, whose adapters currently expose lifecycle only. Explicit providers only need the features you request.
 
 ## Network
 
@@ -161,7 +168,11 @@ Current enforcement limitation: feature requirements reach provider adapters, an
 
 `allow_domains` and `deny_domains` are mutually exclusive. Each list can contain at most 256 names, each at most 253 characters.
 
-Current enforcement limitation: network requirements reach provider adapters, but Prime rejects requests for outbound restrictions before provisioning because enforcement has not been verified. Other adapters do not currently apply them. Do not claim that outbound access was restricted. If the task requires fail-closed egress controls, explain that current OpenMetal cannot provide that guarantee.
+Network restrictions fail closed. No current adapter applies outbound restrictions, so `internet_access: false`, any `allow_domains` list, or a nonempty `deny_domains` list makes every provider ineligible and the create fails with `no_eligible_provider`. Omit the network block, or set `internet_access: true`, when unrestricted egress is acceptable.
+
+## Regions
+
+`regions` lists acceptable placement regions. A provider qualifies only when every region it may place a sandbox in is on the list. No current adapter declares its placement regions, so any nonempty `regions` list currently fails with `no_eligible_provider`.
 
 ## Environment, Secrets, And Metadata
 
@@ -225,13 +236,13 @@ When an explicit provider is selected, options may only be supplied for that pro
 | Configuration                     | Current behavior                                                                           |
 | --------------------------------- | ------------------------------------------------------------------------------------------ |
 | Source kind                       | Validated and used for provider eligibility.                                               |
-| CPU, memory, disk, architecture   | Validated and passed to resource resolution.                                               |
+| CPU, memory, disk, architecture   | Validated and used for provider eligibility and resource resolution.                       |
 | Runtime duration                  | Enforced through a scheduled destroy job.                                                  |
 | Provider and fallback             | Used by provisioning routing.                                                              |
 | Provider options                  | Passed to the selected adapter.                                                            |
-| Regions                           | Stored, not passed to adapters.                                                            |
-| Features                          | Stored, not passed to adapters.                                                            |
-| Network policy                    | Stored, not passed to adapters.                                                            |
+| Regions                           | Hard eligibility filter. No adapter declares regions, so requests currently fail.          |
+| Features                          | Hard eligibility filter against declared and discovered capabilities.                      |
+| Network policy                    | Hard eligibility filter. No adapter enforces restrictions, so they currently fail.         |
 | Idle timeout                      | Stored, not enforced.                                                                      |
 | Runtime action `pause`            | Stored, but expiry currently destroys.                                                     |
 | Environment and secret references | Passed to adapters, but not consumed by current real adapters.                             |

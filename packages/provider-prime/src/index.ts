@@ -122,6 +122,11 @@ export class PrimeSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "direct",
     sources: ["environment", "oci_image", "provider_template"],
+    isolation: {
+      kind: "vm",
+      evidence: "provider_reported",
+      source: "https://docs.primeintellect.ai/sandboxes/overview",
+    },
     runtime: {
       process: { exec: true, streams: false, cancel: false, maxOutputBytes: MAX_OUTPUT_BYTES },
       files: {

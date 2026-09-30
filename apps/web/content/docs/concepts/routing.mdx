@@ -22,27 +22,54 @@ Recognized portable environments are `metal/base`, `metal/node`, and `metal/pyth
 
 ## Runtime support
 
-Current public process streaming works with Cloudflare, E2B, Modal, and Vercel. Process cancellation is not confirmed for those adapters.
+CodeSandbox and Northflank adapters currently expose lifecycle only, without process execution or
+file access, so automatic routing never selects them.
 
-Filesystem read and write support is broader. List, delete, append, and parent creation vary by provider.
+Current public process streaming works with Cloudflare, E2B, Modal, and Vercel. Request
+`features.process.ordered_output` to route only to them. Process cancellation is not confirmed for
+those adapters.
+
+Filesystem read and write support is broader. List, delete, append, and parent creation vary by
+provider; request them under `features.filesystem` when you depend on them.
 
 Portable leased HTTP endpoints are currently available only through Blaxel.
 
 Reliable pause and resume are available through CodeSandbox, E2B, Freestyle, Northflank, and
 Runloop. Daytona pause reporting is inconsistent.
 
-## Stored versus enforced requirements
+## Hard requirements
 
-OpenMetal accepts and stores isolation, PTY, pause, public port, and network requirements. Current
-routing does not enforce these requirements through providers.
+Source, resources, `features`, `network`, and `regions` are hard requirements. Before calling a
+candidate, OpenMetal removes it if its declared capabilities cannot satisfy every requirement,
+records each unmet requirement on the provider attempt, and moves to the next candidate. After
+provisioning, it checks runtime requirements again against the capabilities discovered on the
+sandbox and destroys a sandbox that falls short.
 
-<Callout type="error" title="No fail closed egress guarantee">
-  Do not claim that allow or deny domain lists restrict outbound traffic today. OpenMetal cannot
-  currently guarantee that enforcement.
+When no candidate qualifies, the create operation fails with `no_eligible_provider`.
+`error.details.attempts` lists each provider with its `unmet_requirements`, for example
+`["isolation", "network.allow_domains"]`.
+
+Automatic routing adds a portable baseline: process execution plus file read and write. Set
+`features.process.execute`, `features.filesystem.read`, or `features.filesystem.write` to `false`
+to opt out. Explicit providers only need what you request.
+
+| Requirement             | Current support                                                                                                                                                                         |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `features.isolation`    | Provider-reported microVM: Blaxel, CodeSandbox, E2B, Runloop, Vercel. VM: Freestyle, Prime Intellect. Container: Cloudflare, Daytona, Modal. Northflank is unknown and never qualifies. |
+| `features.process`      | See runtime support below.                                                                                                                                                              |
+| `features.filesystem`   | See runtime support below.                                                                                                                                                              |
+| `features.public_ports` | Blaxel only.                                                                                                                                                                            |
+| `features.pause_resume` | Providers with reliable pause and resume.                                                                                                                                               |
+| `features.pty`          | Never satisfied. Interactive PTY sessions are not part of the API.                                                                                                                      |
+| `network` restrictions  | Never satisfied yet. No adapter enforces outbound restrictions, so requests that restrict egress fail closed.                                                                           |
+| `regions`               | Never satisfied yet. No adapter declares every region it may place a sandbox in.                                                                                                        |
+
+<Callout type="warn" title="Provider-reported isolation">
+  Isolation claims come from provider documentation. OpenMetal has not independently verified them.
 </Callout>
 
 ## Fallback safety
 
-Capacity, provider unavailable, and known absent timeout failures can move to the next candidate. Unknown provider outcomes enter `reconciling` first so OpenMetal does not create duplicate live capacity.
+Capacity, provider unavailable, known absent timeout, and provider-declined unsupported requests can move to the next candidate. Unknown provider outcomes enter `reconciling` first so OpenMetal does not create duplicate live capacity.
 
 See [route across providers](/guides/routing-and-providers) for a complete request.

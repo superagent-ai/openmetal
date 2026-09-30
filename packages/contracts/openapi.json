@@ -1480,6 +1480,54 @@
                   "format"
                 ],
                 "additionalProperties": false
+              },
+              "process": {
+                "type": "object",
+                "properties": {
+                  "execute": {
+                    "type": "boolean"
+                  },
+                  "ordered_output": {
+                    "type": "boolean"
+                  },
+                  "cancel": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "filesystem": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "boolean"
+                  },
+                  "write": {
+                    "type": "boolean"
+                  },
+                  "write_modes": {
+                    "maxItems": 3,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "create",
+                        "overwrite",
+                        "append"
+                      ]
+                    }
+                  },
+                  "create_parents": {
+                    "type": "boolean"
+                  },
+                  "list": {
+                    "type": "boolean"
+                  },
+                  "delete": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -1996,6 +2044,54 @@
                     "required": [
                       "format"
                     ],
+                    "additionalProperties": false
+                  },
+                  "process": {
+                    "type": "object",
+                    "properties": {
+                      "execute": {
+                        "type": "boolean"
+                      },
+                      "ordered_output": {
+                        "type": "boolean"
+                      },
+                      "cancel": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "filesystem": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "boolean"
+                      },
+                      "write": {
+                        "type": "boolean"
+                      },
+                      "write_modes": {
+                        "maxItems": 3,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "create",
+                            "overwrite",
+                            "append"
+                          ]
+                        }
+                      },
+                      "create_parents": {
+                        "type": "boolean"
+                      },
+                      "list": {
+                        "type": "boolean"
+                      },
+                      "delete": {
+                        "type": "boolean"
+                      }
+                    },
                     "additionalProperties": false
                   }
                 },

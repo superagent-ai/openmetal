@@ -634,6 +634,7 @@ export type Database = {
           created_at: string
           error_code: string | null
           error_message: string | null
+          exclusions: Json
           id: string
           operation_id: string
           outcome: string | null
@@ -653,6 +654,7 @@ export type Database = {
           created_at?: string
           error_code?: string | null
           error_message?: string | null
+          exclusions?: Json
           id?: string
           operation_id: string
           outcome?: string | null
@@ -672,6 +674,7 @@ export type Database = {
           created_at?: string
           error_code?: string | null
           error_message?: string | null
+          exclusions?: Json
           id?: string
           operation_id?: string
           outcome?: string | null
@@ -1467,7 +1470,37 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      capability_exclusions_daily: {
+        Row: {
+          attempts: number | null
+          day: string | null
+          organizations: number | null
+          provider: string | null
+          requirement: string | null
+          sandboxes: number | null
+        }
+        Relationships: []
+      }
+      provider_option_usage_daily: {
+        Row: {
+          applied_sandboxes: number | null
+          day: string | null
+          option: string | null
+          organizations: number | null
+          provider: string | null
+          sandboxes: number | null
+        }
+        Relationships: []
+      }
+      unserved_requirements_daily: {
+        Row: {
+          day: string | null
+          organizations: number | null
+          requirement: string | null
+          sandboxes: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       has_organization_role: {

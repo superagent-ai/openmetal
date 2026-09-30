@@ -85,6 +85,11 @@ export class CodeSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "tier",
     sources: ["environment", "provider_template"],
+    isolation: {
+      kind: "microvm",
+      evidence: "provider_reported",
+      source: "https://codesandbox.io/docs/sdk/core-concepts",
+    },
     runtime: {
       process: {
         exec: false,

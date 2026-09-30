@@ -73,7 +73,7 @@ Provider-specific runtime limitations:
 - Prime's gateway carries ordered stdout/stderr frames but does not guarantee restart-safe output replay or cancellation through this adapter. Its upload overwrites without guaranteed parent creation; no portable list or delete is available. Its cumulative cost is estimated from a published CPU/memory/disk rate card valid through December 22, 2026; it is not an upstream billing record.
 - Only Blaxel exposes portable HTTP endpoints with a live-verified native expiry and revocation path. All other adapters keep the endpoint capability disabled when the upstream API cannot satisfy or live verification cannot prove the complete lease contract.
 
-Capability checks happen in the worker after the API accepts a process, filesystem operation, or endpoint. Always inspect the terminal resource and its `error`; HTTP 202 is not capability confirmation.
+Capability checks happen in the worker after the API accepts a process, filesystem operation, or endpoint. Always inspect the terminal resource and its `error`; HTTP 202 is not capability confirmation. Request the capabilities you depend on in `features.process` and `features.filesystem` at creation so routing only selects providers that declare them. Automatic routing always requires process execution and file read and write, so it never selects the lifecycle-only CodeSandbox and Northflank adapters.
 
 ## Routing And Fallback
 

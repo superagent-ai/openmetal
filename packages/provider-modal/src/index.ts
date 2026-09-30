@@ -137,6 +137,11 @@ export class ModalSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "direct",
     sources: ["environment", "oci_image"],
+    isolation: {
+      kind: "container",
+      evidence: "provider_reported",
+      source: "https://modal.com/docs/guide/sandbox-networking",
+    },
     runtime: {
       process: {
         exec: true,

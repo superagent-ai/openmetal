@@ -28,20 +28,24 @@ import {
   type OutboxJobTypeFilter,
   type OutboxLease,
 } from "@openmetal/db";
+import type { CreateSandboxRequest } from "@openmetal/contracts";
 import { OutboxJobPayloadSchema, projectTopic, type OutboxJobPayload } from "@openmetal/events";
 import { createLogger, redactString } from "@openmetal/logger";
 import {
   ProviderError,
   resolveMetalEnvironment,
   resolveProviderResources,
+  unmetSandboxRequirements,
   type ProviderComputerRecording,
   type ProviderCreateSandboxInput,
   type ProviderExecEvent,
   type ProviderRuntimeCapabilities,
   type ProviderSandboxInspection,
   type ProviderSandboxState,
+  type RequirementExclusion,
   type SandboxProvider,
   type SandboxProviderName,
+  type SandboxRequirements,
 } from "@openmetal/provider-core";
 import { resolveWorkerConcurrency, type WorkerEnv } from "./env.js";
 import { JobLocks, type JobLockMode } from "./job-locks.js";
@@ -187,7 +191,9 @@ function classifyProviderFailure(error: unknown): {
     return {
       kind: error.kind,
       retryable: error.retryable,
-      fallbackSafe: ["capacity", "unavailable", "timeout_absent"].includes(error.kind),
+      fallbackSafe: ["capacity", "unavailable", "timeout_absent", "unsupported"].includes(
+        error.kind,
+      ),
       unknown: error.kind === "unknown_outcome",
     };
   }
@@ -297,14 +303,15 @@ async function provisionSandbox(
     ]),
   ];
   const fallbackProviders = fallback.providers ?? [];
-  const candidates = (
+  const candidates =
     sandbox.primaryProvider === "auto"
       ? [
           ...fallbackProviders,
           ...configuredProviders.filter((provider) => !fallbackProviders.includes(provider)),
         ]
-      : [sandbox.primaryProvider as SandboxProviderName, ...fallbackProviders]
-  ).slice(0, fallback.max_attempts ?? 9);
+      : [sandbox.primaryProvider as SandboxProviderName, ...fallbackProviders];
+  const maxProviderCalls = fallback.max_attempts ?? 9;
+  let providerCalls = 0;
   const source = sandbox.source as ProviderCreateSandboxInput["source"];
   const environmentSource = resolveMetalEnvironment(source);
   const requested = sandbox.resourceRequirements as {
@@ -320,12 +327,26 @@ async function provisionSandbox(
     on_idle_timeout?: "destroy" | "pause";
   };
   const allOptions = sandbox.providerOptions as Record<string, Record<string, unknown> | undefined>;
+  const requirements = sandboxRequirements(sandbox);
 
   for (const [attemptIndex, providerName] of candidates.entries()) {
     const byokProvider = byokProviders[providerName];
     const provider = byokProvider ? byokProvider.provider : providers[providerName];
     const providerCredentialId = byokProvider?.credentialId ?? null;
     const options = allOptions[providerName] ?? {};
+    const candidateRequirements = { ...requirements, providerOptions: options };
+    const unmet = (runtime?: ProviderRuntimeCapabilities) =>
+      provider
+        ? unmetSandboxRequirements(provider, candidateRequirements, {
+            managedBilling: !providerCredentialId,
+            runtime,
+          })
+        : [];
+    const exclusions = unmet();
+    if (provider && exclusions.length === 0) {
+      if (providerCalls >= maxProviderCalls) break;
+      providerCalls += 1;
+    }
     const [attempt] = await db
       .insert(providerAttempts)
       .values({
@@ -342,6 +363,9 @@ async function provisionSandbox(
         set: {
           providerCredentialId,
           state: "running",
+          errorCode: null,
+          errorMessage: null,
+          exclusions: [],
           startedAt: new Date(),
           updatedAt: new Date(),
         },
@@ -359,49 +383,24 @@ async function provisionSandbox(
         .where(eq(providerAttempts.id, attempt!.id));
       continue;
     }
-    if (provider.capabilities.sources && !provider.capabilities.sources.includes(source.kind)) {
+    if (exclusions.length > 0) {
       await db
         .update(providerAttempts)
         .set({
           state: "failed",
           errorCode: "capability_unsupported",
-          errorMessage: `${providerName} does not support ${source.kind} sources`,
+          errorMessage: exclusionMessage(exclusions),
+          exclusions,
           outcome: "ineligible",
           completedAt: new Date(),
         })
         .where(eq(providerAttempts.id, attempt!.id));
-      continue;
-    }
-    if (!providerCredentialId && !provider.capabilities.cost) {
-      await db
-        .update(providerAttempts)
-        .set({
-          state: "failed",
-          errorCode: "capability_unsupported",
-          errorMessage: `${providerName} does not expose durable cost for managed billing`,
-          outcome: "ineligible",
-          completedAt: new Date(),
-        })
-        .where(eq(providerAttempts.id, attempt!.id));
-      continue;
-    }
-    if (
-      !supportsRequestedFeatures(
-        provider.capabilities.runtime,
-        sandbox.features as Record<string, unknown>,
-        provider.capabilities.resume === true,
-      )
-    ) {
-      await db
-        .update(providerAttempts)
-        .set({
-          state: "failed",
-          errorCode: "capability_unsupported",
-          errorMessage: `${providerName} does not support the requested portable features`,
-          outcome: "ineligible",
-          completedAt: new Date(),
-        })
-        .where(eq(providerAttempts.id, attempt!.id));
+      await appendOperationEvent(db, operationId, "attempt_failed", {
+        attempt_index: attemptIndex,
+        provider: providerName,
+        code: "capability_unsupported",
+        unmet_requirements: exclusions.map((exclusion) => exclusion.requirement),
+      });
       continue;
     }
     try {
@@ -525,13 +524,8 @@ async function provisionSandbox(
         });
         continue;
       }
-      if (
-        !supportsRequestedFeatures(
-          discoveredRuntime,
-          sandbox.features as Record<string, unknown>,
-          provider.capabilities.resume === true,
-        )
-      ) {
+      const discoveredExclusions = unmet(discoveredRuntime);
+      if (discoveredExclusions.length > 0) {
         if (!(await cleanupCreatedResource())) {
           await markCleanupPending(
             `${providerName} lacked requested capabilities and cleanup was unconfirmed`,
@@ -544,11 +538,18 @@ async function provisionSandbox(
             state: "failed",
             providerResourceId: remote.providerResourceId,
             errorCode: "capability_unsupported",
-            errorMessage: `${providerName} did not expose the requested features after provisioning`,
+            errorMessage: `${providerName} did not expose the requested capabilities after provisioning: ${exclusionMessage(discoveredExclusions)}`,
+            exclusions: discoveredExclusions,
             outcome: "absent",
             completedAt: new Date(),
           })
           .where(eq(providerAttempts.id, attempt!.id));
+        await appendOperationEvent(db, operationId, "attempt_failed", {
+          attempt_index: attemptIndex,
+          provider: providerName,
+          code: "capability_unsupported",
+          unmet_requirements: discoveredExclusions.map((exclusion) => exclusion.requirement),
+        });
         continue;
       }
       const capabilitySnapshot = runtimeCapabilities(provider, discoveredRuntime);
@@ -640,13 +641,8 @@ async function provisionSandbox(
           const discoveredRuntime =
             (await provider.discoverRuntimeCapabilities?.(reconciled.providerResourceId)) ??
             provider.capabilities.runtime;
-          if (
-            !supportsRequestedFeatures(
-              discoveredRuntime,
-              sandbox.features as Record<string, unknown>,
-              provider.capabilities.resume === true,
-            )
-          ) {
+          const reconciledExclusions = unmet(discoveredRuntime);
+          if (reconciledExclusions.length > 0) {
             try {
               await provider.destroy(reconciled.providerResourceId);
             } catch {
@@ -686,7 +682,8 @@ async function provisionSandbox(
                 state: "failed",
                 providerResourceId: reconciled.providerResourceId,
                 errorCode: "capability_unsupported",
-                errorMessage: `${providerName} did not expose the requested features after reconciliation`,
+                errorMessage: `${providerName} did not expose the requested capabilities after reconciliation: ${exclusionMessage(reconciledExclusions)}`,
+                exclusions: reconciledExclusions,
                 outcome: "absent",
                 completedAt: new Date(),
               })
@@ -788,15 +785,89 @@ async function provisionSandbox(
       }
     }
   }
+  const attempts = await db
+    .select({
+      provider: providerAttempts.provider,
+      errorCode: providerAttempts.errorCode,
+      exclusions: providerAttempts.exclusions,
+    })
+    .from(providerAttempts)
+    .where(eq(providerAttempts.operationId, operationId))
+    .orderBy(providerAttempts.attemptIndex);
+  const message =
+    attempts.length > 0 && attempts.every((attempt) => attempt.exclusions.length > 0)
+      ? "no candidate provider satisfies the requested capabilities"
+      : "all selected providers failed or were ineligible";
   await db
     .update(sandboxes)
-    .set({ status: "failed", errorCode: "no_eligible_provider", updatedAt: new Date() })
+    .set({
+      status: "failed",
+      errorCode: "no_eligible_provider",
+      errorMessage: message,
+      updatedAt: new Date(),
+    })
     .where(eq(sandboxes.id, sandbox.id));
   await setOperationState(db, operationId, "failed", {
     code: "no_eligible_provider",
-    message: "all selected providers failed or were ineligible",
+    message,
     retryable: false,
+    details: {
+      attempts: attempts.map((attempt) => ({
+        provider: attempt.provider,
+        code: attempt.errorCode,
+        unmet_requirements: attempt.exclusions.map((exclusion) => exclusion.requirement),
+      })),
+    },
   });
+}
+
+function sandboxRequirements(sandbox: typeof sandboxes.$inferSelect): SandboxRequirements {
+  const source = sandbox.source as ProviderCreateSandboxInput["source"];
+  const resources = sandbox.resourceRequirements as CreateSandboxRequest["resources"];
+  const features = sandbox.features as NonNullable<CreateSandboxRequest["features"]>;
+  const network = sandbox.network as NonNullable<CreateSandboxRequest["network"]>;
+  return {
+    routing: sandbox.primaryProvider === "auto" ? "auto" : "explicit",
+    sourceKind: source.kind,
+    resources: {
+      vcpu: resources.vcpu,
+      memoryMb: resources.memory_mb,
+      diskMb: resources.disk_mb,
+      architecture: resources.architecture ?? "any",
+    },
+    isolation: features.isolation,
+    network: {
+      internetAccess: network.internet_access,
+      allowDomains: network.allow_domains,
+      denyDomains: network.deny_domains,
+    },
+    regions: sandbox.regions,
+    pty: features.pty,
+    pauseResume: features.pause_resume,
+    publicPorts: features.public_ports,
+    process: features.process && {
+      execute: features.process.execute,
+      orderedOutput: features.process.ordered_output,
+      cancel: features.process.cancel,
+    },
+    filesystem: features.filesystem && {
+      read: features.filesystem.read,
+      write: features.filesystem.write,
+      writeModes: features.filesystem.write_modes,
+      createParents: features.filesystem.create_parents,
+      list: features.filesystem.list,
+      delete: features.filesystem.delete,
+    },
+    computerUse: features.computer_use,
+    recordingFormat: features.recording ? (features.recording.format ?? "mp4") : undefined,
+  };
+}
+
+function exclusionMessage(exclusions: readonly RequirementExclusion[]): string {
+  return exclusions
+    .map((exclusion) => exclusion.message)
+    .join("; ")
+    .slice(0, 1_000);
 }
 
 const lostProviderSandboxStates = new Set<ProviderSandboxState>(["stopped", "failed", "absent"]);
@@ -1217,26 +1288,6 @@ async function syncSandboxCost(
 
 const terminalProcessStates = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
 const terminalRuntimeOperationStates = new Set(["succeeded", "failed", "cancelled"]);
-
-function supportsRequestedFeatures(
-  runtime: ProviderRuntimeCapabilities | undefined,
-  features: Record<string, unknown>,
-  resume: boolean,
-): boolean {
-  if (features.pause_resume === true && !resume) return false;
-  if (features.computer_use === true) {
-    if (!runtime?.computer?.screenshot || runtime.computer.actions.length === 0) return false;
-  }
-  const recording = features.recording as { format?: string } | undefined;
-  if (
-    recording &&
-    (!runtime?.computer?.recording ||
-      !runtime.computer.recording.formats.includes((recording.format ?? "mp4") as "mp4" | "webm"))
-  ) {
-    return false;
-  }
-  return true;
-}
 
 function runtimeCapabilities(
   provider: SandboxProvider,

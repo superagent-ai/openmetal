@@ -31,6 +31,7 @@ import {
   type ProviderWriteFileInput,
   type ProviderWriteFileResult,
   type SandboxProvider,
+  type SandboxProviderCapabilities,
   type SandboxProviderName,
 } from "@openmetal/provider-core";
 
@@ -80,6 +81,7 @@ export type FakeProviderBehavior = {
   };
   reportsSandboxState?: boolean;
   now?: Date;
+  capabilities?: Pick<SandboxProviderCapabilities, "isolation" | "network" | "regions">;
 };
 
 export class FakeSandboxProvider implements SandboxProvider {
@@ -168,6 +170,7 @@ export class FakeSandboxProvider implements SandboxProvider {
           },
         },
       },
+      ...behavior.capabilities,
     };
   }
 

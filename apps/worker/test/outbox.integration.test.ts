@@ -393,6 +393,248 @@ describe("worker outbox", () => {
     });
   });
 
+  async function seedProvisionJob(input: {
+    primaryProvider: string;
+    fallbackProviders: string[];
+    maxAttempts?: number;
+    features?: Record<string, unknown>;
+    network?: Record<string, unknown>;
+    providerOptions?: Record<string, unknown>;
+  }) {
+    const user = await createConfirmedUser(env);
+    users.push(user.user.id);
+    const orgId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const sandboxId = crypto.randomUUID();
+    const operationId = crypto.randomUUID();
+    await database.sql`
+      insert into public.organizations (id, name, slug)
+      values (${orgId}, 'Eligibility Org', ${`e-${orgId.slice(0, 8)}`})
+    `;
+    await database.sql`
+      insert into public.organization_members (organization_id, user_id, role)
+      values (${orgId}, ${user.user.id}, 'owner')
+    `;
+    await database.sql`
+      insert into public.projects (id, public_id, organization_id, name, slug)
+      values (
+        ${projectId},
+        ${`prj_${projectId.replaceAll("-", "")}`},
+        ${orgId},
+        'Eligibility Project',
+        ${`p-${projectId.slice(0, 8)}`}
+      )
+    `;
+    await database.sql`
+      insert into metal.sandboxes (
+        id, public_id, organization_id, project_id, provider, primary_provider,
+        status, source, resource_requirements, lifecycle, fallback, features, network,
+        provider_options, environment, secret_refs, metadata, created_by
+      )
+      values (
+        ${sandboxId},
+        ${`sbx_${sandboxId.replaceAll("-", "")}`},
+        ${orgId},
+        ${projectId},
+        ${input.primaryProvider === "auto" ? "daytona" : input.primaryProvider},
+        ${input.primaryProvider},
+        'routing',
+        ${JSON.stringify({ kind: "environment", environment: "metal/node", version: "1" })}::jsonb,
+        ${JSON.stringify({ vcpu: 1, memory_mb: 512, architecture: "any" })}::jsonb,
+        ${JSON.stringify({ runtime_timeout_seconds: 300 })}::jsonb,
+        ${JSON.stringify({ providers: input.fallbackProviders, max_attempts: input.maxAttempts })}::jsonb,
+        ${JSON.stringify(input.features ?? {})}::jsonb,
+        ${JSON.stringify(input.network ?? {})}::jsonb,
+        ${JSON.stringify(input.providerOptions ?? {})}::jsonb,
+        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+        ${user.user.id}
+      )
+    `;
+    await database.sql`
+      insert into metal.operations (
+        id, public_id, organization_id, project_id, sandbox_id, type, state
+      )
+      values (
+        ${operationId},
+        ${`op_${operationId.replaceAll("-", "")}`},
+        ${orgId},
+        ${projectId},
+        ${sandboxId},
+        'sandbox_create',
+        'queued'
+      )
+    `;
+    await database.sql`
+      insert into metal.operation_events (operation_id, sequence, type, data)
+      values (${operationId}, 1, 'queued', '{}'::jsonb)
+    `;
+    const [job] = await database.sql`
+      insert into metal.outbox_jobs (job_type, dedupe_key, payload)
+      values (
+        'sandbox.provision',
+        ${`sandbox:provision:${sandboxId}`},
+        ${JSON.stringify({
+          job_type: "sandbox.provision",
+          sandbox_id: sandboxId,
+          operation_id: operationId,
+        })}::jsonb
+      )
+      returning id
+    `;
+    const workerEnv = loadWorkerEnv({
+      ...process.env,
+      DATABASE_URL: env.DATABASE_URL,
+      SUPABASE_URL: env.SUPABASE_URL,
+      SUPABASE_SECRET_KEY: env.SUPABASE_SECRET_KEY,
+      WORKER_ID: `eligibility-worker-${sandboxId.slice(0, 8)}`,
+      LOG_LEVEL: "silent",
+      METAL_ENVIRONMENT: "test",
+    });
+    return { sandboxId, operationId, jobId: String(job!.id), workerEnv };
+  }
+
+  it("skips providers that cannot satisfy automatic routing requirements", async () => {
+    const seeded = await seedProvisionJob({
+      primaryProvider: "auto",
+      fallbackProviders: ["codesandbox", "e2b"],
+      maxAttempts: 1,
+      features: { isolation: ["microvm"] },
+      providerOptions: { e2b: { template_id: "base" }, codesandbox: { vm_tier: "Nano" } },
+    });
+    const isolation = {
+      kind: "microvm",
+      evidence: "provider_reported",
+      source: "https://example.com",
+    } as const;
+    const lifecycleOnly = new FakeSandboxProvider("codesandbox", {
+      unsupportedRuntimeOperations: ["exec", "readFile", "writeFile"],
+      capabilities: { isolation },
+    });
+    const capable = new FakeSandboxProvider("e2b", { capabilities: { isolation } });
+    await processUntilJob(
+      seeded.jobId,
+      { publish: async () => undefined },
+      seeded.workerEnv,
+      (row) => row.status === "succeeded",
+      { codesandbox: lifecycleOnly, e2b: capable },
+    );
+    const [sandbox] = await database.sql`
+      select provider, status from metal.sandboxes where id = ${seeded.sandboxId}
+    `;
+    expect(sandbox).toMatchObject({ provider: "e2b", status: "ready" });
+    expect(lifecycleOnly.resources.size).toBe(0);
+    const attempts = await database.sql`
+      select provider, outcome, error_code, exclusions
+      from metal.provider_attempts
+      where operation_id = ${seeded.operationId}
+      order by attempt_index
+    `;
+    expect(attempts).toMatchObject([
+      {
+        provider: "codesandbox",
+        outcome: "ineligible",
+        error_code: "capability_unsupported",
+        exclusions: [
+          { requirement: "process.execute" },
+          { requirement: "filesystem.read" },
+          { requirement: "filesystem.write" },
+        ],
+      },
+      { provider: "e2b", outcome: "created", exclusions: [] },
+    ]);
+    const [event] = await database.sql`
+      select data from metal.operation_events
+      where operation_id = ${seeded.operationId} and type = 'attempt_failed'
+    `;
+    expect(event?.data).toMatchObject({
+      provider: "codesandbox",
+      unmet_requirements: ["process.execute", "filesystem.read", "filesystem.write"],
+    });
+    const [excluded] = await database.sql`
+      select sandboxes from metal.capability_exclusions_daily
+      where provider = 'codesandbox' and requirement = 'process.execute'
+        and day = (now() at time zone 'utc')::date
+    `;
+    expect(Number(excluded?.sandboxes)).toBeGreaterThanOrEqual(1);
+    const options = await database.sql`
+      select provider, option, sandboxes, applied_sandboxes
+      from metal.provider_option_usage_daily
+      where day = (now() at time zone 'utc')::date
+        and ((provider = 'e2b' and option = 'template_id')
+          or (provider = 'codesandbox' and option = 'vm_tier'))
+      order by provider
+    `;
+    expect(options).toHaveLength(2);
+    expect(Number(options[1]!.applied_sandboxes)).toBeGreaterThanOrEqual(1);
+    expect(Number(options[0]!.sandboxes)).toBeGreaterThan(Number(options[0]!.applied_sandboxes));
+  });
+
+  it("fails closed with unmet requirements when no candidate can enforce the request", async () => {
+    const seeded = await seedProvisionJob({
+      primaryProvider: "e2b",
+      fallbackProviders: ["modal"],
+      features: { isolation: ["vm"] },
+      network: { allow_domains: ["example.com"] },
+    });
+    const microvm = new FakeSandboxProvider("e2b", {
+      capabilities: {
+        isolation: {
+          kind: "microvm",
+          evidence: "provider_reported",
+          source: "https://example.com",
+        },
+      },
+    });
+    const unknownIsolation = new FakeSandboxProvider("modal");
+    await processUntilJob(
+      seeded.jobId,
+      { publish: async () => undefined },
+      seeded.workerEnv,
+      (row) => row.status === "succeeded",
+      { e2b: microvm, modal: unknownIsolation },
+    );
+    expect(microvm.resources.size).toBe(0);
+    expect(unknownIsolation.resources.size).toBe(0);
+    const [result] = await database.sql`
+      select s.status, s.error_code, s.error_message, o.state, o.error
+      from metal.sandboxes s
+      join metal.operations o on o.sandbox_id = s.id
+      where s.id = ${seeded.sandboxId}
+    `;
+    expect(result).toMatchObject({
+      status: "failed",
+      error_code: "no_eligible_provider",
+      error_message: "no candidate provider satisfies the requested capabilities",
+      state: "failed",
+      error: {
+        code: "no_eligible_provider",
+        retryable: false,
+        details: {
+          attempts: [
+            {
+              provider: "e2b",
+              code: "capability_unsupported",
+              unmet_requirements: ["isolation", "network.allow_domains"],
+            },
+            {
+              provider: "modal",
+              code: "capability_unsupported",
+              unmet_requirements: ["isolation", "network.allow_domains"],
+            },
+          ],
+        },
+      },
+    });
+    const unserved = await database.sql`
+      select requirement, sandboxes from metal.unserved_requirements_daily
+      where day = (now() at time zone 'utc')::date
+        and requirement in ('isolation', 'network.allow_domains')
+      order by requirement
+    `;
+    expect(unserved.map((row) => row.requirement)).toEqual(["isolation", "network.allow_domains"]);
+    expect(unserved.every((row) => Number(row.sandboxes) >= 1)).toBe(true);
+  });
+
   it("recovers expired leases after a worker crash", async () => {
     const user = await createConfirmedUser(env);
     users.push(user.user.id);

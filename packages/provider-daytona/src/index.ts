@@ -264,6 +264,11 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       cost: true,
       sizing: "template",
       sources: ["environment", "oci_image"],
+      isolation: {
+        kind: "container",
+        evidence: "provider_reported",
+        source: "https://www.daytona.io/docs/en/isolation/",
+      },
       runtime: {
         process: {
           exec: true,

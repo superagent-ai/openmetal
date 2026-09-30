@@ -59,6 +59,8 @@ Portable paths are absolute, at most 4,096 characters, contain no NUL byte, and 
 
 Capabilities are checked by the worker. Unsupported operations, write modes, parent-directory creation, and requests above a provider's lower limit complete as failed runtime operations with `capability_unsupported` before the provider method is called; acceptance of the HTTP request is not proof the provider can perform it.
 
+To avoid that failure after a sandbox is already running, declare what you depend on when creating it. `features.process` accepts `execute`, `ordered_output`, and `cancel`; `features.filesystem` accepts `read`, `write`, `write_modes`, `create_parents`, `list`, and `delete`; `features.public_ports` requires leased HTTP endpoints. Routing skips providers that lack a requested capability. Automatic routing always requires process execution and file read and write unless the request sets those fields to `false`.
+
 ## HTTP endpoints
 
 Routes:

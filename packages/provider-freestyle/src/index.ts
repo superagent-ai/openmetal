@@ -75,6 +75,11 @@ export class FreestyleSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "template",
     sources: ["environment", "provider_template"],
+    isolation: {
+      kind: "vm",
+      evidence: "provider_reported",
+      source: "https://www.freestyle.sh/docs",
+    },
     runtime: {
       process: {
         exec: true,

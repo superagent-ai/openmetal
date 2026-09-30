@@ -109,6 +109,11 @@ export class VercelSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "fixed",
     sources: ["environment", "oci_image"],
+    isolation: {
+      kind: "microvm",
+      evidence: "provider_reported",
+      source: "https://vercel.com/docs/sandbox/concepts",
+    },
     runtime: {
       process: {
         exec: true,

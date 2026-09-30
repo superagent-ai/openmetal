@@ -311,6 +311,9 @@ export function ProjectResourcesTable({
   const [deletingSandbox, setDeletingSandbox] = useState<Sandbox>();
   const [error, setError] = useState<string>();
   const [refreshError, setRefreshError] = useState<string>();
+  const [copiedProjectId, setCopiedProjectId] = useState<string>();
+  const [copyError, setCopyError] = useState<string>();
+  const [isCopying, setIsCopying] = useState(false);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<ResourceTableSort>(null);
   const [page, setPage] = useState(1);
@@ -355,6 +358,28 @@ export function ProjectResourcesTable({
       }),
     [providerOptions, statusOptions],
   );
+
+  useEffect(() => {
+    if (!copiedProjectId) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setCopiedProjectId(undefined), 2_000);
+    return () => window.clearTimeout(timeout);
+  }, [copiedProjectId]);
+
+  async function copyProjectId() {
+    setCopyError(undefined);
+    setCopiedProjectId(undefined);
+    setIsCopying(true);
+    try {
+      await navigator.clipboard.writeText(projectId);
+      setCopiedProjectId(projectId);
+    } catch {
+      setCopyError("Could not copy the project ID. Select the ID and copy it manually.");
+    } finally {
+      setIsCopying(false);
+    }
+  }
 
   function updateQuery(next: string) {
     setQuery(next);
@@ -498,6 +523,28 @@ export function ProjectResourcesTable({
   return (
     <>
       <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Project ID</span>
+          <code className="min-w-0 break-all select-all">{projectId}</code>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isCopying}
+            aria-label="Copy project ID"
+            onClick={() => void copyProjectId()}
+          >
+            {isCopying ? "Copying…" : copiedProjectId === projectId ? "Copied" : "Copy"}
+          </Button>
+          <span role="status" className="sr-only">
+            {copiedProjectId === projectId ? "Project ID copied to clipboard" : ""}
+          </span>
+        </div>
+        {copyError ? (
+          <Alert variant="destructive">
+            <AlertDescription>{copyError}</AlertDescription>
+          </Alert>
+        ) : null}
         {error || refreshError ? (
           <Alert variant="destructive">
             <AlertDescription>{error ?? refreshError}</AlertDescription>

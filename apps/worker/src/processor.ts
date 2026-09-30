@@ -2506,6 +2506,7 @@ async function createHttpEndpoint(
         providerResourceId: row.sandbox.providerResourceId,
         port: row.endpoint.port,
         leaseDurationSeconds: leaseSeconds,
+        leaseExpiresAt: claimed.leaseExpiresAt,
       });
     }
     if (

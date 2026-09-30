@@ -203,6 +203,8 @@ export type ProviderExposeHttpEndpointInput = ProviderRuntimeOperation & {
   port: number;
   path?: string;
   leaseDurationSeconds: number;
+  /** Absolute lease limit, distinct from the runtime operation deadline. */
+  leaseExpiresAt?: Date;
 };
 
 export type ProviderHttpEndpointLease = {

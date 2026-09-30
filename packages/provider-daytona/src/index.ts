@@ -755,13 +755,22 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         false,
       );
     }
-    // Daytona does not report the expiry, so it is counted from before the request; the
-    // token's native expiry can trail this by the request latency.
+    // Recalculate after any worker-side awaits so the reported lease cannot exceed the
+    // absolute limit. Daytona does not report expiry; native expiry can trail by latency.
     const requestedAt = Date.now();
+    const leaseDurationSeconds = input.leaseExpiresAt
+      ? Math.min(
+          input.leaseDurationSeconds,
+          Math.floor((input.leaseExpiresAt.getTime() - requestedAt) / 1_000),
+        )
+      : input.leaseDurationSeconds;
+    if (!Number.isFinite(leaseDurationSeconds) || leaseDurationSeconds < 1) {
+      throw new ProviderError("Daytona endpoint lease has expired", "invalid_request", false);
+    }
     let response: unknown;
     try {
       response = await this.request(
-        `/sandbox/${encodeURIComponent(input.providerResourceId)}/ports/${input.port}/signed-preview-url?expiresInSeconds=${input.leaseDurationSeconds}`,
+        `/sandbox/${encodeURIComponent(input.providerResourceId)}/ports/${input.port}/signed-preview-url?expiresInSeconds=${leaseDurationSeconds}`,
         { method: "GET", signal: operationSignal(input.signal, input.deadline) },
       );
     } catch (error) {
@@ -787,7 +796,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     return {
       leaseId: `${preview.port}:${preview.token}`,
       url: url.toString(),
-      expiresAt: new Date(requestedAt + input.leaseDurationSeconds * 1_000),
+      expiresAt: new Date(requestedAt + leaseDurationSeconds * 1_000),
     };
   }
 

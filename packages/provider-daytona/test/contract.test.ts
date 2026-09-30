@@ -88,6 +88,47 @@ it("leases HTTP endpoints as signed Daytona preview URLs", async () => {
   ).resolves.toEqual({ leaseId: "3000:tok_abc-123", revoked: true });
 });
 
+it("bounds leases after worker delays and slow signed preview requests", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-09-30T12:00:00Z"));
+    const leaseExpiresAt = new Date(Date.now() + 60_500);
+    // The worker calculated 60 seconds before an awaited ownership check.
+    vi.setSystemTime(new Date(Date.now() + 2_000));
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toContain("expiresInSeconds=58");
+      // Response latency must not extend the reported expiry either.
+      vi.setSystemTime(new Date(Date.now() + 3_000));
+      return Response.json({
+        sandboxId: "sandbox-1",
+        port: 3000,
+        token: "tok",
+        url: "https://3000-tok.proxy.daytona.test",
+      });
+    });
+    const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+    const lease = await provider.exposeHttpEndpoint({
+      providerResourceId: "sandbox-1",
+      port: 3000,
+      leaseDurationSeconds: 60,
+      leaseExpiresAt,
+    });
+    expect(lease.expiresAt.getTime()).toBe(leaseExpiresAt.getTime() - 500);
+
+    await expect(
+      provider.exposeHttpEndpoint({
+        providerResourceId: "sandbox-1",
+        port: 3000,
+        leaseDurationSeconds: 60,
+        leaseExpiresAt: new Date(Date.now() + 500),
+      }),
+    ).rejects.toMatchObject({ kind: "invalid_request" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("rejects Daytona endpoint requests outside provider limits without calling Daytona", async () => {
   const fetchImpl = vi.fn<typeof fetch>();
   const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });

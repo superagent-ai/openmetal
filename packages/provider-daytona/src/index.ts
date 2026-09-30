@@ -13,13 +13,17 @@ import type {
   ProviderExecEvent,
   ProviderExecInput,
   ProviderExecResult,
+  ProviderExposeHttpEndpointInput,
   ProviderFailureKind,
   ProviderFileEntry,
+  ProviderHttpEndpointLease,
   ProviderListFilesInput,
   ProviderListFilesResult,
   ProviderReadFileInput,
   ProviderReadFileResult,
   ProviderReconcileRecordingInput,
+  ProviderRevokeHttpEndpointInput,
+  ProviderRevokeHttpEndpointResult,
   ProviderSandbox,
   ProviderSandboxCost,
   ProviderSandboxCostInput,
@@ -42,6 +46,8 @@ const PROCESS_POLL_INTERVAL_MS = 250;
 const DAYTONA_EXECUTION_ID_PREFIX = "daytona:";
 const DAYTONA_IMAGE_DISK_GB = 16;
 const DAYTONA_TTL_GRACE_MINUTES = 15;
+const MAX_LEASE_SECONDS = 86_400;
+const DAYTONA_LEASE_ID = /^(\d{1,5}):([A-Za-z0-9_-]{1,128})$/;
 const MAX_ERROR_BODY_BYTES = 8 * 1_024;
 const MAX_ERROR_DETAIL_CHARS = 300;
 const DAYTONA_SANDBOX_UNAVAILABLE_CODES = new Set(["SANDBOX_NOT_FOUND", "SANDBOX_NOT_RUNNING"]);
@@ -141,6 +147,15 @@ const DaytonaCommandLogsSchema = z
     output: z.string().nullish(),
     stdout: z.string().nullish(),
     stderr: z.string().nullish(),
+  })
+  .passthrough();
+
+const DaytonaSignedPreviewUrlSchema = z
+  .object({
+    sandboxId: z.string().min(1),
+    port: z.number().int(),
+    token: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+    url: z.string().url(),
   })
   .passthrough();
 
@@ -283,8 +298,9 @@ export class DaytonaSandboxProvider implements SandboxProvider {
           maxListEntries: MAX_LIST_ENTRIES,
         },
         httpEndpoints: {
-          expose: false,
-          revoke: false,
+          expose: true,
+          revoke: true,
+          maxLeaseDurationSeconds: MAX_LEASE_SECONDS,
         },
         computer: {
           implementation: "native",
@@ -720,6 +736,76 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     );
     if (!response.ok) throw await this.toolboxError(input.providerResourceId, response);
     return { path: input.path, deleted: true };
+  }
+
+  async exposeHttpEndpoint(
+    input: ProviderExposeHttpEndpointInput,
+  ): Promise<ProviderHttpEndpointLease> {
+    if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65_535) {
+      throw new ProviderError("port must be between 1 and 65535", "invalid_request", false);
+    }
+    if (
+      !Number.isInteger(input.leaseDurationSeconds) ||
+      input.leaseDurationSeconds < 1 ||
+      input.leaseDurationSeconds > MAX_LEASE_SECONDS
+    ) {
+      throw new ProviderError(
+        "Daytona endpoint lease duration is outside provider limits",
+        "invalid_request",
+        false,
+      );
+    }
+    // Daytona does not report the expiry, so it is counted from before the request; the
+    // token's native expiry can trail this by the request latency.
+    const requestedAt = Date.now();
+    let response: unknown;
+    try {
+      response = await this.request(
+        `/sandbox/${encodeURIComponent(input.providerResourceId)}/ports/${input.port}/signed-preview-url?expiresInSeconds=${input.leaseDurationSeconds}`,
+        { method: "GET", signal: operationSignal(input.signal, input.deadline) },
+      );
+    } catch (error) {
+      if (error instanceof DaytonaRequestError && error.status === 404) {
+        throw new DaytonaRequestError(404, "API", {
+          code: error.code,
+          detail: error.detail,
+          sandboxUnavailable: true,
+        });
+      }
+      throw error;
+    }
+    const preview = DaytonaSignedPreviewUrlSchema.parse(response);
+    if (preview.sandboxId !== input.providerResourceId || preview.port !== input.port) {
+      throw new ProviderError(
+        "Daytona returned a signed preview URL for a different sandbox port",
+        "unknown_outcome",
+        false,
+      );
+    }
+    const url = new URL(preview.url);
+    if (input.path) url.pathname = input.path.startsWith("/") ? input.path : `/${input.path}`;
+    return {
+      leaseId: `${preview.port}:${preview.token}`,
+      url: url.toString(),
+      expiresAt: new Date(requestedAt + input.leaseDurationSeconds * 1_000),
+    };
+  }
+
+  async revokeHttpEndpoint(
+    input: ProviderRevokeHttpEndpointInput,
+  ): Promise<ProviderRevokeHttpEndpointResult> {
+    const match = DAYTONA_LEASE_ID.exec(input.leaseId);
+    const port = Number(match?.[1]);
+    if (!match || port < 1 || port > 65_535) {
+      throw new ProviderError("Invalid Daytona endpoint lease ID", "invalid_request", false);
+    }
+    // Daytona acknowledges an expiry for any token, including one that already expired or
+    // whose sandbox is gone; in each case the signed URL no longer authenticates.
+    await this.request(
+      `/sandbox/${encodeURIComponent(input.providerResourceId)}/ports/${port}/signed-preview-url/${encodeURIComponent(match[2]!)}/expire`,
+      { method: "POST", signal: operationSignal(input.signal, input.deadline) },
+    );
+    return { leaseId: input.leaseId, revoked: true };
   }
 
   async getCost(input: ProviderSandboxCostInput): Promise<ProviderSandboxCost | null> {

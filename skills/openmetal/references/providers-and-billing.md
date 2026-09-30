@@ -33,7 +33,7 @@ The worker accepts any adapter that implements process execution. Most adapters 
 | Blaxel      | Execute; buffered output         | Read, write, list, delete | Create and revoke     |
 | Cloudflare  | Execute and stream; no cancel    | Read and write            | No                    |
 | CodeSandbox | No                               | No                        | No                    |
-| Daytona     | Execute; buffered output; cancel | Read, write, list, delete | No                    |
+| Daytona     | Execute; buffered output; cancel | Read, write, list, delete | Create and revoke     |
 | E2B         | Execute and stream; no cancel    | Read, write, list, delete | No                    |
 | Freestyle   | Execute; buffered output         | Read, write, list, delete | No                    |
 | Modal       | Execute and stream; no cancel    | Read, write, list, delete | No                    |
@@ -71,7 +71,8 @@ Provider-specific runtime limitations:
 - Vercel file writes are additionally constrained by USTAR path-component limits.
 - Freestyle uses buffered native execution with a 300-second provider timeout ceiling. It supports atomic overwrite writes but not portable create-only or append modes. Its managed cost is a low-confidence cumulative rate-card estimate from provider runtime counters and fixed resources; it excludes transfer, plan credits, discounts, and enterprise pricing.
 - Prime's gateway carries ordered stdout/stderr frames but does not guarantee restart-safe output replay or cancellation through this adapter. Its upload overwrites without guaranteed parent creation; no portable list or delete is available. Its cumulative cost is estimated from a published CPU/memory/disk rate card valid through December 22, 2026; it is not an upstream billing record.
-- Only Blaxel exposes portable HTTP endpoints with a live-verified native expiry and revocation path. All other adapters keep the endpoint capability disabled when the upstream API cannot satisfy or live verification cannot prove the complete lease contract.
+- Only Blaxel and Daytona expose portable HTTP endpoints with a live-verified native expiry and revocation path. All other adapters keep the endpoint capability disabled when the upstream API cannot satisfy or live verification cannot prove the complete lease contract.
+- Daytona endpoints are signed preview URLs bound to one port. The token is embedded in the URL, so the URL itself is the credential. Revocation expires the token and the URL then returns 401. The proxy also passes WebSocket upgrades, but WebSocket traffic is not part of the portable endpoint contract.
 
 Capability checks happen in the worker after the API accepts a process, filesystem operation, or endpoint. Always inspect the terminal resource and its `error`; HTTP 202 is not capability confirmation.
 

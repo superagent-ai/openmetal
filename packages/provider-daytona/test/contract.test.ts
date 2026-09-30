@@ -39,15 +39,121 @@ it("declares the Daytona provider contract", () => {
       list: true,
       delete: true,
     },
-    httpEndpoints: { expose: false, revoke: false },
+    httpEndpoints: { expose: true, revoke: true, maxLeaseDurationSeconds: 86_400 },
     computer: {
       implementation: "native",
       screenshot: { formats: ["png", "jpeg"] },
       recording: { formats: ["mp4"] },
     },
   });
-  expect(provider.exposeHttpEndpoint).toBeUndefined();
-  expect(provider.revokeHttpEndpoint).toBeUndefined();
+});
+
+it("leases HTTP endpoints as signed Daytona preview URLs", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/ports/3000/signed-preview-url?expiresInSeconds=600")) {
+      expect(init?.method).toBe("GET");
+      return Response.json({
+        sandboxId: "sandbox-1",
+        port: 3000,
+        token: "tok_abc-123",
+        url: "https://3000-tok_abc-123.proxy.daytona.test",
+      });
+    }
+    if (url.endsWith("/ports/3000/signed-preview-url/tok_abc-123/expire")) {
+      expect(init?.method).toBe("POST");
+      return new Response(null, { status: 201 });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  });
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  const before = Date.now();
+
+  const lease = await provider.exposeHttpEndpoint!({
+    providerResourceId: "sandbox-1",
+    port: 3000,
+    path: "/health check",
+    leaseDurationSeconds: 600,
+  });
+  expect(lease).toMatchObject({
+    leaseId: "3000:tok_abc-123",
+    url: "https://3000-tok_abc-123.proxy.daytona.test/health%20check",
+  });
+  expect(lease.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 600_000);
+  expect(lease.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 600_000);
+
+  const restarted = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+  await expect(
+    restarted.revokeHttpEndpoint!({ providerResourceId: "sandbox-1", leaseId: lease.leaseId }),
+  ).resolves.toEqual({ leaseId: "3000:tok_abc-123", revoked: true });
+});
+
+it("rejects Daytona endpoint requests outside provider limits without calling Daytona", async () => {
+  const fetchImpl = vi.fn<typeof fetch>();
+  const provider = new DaytonaSandboxProvider({ apiKey: "test", fetchImpl });
+
+  await expect(
+    provider.exposeHttpEndpoint!({
+      providerResourceId: "sandbox-1",
+      port: 3000,
+      leaseDurationSeconds: 86_401,
+    }),
+  ).rejects.toMatchObject({ kind: "invalid_request" });
+  await expect(
+    provider.exposeHttpEndpoint!({
+      providerResourceId: "sandbox-1",
+      port: 0,
+      leaseDurationSeconds: 60,
+    }),
+  ).rejects.toMatchObject({ kind: "invalid_request" });
+  await expect(
+    provider.revokeHttpEndpoint!({ providerResourceId: "sandbox-1", leaseId: "3000:../x" }),
+  ).rejects.toMatchObject({ kind: "invalid_request" });
+  await expect(
+    provider.revokeHttpEndpoint!({ providerResourceId: "sandbox-1", leaseId: "70000:tok" }),
+  ).rejects.toMatchObject({ kind: "invalid_request" });
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it("refuses a signed preview URL issued for a different Daytona port", async () => {
+  const provider = new DaytonaSandboxProvider({
+    apiKey: "test",
+    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        sandboxId: "sandbox-1",
+        port: 3001,
+        token: "tok",
+        url: "https://3001-tok.proxy.daytona.test",
+      }),
+    ),
+  });
+
+  await expect(
+    provider.exposeHttpEndpoint!({
+      providerResourceId: "sandbox-1",
+      port: 3000,
+      leaseDurationSeconds: 60,
+    }),
+  ).rejects.toMatchObject({ kind: "unknown_outcome" });
+});
+
+it("reports a missing Daytona sandbox as unavailable when exposing an endpoint", async () => {
+  const provider = new DaytonaSandboxProvider({
+    apiKey: "test",
+    fetchImpl: vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        daytonaError(404, { error: "Not Found", message: "Sandbox sandbox-1 not found" }),
+      ),
+  });
+
+  await expect(
+    provider.exposeHttpEndpoint!({
+      providerResourceId: "sandbox-1",
+      port: 3000,
+      leaseDurationSeconds: 60,
+    }),
+  ).rejects.toMatchObject({ kind: "unavailable", retryable: false });
 });
 
 it("boots the default Daytona snapshot when no image is requested", async () => {

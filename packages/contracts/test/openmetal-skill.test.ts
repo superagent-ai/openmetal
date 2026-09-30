@@ -94,6 +94,6 @@ describe("OpenMetal agent skill", () => {
     expect(skill).not.toContain("does not yet expose public command execution");
     expect(providers).toContain("Cloudflare supports ordered process execution");
     expect(providers).toContain("Vercel file writes are additionally constrained");
-    expect(providers).toContain("Only Blaxel exposes portable HTTP endpoints");
+    expect(providers).toContain("Only Blaxel and Daytona expose portable HTTP endpoints");
   });
 });

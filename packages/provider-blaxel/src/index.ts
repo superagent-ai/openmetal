@@ -141,6 +141,11 @@ export class BlaxelSandboxProvider implements SandboxProvider {
       cost: true,
       sizing: "direct",
       sources: ["environment", "oci_image"],
+      isolation: {
+        kind: "microvm",
+        evidence: "provider_reported",
+        source: "https://blaxel.ai/platform/sandboxes",
+      },
       runtime: {
         process: {
           exec: true,

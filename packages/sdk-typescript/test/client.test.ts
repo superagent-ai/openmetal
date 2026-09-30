@@ -9,6 +9,81 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe("MetalClient unit", () => {
+  it("uses user-authorized project routes for dashboard sandbox actions", async () => {
+    const projectId = "prj_abc123";
+    const sandboxId = "sbx_abc123";
+    const timestamp = "2026-08-20T12:00:00.000Z";
+    const sandbox = {
+      id: sandboxId,
+      type: "sandbox",
+      project_id: projectId,
+      state: "stopping",
+      state_reason: null,
+      requested: {
+        source: { kind: "oci_image", image: "alpine:latest" },
+        resources: { vcpu: 1, memory_mb: 512 },
+        lifecycle: { runtime_timeout_seconds: 3600 },
+      },
+      provider: "daytona",
+      billing_mode: "managed",
+      resolved_resources: null,
+      cost_microusd: null,
+      cost_updated_at: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+      ready_at: null,
+      paused_at: null,
+      stopped_at: null,
+    };
+    const requests: Array<{ url: string; method?: string; authorization: string | null }> = [];
+    const client = new MetalClient({
+      baseUrl: "http://localhost:4000",
+      accessToken: async () => "supabase-user-jwt",
+      fetch: async (url, init) => {
+        requests.push({
+          url: String(url),
+          method: init?.method,
+          authorization: new Headers(init?.headers).get("authorization"),
+        });
+        return jsonResponse(200, {
+          sandbox,
+          operation: {
+            id: "op_abc123",
+            project_id: projectId,
+            type: init?.method === "DELETE" ? "sandbox_destroy" : "sandbox_pause",
+            state: "queued",
+            resource_type: "sandbox",
+            resource_id: sandboxId,
+            retryable: false,
+            error: null,
+            created_at: timestamp,
+            updated_at: timestamp,
+            completed_at: null,
+          },
+        });
+      },
+    });
+
+    await expect(client.sandboxes.pauseFromProject(projectId, sandboxId)).resolves.toMatchObject({
+      id: sandboxId,
+    });
+    await expect(client.sandboxes.deleteFromProject(projectId, sandboxId)).resolves.toMatchObject({
+      id: sandboxId,
+    });
+    expect(requests).toEqual([
+      {
+        url: `http://localhost:4000/v1/projects/${projectId}/sandboxes/${sandboxId}/pause`,
+        method: "POST",
+        authorization: "Bearer supabase-user-jwt",
+      },
+      {
+        url: `http://localhost:4000/v1/projects/${projectId}/sandboxes/${sandboxId}`,
+        method: "DELETE",
+        authorization: "Bearer supabase-user-jwt",
+      },
+    ]);
+  });
+
   it("maps a stable error envelope", async () => {
     const client = new MetalClient({
       baseUrl: "http://localhost:4000",

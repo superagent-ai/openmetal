@@ -121,6 +121,11 @@ export class RunloopSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "tier",
     sources: ["environment", "provider_template"],
+    isolation: {
+      kind: "microvm",
+      evidence: "provider_reported",
+      source: "https://runloop.ai/security-compliance",
+    },
     runtime: {
       process: {
         exec: true,

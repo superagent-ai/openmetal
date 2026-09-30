@@ -1202,6 +1202,14 @@ export class MetalClient {
         projectId: options?.projectId,
         schema: SandboxCapabilitiesSchema,
       }),
+    pauseFromProject: async (projectId: string, sandboxId: string) => {
+      const mutation = await this.request({
+        method: "POST",
+        path: `/v1/projects/${projectId}/sandboxes/${sandboxId}/pause`,
+        schema: SandboxMutationSchema,
+      });
+      return mutation.sandbox;
+    },
     pauseAsync: (sandboxId: string, options?: { idempotencyKey?: string; projectId?: string }) =>
       this.request({
         method: "POST",
@@ -1262,11 +1270,14 @@ export class MetalClient {
       }
       return this.sandboxes.get(sandboxId, options);
     },
-    deleteFromProject: async (
-      _projectId: string,
-      sandboxId: string,
-      options?: { timeoutMs?: number; signal?: AbortSignal },
-    ) => this.sandboxes.delete(sandboxId, { ...options, projectId: _projectId }),
+    deleteFromProject: async (projectId: string, sandboxId: string) => {
+      const mutation = await this.request({
+        method: "DELETE",
+        path: `/v1/projects/${projectId}/sandboxes/${sandboxId}`,
+        schema: SandboxMutationSchema,
+      });
+      return mutation.sandbox;
+    },
   };
 
   readonly gpu = {

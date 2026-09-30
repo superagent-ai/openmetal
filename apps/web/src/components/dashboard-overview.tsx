@@ -74,16 +74,13 @@ function moneyFromMicrousd(value: string): string {
 }
 
 function chartBars(stacks: ChartSegment[][]): ChartBar[] {
-  const recent = stacks.slice(-8).map((segments) => ({
+  const bars = stacks.map((segments) => ({
     segments: segments.filter((segment) => segment.value > 0),
     total: segments.reduce((sum, segment) => sum + Math.max(segment.value, 0), 0),
   }));
-  const maximum = Math.max(...recent.map((bar) => bar.total), 0);
-  if (maximum === 0) {
-    return Array.from({ length: 8 }, () => ({ height: 8, segments: [] }));
-  }
-  return recent.map(({ segments, total }) => ({
-    height: Math.max(10, Math.round((total / maximum) * 100)),
+  const maximum = Math.max(...bars.map((bar) => bar.total), 0);
+  return bars.map(({ segments, total }) => ({
+    height: total === 0 ? 8 : Math.max(10, Math.round((total / maximum) * 100)),
     segments,
   }));
 }
@@ -247,14 +244,23 @@ export function DashboardOverview({
   }, [organization.id, projectIdsKey, router, supabase]);
 
   const basePath = `/dashboard/${organization.slug}`;
-  const dailySpend = usage.daily.map((day) => Number(day.total_cost.microusd) / 1_000_000);
-  const sandboxCounts = summarizeSandboxStatuses(resources);
-  const sandboxActivity = sandboxStatusesByDate(
-    resources,
-    usage.daily.map((day) => day.date),
+  const weekStart = new Date(usage.period.from);
+  const weekDates = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(weekStart);
+    day.setUTCDate(day.getUTCDate() + index);
+    return day.toISOString().slice(0, 10);
+  });
+  const spendByDate = new Map(
+    usage.daily.map((day) => [day.date, Number(day.total_cost.microusd) / 1_000_000]),
   );
+  const dailySpend = weekDates.map((date) => spendByDate.get(date) ?? 0);
+  const sandboxCounts = summarizeSandboxStatuses(resources);
+  const sandboxActivity = sandboxStatusesByDate(resources, weekDates);
   const creditBarColor = billing.auto_topup.enabled ? legendColors[0] : legendColors[1];
-  const creditActivity = billing.ledger.map((entry) => Math.abs(Number(entry.amount_usd)));
+  const creditsByDate = new Map(
+    billing.weekly_activity.map((day) => [day.date, Number(day.amount_microusd) / 1_000_000]),
+  );
+  const creditActivity = weekDates.map((date) => creditsByDate.get(date) ?? 0);
   const navigation = [
     {
       title: "Projects",
@@ -351,7 +357,13 @@ export function DashboardOverview({
 
       <section className="space-y-4 pt-6" aria-labelledby="usage-summary-title">
         <div className="flex items-center justify-between gap-4">
-          <h2 id="usage-summary-title" className="text-sm font-medium">
+          <h2 id="usage-summary-title" className="flex items-center gap-2 text-sm font-medium">
+            <HugeiconsIcon
+              icon={Analytics01Icon}
+              strokeWidth={2}
+              className="size-4 text-muted-foreground"
+              aria-hidden="true"
+            />
             This week&apos;s usage
           </h2>
           <Link

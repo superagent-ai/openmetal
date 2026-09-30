@@ -1484,6 +1484,54 @@
                   "format"
                 ],
                 "additionalProperties": false
+              },
+              "process": {
+                "type": "object",
+                "properties": {
+                  "execute": {
+                    "type": "boolean"
+                  },
+                  "ordered_output": {
+                    "type": "boolean"
+                  },
+                  "cancel": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "filesystem": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "boolean"
+                  },
+                  "write": {
+                    "type": "boolean"
+                  },
+                  "write_modes": {
+                    "maxItems": 3,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "create",
+                        "overwrite",
+                        "append"
+                      ]
+                    }
+                  },
+                  "create_parents": {
+                    "type": "boolean"
+                  },
+                  "list": {
+                    "type": "boolean"
+                  },
+                  "delete": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -2000,6 +2048,54 @@
                     "required": [
                       "format"
                     ],
+                    "additionalProperties": false
+                  },
+                  "process": {
+                    "type": "object",
+                    "properties": {
+                      "execute": {
+                        "type": "boolean"
+                      },
+                      "ordered_output": {
+                        "type": "boolean"
+                      },
+                      "cancel": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "filesystem": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "boolean"
+                      },
+                      "write": {
+                        "type": "boolean"
+                      },
+                      "write_modes": {
+                        "maxItems": 3,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "create",
+                            "overwrite",
+                            "append"
+                          ]
+                        }
+                      },
+                      "create_parents": {
+                        "type": "boolean"
+                      },
+                      "list": {
+                        "type": "boolean"
+                      },
+                      "delete": {
+                        "type": "boolean"
+                      }
+                    },
                     "additionalProperties": false
                   }
                 },
@@ -6023,6 +6119,27 @@
               ],
               "additionalProperties": false
             }
+          },
+          "weekly_activity": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "format": "date",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                },
+                "amount_microusd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "date",
+                "amount_microusd"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -6033,7 +6150,8 @@
           "payment_method",
           "auto_topup",
           "purchases",
-          "ledger"
+          "ledger",
+          "weekly_activity"
         ],
         "additionalProperties": false
       },

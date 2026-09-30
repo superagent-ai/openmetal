@@ -136,7 +136,8 @@ When handling an error:
 
 - Keep provider candidates unique.
 - A `provider_template` cannot use fallback. Prefer a matching explicit top-level provider; if it is omitted or `auto`, the service derives the provider from the template source.
-- Use either `network.allow_domains` or `network.deny_domains`, never both.
+- Use either `network.allow_domains` or `network.deny_domains`, never both. No current provider enforces outbound restrictions, so restricted network or nonempty `regions` requests fail with `no_eligible_provider` instead of running unrestricted.
+- Declare capabilities the task depends on under `features`, such as `process.ordered_output`, `filesystem.list`, `isolation`, or `public_ports`, so routing skips providers that lack them. On `no_eligible_provider`, read `error.details.attempts[].unmet_requirements`.
 - Prefer `architecture: "any"` unless the workload has a verified architecture requirement.
 - Use `secret_refs` for references only, never raw secret values. Current adapters do not yet consume these references, so do not claim that secrets were injected.
 - Treat requested and resolved resources separately; providers may map requests to a larger available tier.

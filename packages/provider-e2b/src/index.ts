@@ -222,6 +222,11 @@ export class E2BSandboxProvider implements SandboxProvider {
     cost: true,
     sizing: "template",
     sources: ["environment", "provider_template"],
+    isolation: {
+      kind: "microvm",
+      evidence: "provider_reported",
+      source: "https://e2b.dev/",
+    },
     runtime: {
       process: {
         exec: true,

@@ -70,6 +70,13 @@ export class CloudflareSandboxProvider implements SandboxProvider {
       cost: Boolean(options.accountId && options.analyticsToken),
       sizing: "fixed",
       sources: ["environment"],
+      // Cloudflare documents both a VM per sandbox and a container per sandbox; claim only
+      // the container boundary until one is verified.
+      isolation: {
+        kind: "container",
+        evidence: "provider_reported",
+        source: "https://developers.cloudflare.com/sandbox/concepts/containers/",
+      },
       runtime: {
         process: {
           exec: true,

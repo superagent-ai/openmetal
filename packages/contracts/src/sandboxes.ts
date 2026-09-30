@@ -140,6 +140,26 @@ export const PortableFeaturesSchema = z.object({
       format: z.literal("mp4").default("mp4"),
     })
     .optional(),
+  process: z
+    .object({
+      execute: z.boolean().optional(),
+      ordered_output: z.boolean().optional(),
+      cancel: z.boolean().optional(),
+    })
+    .optional(),
+  filesystem: z
+    .object({
+      read: z.boolean().optional(),
+      write: z.boolean().optional(),
+      write_modes: z
+        .array(z.enum(["create", "overwrite", "append"]))
+        .max(3)
+        .optional(),
+      create_parents: z.boolean().optional(),
+      list: z.boolean().optional(),
+      delete: z.boolean().optional(),
+    })
+    .optional(),
 });
 export const NetworkRequirementsSchema = z
   .object({

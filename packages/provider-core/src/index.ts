@@ -414,6 +414,25 @@ export type SandboxProviderName =
   | "runloop"
   | "vercel";
 
+export type CapabilityEvidence = "verified" | "provider_reported";
+
+export type SandboxIsolation = "microvm" | "vm" | "container";
+
+export type ProviderIsolationCapability = {
+  kind: SandboxIsolation;
+  evidence: CapabilityEvidence;
+  source: string;
+};
+
+// Declare only restrictions the adapter applies from `ProviderCreateSandboxInput.network`
+// and fails closed on when the provider rejects them.
+export type ProviderNetworkPolicyCapabilities = {
+  blockInternet: boolean;
+  allowDomains: boolean;
+  denyDomains: boolean;
+  evidence: CapabilityEvidence;
+};
+
 export type SandboxProviderCapabilities = {
   pause: boolean;
   cost: boolean;
@@ -421,6 +440,10 @@ export type SandboxProviderCapabilities = {
   sizing?: "direct" | "tier" | "template" | "fixed";
   sources?: ReadonlyArray<"environment" | "oci_image" | "provider_template">;
   runtime?: ProviderRuntimeCapabilities;
+  isolation?: ProviderIsolationCapability;
+  network?: ProviderNetworkPolicyCapabilities;
+  // Every region the adapter may place a sandbox in, not only its default.
+  regions?: readonly string[];
 };
 
 export interface SandboxProvider extends SandboxRuntimeProvider {
@@ -567,3 +590,4 @@ export function resolveMetalEnvironment(source: ProviderCreateSandboxInput["sour
 export const MetalEnvironmentCatalog = environments;
 
 export * from "./gpu.js";
+export * from "./eligibility.js";

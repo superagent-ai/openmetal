@@ -688,7 +688,10 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       });
     }
     const form = new FormData();
-    form.set("file", new Blob([bytes.slice().buffer]), providerPath.split("/").at(-1) || "file");
+    // bytes can be a pooled Buffer view (the worker decodes base64 into the shared
+    // Buffer pool), so copy element-wise: Buffer.slice() is a view and its .buffer
+    // would ship the entire pool page to the provider instead of just the payload.
+    form.set("file", new Blob([new Uint8Array(bytes)]), providerPath.split("/").at(-1) || "file");
     const response = await this.toolboxFetch(
       input.providerResourceId,
       `/files/upload?path=${encodeURIComponent(providerPath)}`,

@@ -17,6 +17,7 @@ overrides:
   js-yaml: 4.3.2
   qs: 6.16.0
   sharp: 0.35.4
+  source-map-js@1.2.1: 1.2.2
 patchedDependencies:
   # React 19 warns when next-themes renders its SSR-only init script on the client.
   # Upstream fix: https://github.com/pacocoursey/next-themes/pull/386

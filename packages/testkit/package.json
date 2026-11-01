@@ -26,7 +26,7 @@
     "@openmetal/sdk": "workspace:*",
     "@supabase/supabase-js": "2.112.3",
     "postgres": "3.4.9",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@openmetal/eslint-config": "workspace:*",

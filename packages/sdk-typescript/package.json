@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@openmetal/contracts": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@openmetal/eslint-config": "workspace:*",
